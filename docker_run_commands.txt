@@ -1,0 +1,17 @@
+##Once docker is installed and postgres run this commamnd in terminal to run the 
+##postgres process in docker 
+docker run -d \
+  --name orcaDB \
+  -e POSTGRES_USER=app \
+  -e POSTGRES_PASSWORD=password \
+  -e POSTGRES_DB=app_db \
+  -p 5433:5432 \
+  -v pgdata:/var/lib/postgresql/data \
+  postgres:16
+
+##to connect to datagrip use this 
+DB_HOST=localhost
+DB_PORT=5433
+DB_NAME=app_db
+DB_USER=app
+DB_PASSWORD=password
