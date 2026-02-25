@@ -15,3 +15,5 @@ DB_PORT=5433
 DB_NAME=app_db
 DB_USER=app
 DB_PASSWORD=password
+
+docker exec -it orcaDB psql -U app -d app_db
