@@ -1,0 +1,13 @@
+#for the first time:
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+
+#saving dependencies:
+pip freeze > requirements.txt
+
+#starting venv:
+source .venv/bin/activate
+
+#deactivate venv
+deactivate
