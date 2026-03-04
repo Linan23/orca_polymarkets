@@ -63,6 +63,58 @@ Important:
 This is acceptable for local development only.
 Change these credentials before using any shared or remote environment.
 
+## Docker Profile (Collaborator-Friendly)
+
+For reproducible collaborator setup, run PostgreSQL in Docker:
+
+```bash
+docker compose -f app/compose.yaml up -d db
+```
+
+Use these connection values:
+
+- host: `localhost`
+- port: `5433`
+- database: `app_db`
+- username: `app`
+- password: `password`
+
+Application connection string:
+
+```bash
+export DATABASE_URL="postgresql+psycopg://app:password@localhost:5433/app_db"
+```
+
+`psql` connection string:
+
+```bash
+export PSQL_URL="postgresql://app:password@localhost:5433/app_db"
+```
+
+If a maintainer shared a database snapshot, load it into Docker with:
+
+```bash
+./data_platform/open_psql.sh < path/to/shared_data_snapshot.sql
+```
+
+Or use the collaborator setup script (recommended, cross-platform):
+
+```bash
+.venv/bin/python scripts/setup_collab_db.py --snapshot path/to/shared_data_snapshot.sql
+```
+
+Windows PowerShell:
+
+```powershell
+.venv\Scripts\python.exe scripts\setup_collab_db.py --snapshot path\to\shared_data_snapshot.sql
+```
+
+Windows `psql` access without installing host PostgreSQL CLI:
+
+```powershell
+docker exec -it orcaDB psql -U app -d app_db
+```
+
 ## PostgreSQL Service Management
 
 ### Start PostgreSQL

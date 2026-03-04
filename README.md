@@ -21,6 +21,38 @@ export DATABASE_URL="postgresql+psycopg://postgres:postgres@localhost:5432/whali
 export PSQL_URL="postgresql://postgres:postgres@localhost:5432/whaling"
 ```
 
+Docker option (recommended for collaborators):
+
+```bash
+docker compose -f app/compose.yaml up -d db
+export DATABASE_URL="postgresql+psycopg://app:password@localhost:5433/app_db"
+export PSQL_URL="postgresql://app:password@localhost:5433/app_db"
+```
+
+One-command collaborator DB setup (cross-platform: macOS/Linux/Windows):
+
+```bash
+.venv/bin/python scripts/setup_collab_db.py --snapshot path/to/shared_data_snapshot.sql
+```
+
+If you prefer manual import:
+
+```bash
+./data_platform/open_psql.sh < path/to/shared_data_snapshot.sql
+```
+
+Windows PowerShell equivalent:
+
+```powershell
+.venv\Scripts\python.exe scripts\setup_collab_db.py --snapshot path\to\shared_data_snapshot.sql
+```
+
+Windows `psql` access without local PostgreSQL CLI:
+
+```powershell
+docker exec -it orcaDB psql -U app -d app_db
+```
+
 Or open the database directly with:
 
 ```bash

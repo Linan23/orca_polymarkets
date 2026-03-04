@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from data_platform.ingest.store import (
     ensure_event_tag_map,
     finalize_scrape_run,
+    insert_orderbook_snapshot,
     insert_position_snapshot,
     parse_datetime,
     start_scrape_run,
@@ -256,6 +257,68 @@ def ingest_positions_record(
             unrealized_pnl=unrealized_pnl,
             is_redeemable=position.get("redeemable"),
             is_mergeable=position.get("mergeable"),
+            raw_payload_id=payload_row.payload_id,
+        )
+        records_written += 1
+
+    finalize_scrape_run(
+        session,
+        scrape_run,
+        status="success",
+        records_written=records_written,
+        error_count=0,
+        error_summary=None,
+    )
+    return {"records_written": records_written, "error_count": 0}
+
+
+def ingest_orderbook_batch(
+    session: Session,
+    *,
+    books: list[dict[str, Any]],
+    request_url: str,
+    raw_output_path: str | None = None,
+) -> dict[str, int]:
+    """Persist one Polymarket order-book snapshot batch into the database."""
+    scrape_run = start_scrape_run(
+        session,
+        platform_name="polymarket",
+        job_name="polymarket-orderbook",
+        endpoint_name="orderbook",
+        request_url=request_url,
+        raw_output_path=raw_output_path,
+    )
+
+    records_written = 0
+    for item in books:
+        if not isinstance(item, dict):
+            continue
+        market = item.get("market")
+        if market is None:
+            continue
+        snapshot_time = parse_datetime(item.get("snapshot_time")) or parse_datetime(item.get("scraped_at_iso"))
+        payload_row = store_api_payload(
+            session,
+            scrape_run=scrape_run,
+            platform_name="polymarket",
+            entity_type="orderbook",
+            entity_external_id=str(getattr(market, "external_market_ref", None) or getattr(market, "market_slug", None) or ""),
+            payload=item.get("raw_payload", item),
+            collected_at=snapshot_time,
+        )
+
+        insert_orderbook_snapshot(
+            session,
+            market=market,
+            platform_name="polymarket",
+            snapshot_time=snapshot_time or parse_datetime(item.get("snapshot_time")),
+            depth_levels=int(item.get("depth_levels") or 0),
+            best_bid=item.get("best_bid"),
+            best_ask=item.get("best_ask"),
+            mid_price=item.get("mid_price"),
+            spread=item.get("spread"),
+            bid_depth_notional=item.get("bid_depth_notional"),
+            ask_depth_notional=item.get("ask_depth_notional"),
             raw_payload_id=payload_row.payload_id,
         )
         records_written += 1

@@ -71,3 +71,15 @@ Run only the Kalshi order-book step:
 ```bash
 .venv/bin/python data_platform/jobs/kalshi_orderbook_snapshot.py --environment prod --market-limit 5 --max-requests 1
 ```
+
+Load a shared snapshot into Docker PostgreSQL:
+
+```bash
+./data_platform/open_psql.sh < path/to/shared_data_snapshot.sql
+```
+
+For full collaborator onboarding, use:
+
+```bash
+.venv/bin/python scripts/setup_collab_db.py --snapshot path/to/shared_data_snapshot.sql
+```

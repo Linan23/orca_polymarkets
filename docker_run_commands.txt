@@ -1,38 +1,24 @@
-# Start PostgreSQL in Docker for the Whaling data platform
-docker run -d \
-  --name orcaDB \
-  -e POSTGRES_USER=app \
-  -e POSTGRES_PASSWORD=password \
-  -e POSTGRES_DB=app_db \
-  -p 5433:5432 \
-  -v pgdata:/var/lib/postgresql/data \
-  postgres:16
+# Start Docker PostgreSQL (compose-based)
+docker compose -f app/compose.yaml up -d db
 
-# Export connection strings for this repo
-# The Python app uses DATABASE_URL (SQLAlchemy format)
-# The psql CLI uses PSQL_URL (standard PostgreSQL format)
+# Docker connection strings (use these in this repo)
 export DATABASE_URL="postgresql+psycopg://app:password@localhost:5433/app_db"
 export PSQL_URL="postgresql://app:password@localhost:5433/app_db"
 
-# Environment values for GUI tools like DataGrip
-DB_HOST=localhost
-DB_PORT=5433
-DB_NAME=app_db
-DB_USER=app
-DB_PASSWORD=password
+# Connect with psql
+./data_platform/open_psql.sh
 
-# Connect with psql from the host machine
-psql "$PSQL_URL"
+# Schema bootstrap/migrations in Docker DB
+.venv/bin/alembic -c alembic.ini upgrade head
 
-# Or connect inside the container
-docker exec -it orcaDB psql -U app -d app_db
+# If a maintainer shared a snapshot, load it into Docker DB:
+./data_platform/open_psql.sh < path/to/shared_data_snapshot.sql
 
-# Bootstrap the schemas and tables after the container is running
-.venv/bin/python bootstrap_db.py
+# Or do full collaborator setup in one command:
+.venv/bin/python scripts/setup_collab_db.py --snapshot path/to/shared_data_snapshot.sql
 
-# Basic validation commands
+# Validate stack
+.venv/bin/python data_platform/tests/smoke_validate.py --require-sample-data
+
+# Run API with Docker DB
 .venv/bin/python -m uvicorn main:app --reload
-.venv/bin/python build_dashboard_snapshot.py
-
-#use this command to start docker container by running compose file
-docker compose -f app/compose.yaml up -d

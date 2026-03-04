@@ -16,6 +16,7 @@ from data_platform.models import (
     MarketEvent,
     MarketTag,
     MarketTagMap,
+    OrderbookSnapshot,
     Platform,
     PositionSnapshot,
     ScrapeRun,
@@ -466,6 +467,41 @@ def insert_transaction_fact(
         profit_loss_realized=profit_loss_realized,
         transaction_time=transaction_time,
         sequence_ts=sequence_ts,
+        raw_payload_id=raw_payload_id,
+    )
+    session.add(row)
+    session.flush()
+    return row
+
+
+def insert_orderbook_snapshot(
+    session: Session,
+    *,
+    market: MarketContract,
+    platform_name: str,
+    snapshot_time: datetime,
+    depth_levels: int,
+    best_bid: Any = None,
+    best_ask: Any = None,
+    mid_price: Any = None,
+    spread: Any = None,
+    bid_depth_notional: Any = None,
+    ask_depth_notional: Any = None,
+    raw_payload_id: int | None = None,
+) -> OrderbookSnapshot:
+    """Insert one normalized order-book snapshot row."""
+    platform = get_platform(session, platform_name)
+    row = OrderbookSnapshot(
+        market_contract_id=market.market_contract_id,
+        platform_id=platform.platform_id,
+        snapshot_time=snapshot_time,
+        depth_levels=depth_levels,
+        best_bid=best_bid,
+        best_ask=best_ask,
+        mid_price=mid_price,
+        spread=spread,
+        bid_depth_notional=bid_depth_notional,
+        ask_depth_notional=ask_depth_notional,
         raw_payload_id=raw_payload_id,
     )
     session.add(row)
