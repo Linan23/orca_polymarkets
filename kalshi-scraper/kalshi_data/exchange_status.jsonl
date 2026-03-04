@@ -1,3 +1,0 @@
-{"scraped_at_unix":1772050986,"scraped_at_iso":"2026-02-25T20:23:06.994753+00:00","endpoint":"status","environment":"prod","duration_ms":171,"data":{"exchange_active":true,"exchange_estimated_resume_time":null,"trading_active":true}}
-{"scraped_at_unix":1772050989,"scraped_at_iso":"2026-02-25T20:23:09.013089+00:00","endpoint":"status","environment":"prod","duration_ms":39,"data":{"exchange_active":true,"exchange_estimated_resume_time":null,"trading_active":true}}
-{"scraped_at_unix":1772050991,"scraped_at_iso":"2026-02-25T20:23:11.368080+00:00","endpoint":"status","environment":"prod","duration_ms":25,"data":{"exchange_active":true,"exchange_estimated_resume_time":null,"trading_active":true}}

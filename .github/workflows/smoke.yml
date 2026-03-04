@@ -1,0 +1,71 @@
+name: smoke
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: app
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: app_db
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U app -d app_db"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql+psycopg://app:password@localhost:5433/app_db
+      PSQL_URL: postgresql://app:password@localhost:5433/app_db
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Wait for PostgreSQL
+        run: |
+          python - <<'PY'
+          import time
+          import psycopg
+
+          dsn = "postgresql://app:password@localhost:5433/app_db"
+          for _ in range(60):
+              try:
+                  with psycopg.connect(dsn):
+                      print("PostgreSQL ready")
+                      raise SystemExit(0)
+              except Exception:
+                  time.sleep(1)
+          raise SystemExit("PostgreSQL did not become ready in time")
+          PY
+
+      - name: Apply migrations
+        run: |
+          python -m alembic -c alembic.ini upgrade head
+
+      - name: Compile core modules
+        run: |
+          python -m compileall data_platform build_dashboard_snapshot.py bootstrap_db.py scripts/setup_collab_db.py
+
+      - name: Run smoke validation
+        run: |
+          python data_platform/tests/smoke_validate.py
