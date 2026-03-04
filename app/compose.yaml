@@ -1,0 +1,15 @@
+services:
+  db:
+    image: postgres:16
+    container_name: orcaDB
+    ports:
+      - "5433:5432"
+    environment:
+      - POSTGRES_USER=app
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DB=app_db
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:
