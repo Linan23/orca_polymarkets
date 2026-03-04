@@ -1,8 +1,9 @@
-from fastapi import FastAPI
+"""Compatibility entrypoint for the internal read-only API.
 
-app =FastAPI()
+The FastAPI implementation lives in ``data_platform.api.server``. This wrapper
+keeps the existing ``uvicorn main:app`` command stable for collaborators.
+"""
 
-@app.get("/")
-async def root():
-    return {'message': 'Hello World'}
+from data_platform.api.server import app
 
+__all__ = ["app"]

@@ -1,0 +1,3 @@
+{"scraped_at_unix":1772050994,"scraped_at_iso":"2026-02-25T20:23:14.092885+00:00","endpoint":"balance","environment":"prod","duration_ms":195,"data":{"balance":0,"portfolio_value":0,"updated_ts":1772050994}}
+{"scraped_at_unix":1772050996,"scraped_at_iso":"2026-02-25T20:23:16.109184+00:00","endpoint":"balance","environment":"prod","duration_ms":41,"data":{"balance":0,"portfolio_value":0,"updated_ts":1772050996}}
+{"scraped_at_unix":1772050998,"scraped_at_iso":"2026-02-25T20:23:18.501205+00:00","endpoint":"balance","environment":"prod","duration_ms":43,"data":{"balance":0,"portfolio_value":0,"updated_ts":1772050998}}

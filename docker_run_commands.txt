@@ -1,5 +1,4 @@
-##Once docker is installed and postgres run this commamnd in terminal to run the 
-##postgres process in docker 
+# Start PostgreSQL in Docker for the Whaling data platform
 docker run -d \
   --name orcaDB \
   -e POSTGRES_USER=app \
@@ -9,11 +8,28 @@ docker run -d \
   -v pgdata:/var/lib/postgresql/data \
   postgres:16
 
-##to connect to datagrip use this 
+# Export connection strings for this repo
+# The Python app uses DATABASE_URL (SQLAlchemy format)
+# The psql CLI uses PSQL_URL (standard PostgreSQL format)
+export DATABASE_URL="postgresql+psycopg://app:password@localhost:5433/app_db"
+export PSQL_URL="postgresql://app:password@localhost:5433/app_db"
+
+# Environment values for GUI tools like DataGrip
 DB_HOST=localhost
 DB_PORT=5433
 DB_NAME=app_db
 DB_USER=app
 DB_PASSWORD=password
 
+# Connect with psql from the host machine
+psql "$PSQL_URL"
+
+# Or connect inside the container
 docker exec -it orcaDB psql -U app -d app_db
+
+# Bootstrap the schemas and tables after the container is running
+.venv/bin/python bootstrap_db.py
+
+# Basic validation commands
+.venv/bin/python -m uvicorn main:app --reload
+.venv/bin/python build_dashboard_snapshot.py
