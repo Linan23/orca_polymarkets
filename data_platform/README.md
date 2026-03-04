@@ -8,7 +8,7 @@ It covers:
 - the `data_platform/` layout
 - local PostgreSQL setup
 - connection settings
-- schema bootstrap
+- schema bootstrap and migrations
 - ingestion into the database
 - dashboard snapshot generation
 - routine maintenance
@@ -18,12 +18,13 @@ This project currently uses:
 - shared data-platform code under `data_platform/`
 - PostgreSQL 16 (Homebrew)
 - SQLAlchemy ORM models in [`models/`](models/)
-- schema bootstrap via [`../bootstrap_db.py`](../bootstrap_db.py)
+- Alembic migrations via [`../alembic.ini`](../alembic.ini)
+- optional compatibility bootstrap via [`../bootstrap_db.py`](../bootstrap_db.py)
 
 Important:
-- Alembic is not fully initialized yet.
-- For now, schema creation is done with the root wrapper `bootstrap_db.py`.
-- The local `migrations/` folder is reserved for the next step when migration files are added.
+- Alembic is now the preferred way to create and evolve the schema.
+- `bootstrap_db.py` remains available as a compatibility helper for quick local bootstraps.
+- Migration instructions live in [`migrations/README.md`](migrations/README.md).
 
 ## Current Local Defaults
 
@@ -46,6 +47,13 @@ export DATABASE_URL="postgresql+psycopg://postgres:postgres@localhost:5432/whali
 ```bash
 export PSQL_URL="postgresql://postgres:postgres@localhost:5432/whaling"
 ```
+
+Quick open helper:
+
+```bash
+./data_platform/open_psql.sh
+```
+
 
 Important:
 - `DATABASE_URL` is for the Python application (`SQLAlchemy` + `psycopg`)
@@ -133,16 +141,22 @@ fi
 Once `DATABASE_URL` is set and PostgreSQL is running, create the schemas and tables:
 
 ```bash
+.venv/bin/alembic -c alembic.ini upgrade head
+```
+
+Compatibility option:
+
+```bash
 .venv/bin/python bootstrap_db.py
 ```
 
-What this creates:
+What the baseline migration creates:
 
 - schema `analytics`
 - schema `raw`
 - all ORM-backed application tables
 
-This command is safe to rerun for table creation, but it is not a replacement for real migrations long term.
+Use Alembic for all schema evolution after the baseline.
 
 ## Verify the Database
 
@@ -212,6 +226,18 @@ psql "$PSQL_URL" -Atqc \
 psql "$PSQL_URL"
 ```
 
+Or use the helper script:
+
+```bash
+./data_platform/open_psql.sh
+```
+
+Or, if you added the shell function above:
+
+```bash
+whalingdb
+```
+
 ### Useful `psql` commands
 
 Inside `psql`:
@@ -262,6 +288,38 @@ ORDER BY market_contract_id DESC
 LIMIT 10;
 "
 ```
+
+### Run the checked-in deliverable query pack
+
+For repeatable demos and report snapshots, use the checked-in SQL script:
+
+```bash
+./data_platform/open_psql.sh -f data_platform/sql/deliverable_queries.sql
+```
+
+## Smoke Validation
+
+Run the lightweight validator to confirm the local stack is healthy:
+
+```bash
+.venv/bin/python data_platform/tests/smoke_validate.py --require-sample-data
+```
+
+What it checks:
+- database connectivity
+- Alembic baseline revision
+- required `analytics` and `raw` tables
+- current FastAPI read endpoints
+
+Optional deeper validation:
+
+```bash
+.venv/bin/python data_platform/tests/smoke_validate.py --require-sample-data --build-dashboard
+```
+
+Optional flags:
+- `--run-bootstrap` to exercise the compatibility bootstrap helper
+- `--json` for machine-readable output
 
 Latest dashboard snapshots:
 
@@ -358,6 +416,56 @@ Note:
 - The current Kalshi trade endpoint does not expose trader identity.
 - The system uses a placeholder canonical user row (`__unknown__`) to satisfy the `transaction_fact.user_id` foreign key.
 
+## Dune: saved query results
+
+This writes:
+- scrape run metadata
+- raw Dune result payloads
+- normalized `user_account` rows for maker wallets
+- synthetic `market_event` and `market_contract` rows under the `dune` platform
+- normalized `transaction_fact` rows using the saved query output
+
+The Dune ingest expects a saved query whose result rows include fields compatible with:
+- `block_time`
+- `block_number`
+- `tx_hash`
+- `maker`
+- `question`
+- `token_outcome_name` or `token_outcome`
+- `price`
+- `amount` or `amount_usdc`
+- `shares`
+- `maker_action` or `action`
+
+Required:
+
+Put your key in the repo-level `.env` file:
+
+```env
+DUNE_API_KEY=your_dune_api_key_here
+DUNE_QUERY_ID=2103719
+```
+
+Command:
+
+```bash
+.venv/bin/python data_platform/jobs/dune_query_ingest.py \
+  --query-id 2103719 \
+  --max-requests 1
+```
+
+Inspect the imported Dune-backed transactions:
+
+```bash
+psql "$PSQL_URL" -c "
+SELECT transaction_id, user_id, source_transaction_id, side, price, shares, notional_value, transaction_time
+FROM analytics.transaction_fact
+WHERE platform_id = (SELECT platform_id FROM analytics.platform WHERE platform_name = 'dune')
+ORDER BY transaction_id DESC
+LIMIT 10;
+"
+```
+
 ## Building the Derived Dashboard Tables
 
 The normalized layer feeds the dashboard-facing tables.
@@ -405,16 +513,20 @@ curl -s http://127.0.0.1:8000/health
 
 ## Common Maintenance Tasks
 
-## 1. Re-bootstrap after model changes
+## 1. Apply migrations after model changes
 
-If you change the ORM models and are still in the pre-Alembic stage:
+If you change the ORM models:
 
-1. decide whether the database can be reset safely
-2. if yes, drop and recreate the database
-3. rerun `bootstrap_db.py`
+1. generate a migration:
+2. review the generated revision
+3. run `alembic upgrade head`
 
-Do not rely on `create_all()` for complex schema evolution long term.
-That is what Alembic is for once migrations are initialized.
+Example:
+
+```bash
+.venv/bin/alembic -c alembic.ini revision --autogenerate -m "describe_change"
+.venv/bin/alembic -c alembic.ini upgrade head
+```
 
 ## 2. Reset the local database
 
@@ -423,7 +535,7 @@ This deletes all collected data and recreates a clean local database.
 ```bash
 dropdb --if-exists whaling
 createdb -O postgres whaling
-.venv/bin/python bootstrap_db.py
+.venv/bin/alembic -c alembic.ini upgrade head
 ```
 
 Use this only when you intentionally want a full local reset.
@@ -489,7 +601,7 @@ Cause:
 Check:
 
 1. verify PostgreSQL is running
-2. verify `bootstrap_db.py` was run
+2. verify the baseline migration was applied (`alembic upgrade head`) or the compatibility bootstrap was run
 3. try a manual `psql "$PSQL_URL"` connection
 
 ## Problem: `psql` command not found
@@ -509,13 +621,11 @@ echo 'export PATH="/opt/homebrew/opt/postgresql@16/bin:$PATH"' >> ~/.zshrc
 ## Problem: tables do not reflect model changes
 
 Cause:
-- `bootstrap_db.py` does not apply complex schema changes to existing tables
+- the database has not been migrated to match the current models
 
-Current workaround:
-- reset the local DB if safe
-
-Long-term solution:
-- initialize Alembic and use real migrations
+Current fix:
+- generate and apply an Alembic migration
+- or reset the local DB if it is safe to do so
 
 ## Recommended Operating Pattern for This Phase
 
@@ -523,10 +633,11 @@ For this phase, the stable local workflow is:
 
 1. Start PostgreSQL
 2. Export `DATABASE_URL` and `PSQL_URL`
-3. Run `bootstrap_db.py` when setting up a fresh DB
-4. Run one or more scrapers with `--write-to-db`
-5. Run `build_dashboard_snapshot.py`
-6. Inspect via `psql` and the FastAPI read endpoints
+3. Run `alembic upgrade head` when setting up a fresh DB
+4. Export `DUNE_API_KEY` if the Dune step is enabled
+5. Run one or more scrapers with `--write-to-db` or use `data_platform/jobs/run_ingest_cycle.py`
+6. Run `build_dashboard_snapshot.py`
+7. Inspect via `psql` and the FastAPI read endpoints
 
 That gives you:
 - raw payload retention

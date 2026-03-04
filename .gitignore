@@ -6,6 +6,7 @@ ENV/
 
 # Python
 __pycache__/
+__pycache__*/
 *.py[cod]
 *.pyo
 *.pyd
@@ -23,3 +24,13 @@ __pycache__/
 # OS
 .DS_Store
 Thumbs.db
+
+# Runtime data artifacts
+data_platform/runtime/
+polymarket_data/
+kalshi-scraper/kalshi_data/orderbook_snapshots.jsonl
+
+# Local secrets
+kalshi-scraper/*.pem
+kalshi-scraper/*.key
+kalshi-scraper/kalshi_private_key.pem

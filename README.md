@@ -21,7 +21,31 @@ export DATABASE_URL="postgresql+psycopg://postgres:postgres@localhost:5432/whali
 export PSQL_URL="postgresql://postgres:postgres@localhost:5432/whaling"
 ```
 
+Or open the database directly with:
+
+```bash
+./data_platform/open_psql.sh
+```
+
+Optional shell shortcut from anywhere inside this repo:
+
+```bash
+whalingdb() {
+  local repo_root
+  repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" || return 1
+  "$repo_root/data_platform/open_psql.sh" "$@"
+}
+```
+
+To keep that function across shell sessions, add it to `~/.zshrc` and run `source ~/.zshrc`.
+
 Create the schemas and tables:
+
+```bash
+.venv/bin/alembic -c alembic.ini upgrade head
+```
+
+Compatibility option:
 
 ```bash
 .venv/bin/python bootstrap_db.py
@@ -39,6 +63,16 @@ Build a derived dashboard snapshot from the normalized tables:
 .venv/bin/python build_dashboard_snapshot.py
 ```
 
+Run one automated ingest cycle:
+
+```bash
+.venv/bin/python data_platform/jobs/run_ingest_cycle.py \
+  --polymarket-wallet 0x92a54267b56800430b2be9af0f768d18134f9631 \
+  --enable-dune
+```
+
+When `--enable-dune` is used, the runner reads `DUNE_API_KEY` and `DUNE_QUERY_ID` from the repo-level `.env` file.
+
 Inspect the database schema quickly:
 
 ```bash
@@ -55,6 +89,24 @@ FROM analytics.transaction_fact
 ORDER BY transaction_id DESC
 LIMIT 10;
 "
+```
+
+Run the checked-in deliverable query pack:
+
+```bash
+./data_platform/open_psql.sh -f data_platform/sql/deliverable_queries.sql
+```
+
+Run the lightweight smoke validator:
+
+```bash
+.venv/bin/python data_platform/tests/smoke_validate.py --require-sample-data
+```
+
+To include a live dashboard rebuild in the validation:
+
+```bash
+.venv/bin/python data_platform/tests/smoke_validate.py --require-sample-data --build-dashboard
 ```
 
 ## Polymarket Positions Scraper
@@ -138,3 +190,13 @@ cd kalshi-scraper
   --write-to-db \
   --max-requests 1
 ```
+
+Dune query results can now also write into PostgreSQL:
+
+```bash
+.venv/bin/python data_platform/jobs/dune_query_ingest.py \
+  --query-id 2103719 \
+  --max-requests 1
+```
+
+The Dune job loads `DUNE_API_KEY` and `DUNE_QUERY_ID` from the repo-level `.env` file automatically.

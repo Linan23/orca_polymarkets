@@ -3,12 +3,12 @@
 This runner orchestrates the existing entrypoints in a stable order:
 1. Bootstrap the database schema.
 2. Run Polymarket event discovery.
-3. Run Polymarket positions for configured wallets.
-4. Run Kalshi trades ingestion.
-5. Build the derived dashboard snapshot.
-
-It is intentionally thin and shell command based so the team keeps using the
-same entrypoints that are already validated independently.
+3. Run Polymarket order-book snapshots.
+4. Run Polymarket positions for configured wallets.
+5. Run Kalshi trades ingestion.
+6. Run Kalshi order-book snapshots.
+7. Run the optional Dune query ingest.
+8. Build the derived dashboard snapshot.
 """
 
 from __future__ import annotations
@@ -25,6 +25,7 @@ from typing import Any
 
 BASE_DIR = Path(__file__).resolve().parent
 ROOT_DIR = BASE_DIR.parents[1]
+RUNTIME_DIR = ROOT_DIR / "data_platform" / "runtime"
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
@@ -47,7 +48,6 @@ class StepResult:
     stderr_tail: list[str]
 
 
-
 def parse_args() -> argparse.Namespace:
     """Parse CLI flags for the orchestration runner."""
     parser = argparse.ArgumentParser(description="Run the data platform ingestion pipeline in one command.")
@@ -62,59 +62,36 @@ def parse_args() -> argparse.Namespace:
         default=[],
         help="Repeatable wallet address for the Polymarket positions job. Can also come from POLYMARKET_WALLETS.",
     )
-    parser.add_argument(
-        "--discovery-limit",
-        type=int,
-        default=10,
-        help="Max events requested by the Polymarket discovery step.",
-    )
+    parser.add_argument("--discovery-limit", type=int, default=10, help="Max events requested by the Polymarket discovery step.")
+    parser.add_argument("--orderbook-market-limit", type=int, default=10, help="Tracked Polymarket markets sampled in the order-book step.")
     parser.add_argument(
         "--kalshi-environment",
         choices=["demo", "prod"],
         default=DEFAULT_KALSHI_ENVIRONMENT,
-        help="Kalshi environment for the trades step.",
+        help="Kalshi environment for trades and order-book steps.",
     )
+    parser.add_argument("--kalshi-trades-limit", type=int, default=25, help="Trade row limit for the Kalshi trades step.")
     parser.add_argument(
-        "--kalshi-trades-limit",
+        "--kalshi-orderbook-market-limit",
         type=int,
-        default=25,
-        help="Trade row limit for the Kalshi trades step.",
+        default=10,
+        help="Tracked Kalshi markets sampled in the order-book step.",
     )
-    parser.add_argument(
-        "--skip-bootstrap",
-        action="store_true",
-        help="Skip the schema bootstrap step.",
-    )
-    parser.add_argument(
-        "--skip-discovery",
-        action="store_true",
-        help="Skip the Polymarket discovery step.",
-    )
-    parser.add_argument(
-        "--skip-positions",
-        action="store_true",
-        help="Skip the Polymarket positions step.",
-    )
-    parser.add_argument(
-        "--skip-kalshi",
-        action="store_true",
-        help="Skip the Kalshi trades step.",
-    )
-    parser.add_argument(
-        "--skip-dashboard",
-        action="store_true",
-        help="Skip the derived dashboard snapshot step.",
-    )
+    parser.add_argument("--enable-dune", action="store_true", help="Enable the optional Dune query ingest step.")
+    parser.add_argument("--dune-query-id", default=os.getenv("DUNE_QUERY_ID", "2103719"), help="Saved Dune query id.")
+    parser.add_argument("--skip-bootstrap", action="store_true", help="Skip the schema bootstrap step.")
+    parser.add_argument("--skip-discovery", action="store_true", help="Skip the Polymarket discovery step.")
+    parser.add_argument("--skip-orderbook", action="store_true", help="Skip the Polymarket order-book snapshot step.")
+    parser.add_argument("--skip-positions", action="store_true", help="Skip the Polymarket positions step.")
+    parser.add_argument("--skip-kalshi", action="store_true", help="Skip the Kalshi trades step.")
+    parser.add_argument("--skip-kalshi-orderbook", action="store_true", help="Skip the Kalshi order-book snapshot step.")
+    parser.add_argument("--skip-dashboard", action="store_true", help="Skip the derived dashboard snapshot step.")
     parser.add_argument(
         "--continue-on-error",
         action="store_true",
         help="Continue running later steps even if one step fails.",
     )
-    parser.add_argument(
-        "--loop",
-        action="store_true",
-        help="Repeat the ingest cycle until interrupted.",
-    )
+    parser.add_argument("--loop", action="store_true", help="Repeat the ingest cycle until interrupted.")
     parser.add_argument(
         "--interval-seconds",
         type=float,
@@ -125,10 +102,16 @@ def parse_args() -> argparse.Namespace:
 
     if args.discovery_limit <= 0:
         parser.error("--discovery-limit must be > 0.")
+    if args.orderbook_market_limit <= 0:
+        parser.error("--orderbook-market-limit must be > 0.")
     if args.kalshi_trades_limit <= 0:
         parser.error("--kalshi-trades-limit must be > 0.")
+    if args.kalshi_orderbook_market_limit <= 0:
+        parser.error("--kalshi-orderbook-market-limit must be > 0.")
     if args.interval_seconds < 0:
         parser.error("--interval-seconds must be >= 0.")
+    if args.enable_dune and not args.dune_query_id.strip():
+        parser.error("--dune-query-id must not be empty when the Dune step is enabled.")
 
     env_wallets = [wallet.strip() for wallet in os.getenv("POLYMARKET_WALLETS", "").split(",") if wallet.strip()]
     args.polymarket_wallets = args.polymarket_wallet + env_wallets
@@ -137,15 +120,14 @@ def parse_args() -> argparse.Namespace:
             "At least one Polymarket wallet is required for positions. "
             "Use --polymarket-wallet or set POLYMARKET_WALLETS."
         )
-
     return args
+
 
 def command_env(database_url: str) -> dict[str, str]:
     """Build the child-process environment for pipeline steps."""
     env = os.environ.copy()
     env["DATABASE_URL"] = database_url
     return env
-
 
 
 def run_step(name: str, command: list[str], env: dict[str, str]) -> StepResult:
@@ -172,11 +154,17 @@ def run_step(name: str, command: list[str], env: dict[str, str]) -> StepResult:
     )
 
 
-
 def pipeline_commands(args: argparse.Namespace) -> list[tuple[str, list[str]]]:
     """Build the ordered pipeline command list for one cycle."""
     commands: list[tuple[str, list[str]]] = []
     py = sys.executable
+    runtime_dir = RUNTIME_DIR
+    discovery_output = runtime_dir / "discovered_events.jsonl"
+    positions_output = runtime_dir / "positions.jsonl"
+    polymarket_orderbook_output = runtime_dir / "polymarket_orderbook_snapshots.jsonl"
+    kalshi_trades_output = runtime_dir / "kalshi_trades.jsonl"
+    kalshi_orderbook_output = runtime_dir / "kalshi_orderbook_snapshots.jsonl"
+    dune_output = runtime_dir / "dune_query_results.jsonl"
 
     if not args.skip_bootstrap:
         commands.append(("bootstrap_db", [py, "bootstrap_db.py"]))
@@ -194,6 +182,25 @@ def pipeline_commands(args: argparse.Namespace) -> list[tuple[str, list[str]]]:
                     "1",
                     "--limit",
                     str(args.discovery_limit),
+                    "--output-file",
+                    str(discovery_output),
+                ],
+            )
+        )
+
+    if not args.skip_orderbook:
+        commands.append(
+            (
+                "polymarket_orderbook",
+                [
+                    py,
+                    "data_platform/jobs/polymarket_orderbook_snapshot.py",
+                    "--market-limit",
+                    str(args.orderbook_market_limit),
+                    "--max-requests",
+                    "1",
+                    "--output-file",
+                    str(polymarket_orderbook_output),
                 ],
             )
         )
@@ -211,6 +218,8 @@ def pipeline_commands(args: argparse.Namespace) -> list[tuple[str, list[str]]]:
                         "--write-to-db",
                         "--max-requests",
                         "1",
+                        "--output-file",
+                        str(positions_output),
                     ],
                 )
             )
@@ -231,6 +240,44 @@ def pipeline_commands(args: argparse.Namespace) -> list[tuple[str, list[str]]]:
                     "1",
                     "--limit",
                     str(args.kalshi_trades_limit),
+                    "--output-file",
+                    str(kalshi_trades_output),
+                ],
+            )
+        )
+
+    if not args.skip_kalshi_orderbook:
+        commands.append(
+            (
+                "kalshi_orderbook",
+                [
+                    py,
+                    "data_platform/jobs/kalshi_orderbook_snapshot.py",
+                    "--environment",
+                    args.kalshi_environment,
+                    "--market-limit",
+                    str(args.kalshi_orderbook_market_limit),
+                    "--max-requests",
+                    "1",
+                    "--output-file",
+                    str(kalshi_orderbook_output),
+                ],
+            )
+        )
+
+    if args.enable_dune:
+        commands.append(
+            (
+                "dune_query",
+                [
+                    py,
+                    "data_platform/jobs/dune_query_ingest.py",
+                    "--query-id",
+                    args.dune_query_id,
+                    "--max-requests",
+                    "1",
+                    "--output-file",
+                    str(dune_output),
                 ],
             )
         )
@@ -239,7 +286,6 @@ def pipeline_commands(args: argparse.Namespace) -> list[tuple[str, list[str]]]:
         commands.append(("build_dashboard_snapshot", [py, "build_dashboard_snapshot.py"]))
 
     return commands
-
 
 
 def summarize_cycle(cycle_index: int, results: list[StepResult]) -> dict[str, Any]:
@@ -266,11 +312,9 @@ def summarize_cycle(cycle_index: int, results: list[StepResult]) -> dict[str, An
     }
 
 
-
 def run_cycle(args: argparse.Namespace, cycle_index: int) -> dict[str, Any]:
     """Run one ingest cycle and return a summary."""
     database_url = args.database_url or os.getenv("DATABASE_URL", "") or get_settings().database_url
-
     env = command_env(database_url)
     results: list[StepResult] = []
     for name, command in pipeline_commands(args):
@@ -280,7 +324,6 @@ def run_cycle(args: argparse.Namespace, cycle_index: int) -> dict[str, Any]:
         if not result.ok and not args.continue_on_error:
             break
     return summarize_cycle(cycle_index, results)
-
 
 
 def main() -> int:
