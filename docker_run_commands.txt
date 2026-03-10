@@ -19,6 +19,7 @@ export PSQL_URL="postgresql://app:password@localhost:5433/app_db"
 
 # Validate stack
 .venv/bin/python data_platform/tests/smoke_validate.py --require-sample-data
+.venv/bin/python data_platform/tests/data_quality_check.py --require-data
 
 # Run API with Docker DB
 .venv/bin/python -m uvicorn main:app --reload
