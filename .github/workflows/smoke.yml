@@ -41,6 +41,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Secret scan (repo)
+        run: |
+          python scripts/secret_scan.py
+
       - name: Wait for PostgreSQL
         run: |
           python - <<'PY'
@@ -69,3 +73,11 @@ jobs:
       - name: Run smoke validation
         run: |
           python data_platform/tests/smoke_validate.py
+
+      - name: Run data-quality checks
+        run: |
+          python data_platform/tests/data_quality_check.py
+
+      - name: Run Week 4/5 readiness gate (structural)
+        run: |
+          python data_platform/tests/week45_readiness_check.py

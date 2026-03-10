@@ -100,6 +100,7 @@ Run one automated ingest cycle:
 ```bash
 .venv/bin/python data_platform/jobs/run_ingest_cycle.py \
   --polymarket-wallet 0x92a54267b56800430b2be9af0f768d18134f9631 \
+  --polymarket-trades-limit 200 \
   --enable-dune
 ```
 
@@ -140,6 +141,34 @@ To include a live dashboard rebuild in the validation:
 ```bash
 .venv/bin/python data_platform/tests/smoke_validate.py --require-sample-data --build-dashboard
 ```
+
+Run data-quality checks:
+
+```bash
+.venv/bin/python data_platform/tests/data_quality_check.py --require-data
+```
+
+Run Week 4/5 readiness gate (strict, non-Dune):
+
+```bash
+.venv/bin/python data_platform/tests/week45_readiness_check.py --require-data
+```
+
+Include Dune in strict readiness when needed:
+
+```bash
+.venv/bin/python data_platform/tests/week45_readiness_check.py --require-data --require-dune
+```
+
+Run repository secret scan:
+
+```bash
+.venv/bin/python scripts/secret_scan.py
+```
+
+Snapshot release process:
+
+- [`SNAPSHOT_RELEASE.md`](SNAPSHOT_RELEASE.md)
 
 ## Polymarket Positions Scraper
 
@@ -209,6 +238,14 @@ Polymarket positions can now also write into PostgreSQL:
 .venv/bin/python polymarket_positions_scraper.py \
   --user-wallet 0x92a54267b56800430b2be9af0f768d18134f9631 \
   --write-to-db \
+  --max-requests 1
+```
+
+Polymarket trades can now also write into PostgreSQL:
+
+```bash
+.venv/bin/python data_platform/jobs/polymarket_trades_ingest.py \
+  --limit 200 \
   --max-requests 1
 ```
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import datetime, timezone
+from string import hexdigits
 from typing import Any
 
 from sqlalchemy import Select, select
@@ -26,6 +27,18 @@ from data_platform.models import (
 
 
 UNKNOWN_USER_EXTERNAL_REF = "__unknown__"
+
+
+def normalize_wallet_ref(value: str | None) -> str | None:
+    """Normalize hex wallet references to lowercase ``0x...`` format."""
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    if len(text) > 2 and text.startswith("0x") and all(char in hexdigits for char in text[2:]):
+        return "0x" + text[2:].lower()
+    return text
 
 
 def parse_datetime(value: Any) -> datetime | None:
@@ -150,19 +163,24 @@ def upsert_user_account(
 ) -> UserAccount:
     """Create or update a canonical user account row."""
     platform = get_platform(session, platform_name)
+    canonical_external_ref = normalize_wallet_ref(external_user_ref) or external_user_ref.strip()
+    if not canonical_external_ref:
+        canonical_external_ref = UNKNOWN_USER_EXTERNAL_REF
+    canonical_wallet_address = normalize_wallet_ref(wallet_address)
+    canonical_display_label = display_label.strip() if isinstance(display_label, str) and display_label.strip() else None
     row = session.scalar(
         select(UserAccount).where(
             UserAccount.platform_id == platform.platform_id,
-            UserAccount.external_user_ref == external_user_ref,
+            UserAccount.external_user_ref == canonical_external_ref,
         )
     )
     now = datetime.now(timezone.utc)
     if row is None:
         row = UserAccount(
             platform_id=platform.platform_id,
-            external_user_ref=external_user_ref,
-            wallet_address=wallet_address,
-            display_label=display_label,
+            external_user_ref=canonical_external_ref,
+            wallet_address=canonical_wallet_address,
+            display_label=canonical_display_label,
             first_seen_at=now,
             last_seen_at=now,
         )
@@ -170,8 +188,8 @@ def upsert_user_account(
         session.flush()
         return row
 
-    row.wallet_address = wallet_address or row.wallet_address
-    row.display_label = display_label or row.display_label
+    row.wallet_address = canonical_wallet_address or row.wallet_address
+    row.display_label = canonical_display_label or row.display_label
     row.last_seen_at = now
     row.updated_at = now
     session.flush()

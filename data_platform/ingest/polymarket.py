@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy.orm import Session
 
 from data_platform.ingest.store import (
+    UNKNOWN_USER_EXTERNAL_REF,
     ensure_event_tag_map,
     finalize_scrape_run,
     insert_orderbook_snapshot,
     insert_position_snapshot,
+    insert_transaction_fact,
     parse_datetime,
     start_scrape_run,
     store_api_payload,
@@ -36,6 +39,142 @@ def _parse_outcomes(raw_value: Any) -> tuple[str | None, str | None]:
     first = values[0] if values else None
     second = values[1] if len(values) > 1 else None
     return first, second
+
+
+def _polymarket_trade_source_id(trade: dict[str, Any]) -> str:
+    """Build a stable Polymarket transaction identity."""
+    tx_hash = str(trade.get("transactionHash") or "missing-tx-hash")
+    asset = str(trade.get("asset") or "missing-asset")
+    outcome_index = str(trade.get("outcomeIndex") if trade.get("outcomeIndex") is not None else "missing-outcome-index")
+    timestamp = str(trade.get("timestamp") if trade.get("timestamp") is not None else "missing-timestamp")
+    return f"{tx_hash}:{asset}:{outcome_index}:{timestamp}"
+
+
+def ingest_trades_record(
+    session: Session,
+    *,
+    record: dict[str, Any],
+    request_url: str,
+    raw_output_path: str | None = None,
+) -> dict[str, int]:
+    """Persist one Polymarket trades batch into the database."""
+    scraped_at = parse_datetime(record.get("scraped_at_iso"))
+    batch_time = scraped_at or parse_datetime(record.get("scraped_at_unix")) or datetime.now(timezone.utc)
+    scrape_run = start_scrape_run(
+        session,
+        platform_name="polymarket",
+        job_name="polymarket-trades",
+        endpoint_name="trades",
+        request_url=request_url,
+        raw_output_path=raw_output_path,
+        window_started_at=scraped_at,
+    )
+    payload_row = store_api_payload(
+        session,
+        scrape_run=scrape_run,
+        platform_name="polymarket",
+        entity_type="trades",
+        entity_external_id=None,
+        payload=record,
+        collected_at=scraped_at,
+    )
+
+    trades = record.get("trades") if isinstance(record.get("trades"), list) else []
+    records_written = 0
+    error_count = 0
+
+    for trade in trades:
+        if not isinstance(trade, dict):
+            error_count += 1
+            continue
+
+        wallet_ref = str(trade.get("proxyWallet") or "").strip()
+        user_row = upsert_user_account(
+            session,
+            platform_name="polymarket",
+            external_user_ref=wallet_ref or UNKNOWN_USER_EXTERNAL_REF,
+            wallet_address=wallet_ref or None,
+            display_label=str(trade.get("pseudonym") or trade.get("name") or wallet_ref or "unknown-polymarket-user"),
+        )
+
+        event_slug = str(trade.get("eventSlug") or trade.get("slug") or "").strip()
+        condition_ref = str(trade.get("conditionId") or "").strip()
+        event_ref = event_slug or condition_ref or str(trade.get("asset") or "unknown-event")
+        title = str(trade.get("title") or trade.get("slug") or "Untitled Event")
+        trade_time = parse_datetime(trade.get("timestamp")) or scraped_at
+        event_row = upsert_market_event(
+            session,
+            platform_name="polymarket",
+            external_event_ref=event_ref,
+            title=title,
+            slug=event_slug or None,
+            end_time=None,
+            is_active=True,
+            is_closed=False,
+            is_archived=False,
+            raw_payload_id=payload_row.payload_id,
+        )
+
+        outcome = str(trade.get("outcome")) if trade.get("outcome") is not None else None
+        question = f"{title} [{outcome}]" if outcome else title
+        market_ref = str(trade.get("asset") or f"{condition_ref}:{trade.get('outcomeIndex')}" or event_ref)
+        market_row = upsert_market_contract(
+            session,
+            platform_name="polymarket",
+            event=event_row,
+            external_market_ref=market_ref,
+            question=question,
+            market_url=trade.get("icon"),
+            market_slug=str(trade.get("slug")) if trade.get("slug") is not None else None,
+            condition_ref=condition_ref or None,
+            outcome_a_label=outcome,
+            is_active=True,
+            is_closed=False,
+            accepting_orders=None,
+            last_trade_price=trade.get("price"),
+            end_time=None,
+            raw_payload_id=payload_row.payload_id,
+        )
+
+        price = trade.get("price")
+        shares = trade.get("size")
+        notional_value = None
+        try:
+            if price is not None and shares is not None:
+                notional_value = float(price) * float(shares)
+        except (TypeError, ValueError):
+            notional_value = None
+
+        insert_transaction_fact(
+            session,
+            user=user_row,
+            market=market_row,
+            platform_name="polymarket",
+            source_transaction_id=_polymarket_trade_source_id(trade),
+            source_fill_id=str(trade.get("transactionHash")) if trade.get("transactionHash") is not None else None,
+            transaction_type="trade",
+            transaction_time=trade_time or batch_time,
+            side=str(trade.get("side")).lower() if trade.get("side") is not None else None,
+            outcome_label=outcome,
+            price=price,
+            shares=shares,
+            notional_value=notional_value,
+            raw_payload_id=payload_row.payload_id,
+        )
+        records_written += 1
+
+    status = "success"
+    if error_count:
+        status = "partial" if records_written else "failed"
+    finalize_scrape_run(
+        session,
+        scrape_run,
+        status=status,
+        records_written=records_written,
+        error_count=error_count,
+        error_summary=f"Skipped {error_count} malformed trade rows." if error_count else None,
+    )
+    return {"records_written": records_written, "error_count": error_count}
 
 
 def ingest_discovery_cycle(

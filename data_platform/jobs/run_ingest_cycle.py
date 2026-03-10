@@ -3,12 +3,13 @@
 This runner orchestrates the existing entrypoints in a stable order:
 1. Bootstrap the database schema.
 2. Run Polymarket event discovery.
-3. Run Polymarket order-book snapshots.
-4. Run Polymarket positions for configured wallets.
-5. Run Kalshi trades ingestion.
-6. Run Kalshi order-book snapshots.
-7. Run the optional Dune query ingest.
-8. Build the derived dashboard snapshot.
+3. Run Polymarket trades ingestion.
+4. Run Polymarket order-book snapshots.
+5. Run Polymarket positions for configured wallets.
+6. Run Kalshi trades ingestion.
+7. Run Kalshi order-book snapshots.
+8. Run the optional Dune query ingest.
+9. Build the derived dashboard snapshot.
 """
 
 from __future__ import annotations
@@ -63,6 +64,7 @@ def parse_args() -> argparse.Namespace:
         help="Repeatable wallet address for the Polymarket positions job. Can also come from POLYMARKET_WALLETS.",
     )
     parser.add_argument("--discovery-limit", type=int, default=10, help="Max events requested by the Polymarket discovery step.")
+    parser.add_argument("--polymarket-trades-limit", type=int, default=200, help="Trade row limit for the Polymarket trades step.")
     parser.add_argument("--orderbook-market-limit", type=int, default=10, help="Tracked Polymarket markets sampled in the order-book step.")
     parser.add_argument(
         "--kalshi-environment",
@@ -81,6 +83,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dune-query-id", default=os.getenv("DUNE_QUERY_ID", "2103719"), help="Saved Dune query id.")
     parser.add_argument("--skip-bootstrap", action="store_true", help="Skip the schema bootstrap step.")
     parser.add_argument("--skip-discovery", action="store_true", help="Skip the Polymarket discovery step.")
+    parser.add_argument("--skip-polymarket-trades", action="store_true", help="Skip the Polymarket trades step.")
     parser.add_argument("--skip-orderbook", action="store_true", help="Skip the Polymarket order-book snapshot step.")
     parser.add_argument("--skip-positions", action="store_true", help="Skip the Polymarket positions step.")
     parser.add_argument("--skip-kalshi", action="store_true", help="Skip the Kalshi trades step.")
@@ -102,6 +105,8 @@ def parse_args() -> argparse.Namespace:
 
     if args.discovery_limit <= 0:
         parser.error("--discovery-limit must be > 0.")
+    if args.polymarket_trades_limit <= 0:
+        parser.error("--polymarket-trades-limit must be > 0.")
     if args.orderbook_market_limit <= 0:
         parser.error("--orderbook-market-limit must be > 0.")
     if args.kalshi_trades_limit <= 0:
@@ -160,6 +165,7 @@ def pipeline_commands(args: argparse.Namespace) -> list[tuple[str, list[str]]]:
     py = sys.executable
     runtime_dir = RUNTIME_DIR
     discovery_output = runtime_dir / "discovered_events.jsonl"
+    polymarket_trades_output = runtime_dir / "polymarket_trades.jsonl"
     positions_output = runtime_dir / "positions.jsonl"
     polymarket_orderbook_output = runtime_dir / "polymarket_orderbook_snapshots.jsonl"
     kalshi_trades_output = runtime_dir / "kalshi_trades.jsonl"
@@ -184,6 +190,23 @@ def pipeline_commands(args: argparse.Namespace) -> list[tuple[str, list[str]]]:
                     str(args.discovery_limit),
                     "--output-file",
                     str(discovery_output),
+                ],
+            )
+        )
+
+    if not args.skip_polymarket_trades:
+        commands.append(
+            (
+                "polymarket_trades",
+                [
+                    py,
+                    "data_platform/jobs/polymarket_trades_ingest.py",
+                    "--limit",
+                    str(args.polymarket_trades_limit),
+                    "--max-requests",
+                    "1",
+                    "--output-file",
+                    str(polymarket_trades_output),
                 ],
             )
         )

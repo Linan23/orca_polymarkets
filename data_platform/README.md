@@ -373,6 +373,28 @@ Optional flags:
 - `--run-bootstrap` to exercise the compatibility bootstrap helper
 - `--json` for machine-readable output
 
+Run data-quality checks:
+
+```bash
+.venv/bin/python data_platform/tests/data_quality_check.py --require-data
+```
+
+Run Week 4/5 readiness gate (strict, non-Dune):
+
+```bash
+.venv/bin/python data_platform/tests/week45_readiness_check.py --require-data
+```
+
+Optional strict Dune coverage:
+
+```bash
+.venv/bin/python data_platform/tests/week45_readiness_check.py --require-data --require-dune
+```
+
+Snapshot publishing runbook:
+
+- [`../SNAPSHOT_RELEASE.md`](../SNAPSHOT_RELEASE.md)
+
 Latest dashboard snapshots:
 
 ```bash
@@ -412,6 +434,36 @@ You can combine filtering:
   --fetch-full-details \
   --write-to-db \
   --max-requests 1
+```
+
+## Polymarket: trades
+
+This writes:
+- scrape run metadata
+- raw trades payloads
+- normalized user rows
+- normalized event rows
+- normalized market rows
+- normalized `transaction_fact` rows
+
+Command:
+
+```bash
+.venv/bin/python data_platform/jobs/polymarket_trades_ingest.py \
+  --limit 200 \
+  --max-requests 1
+```
+
+Inspect imported Polymarket transactions:
+
+```bash
+psql "$PSQL_URL" -c "
+SELECT transaction_id, user_id, source_transaction_id, side, outcome_label, price, shares, notional_value, transaction_time
+FROM analytics.transaction_fact
+WHERE platform_id = (SELECT platform_id FROM analytics.platform WHERE platform_name = 'polymarket')
+ORDER BY transaction_id DESC
+LIMIT 10;
+"
 ```
 
 ## Polymarket: positions
