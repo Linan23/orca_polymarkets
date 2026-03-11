@@ -1,35 +1,37 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from '/vite.svg'
-import './App.css'
+import "./App.css";
+import { BrowserRouter, Routes, Route } from "react-router-dom";
+import MarketLeaderboard from "./homepage/market_leaderboard";
+import UserLeaderboard from "./homepage/user_leaderboard";
+import MarketProfile from "./pages/MarketProfile";
+import UserProfile from "./pages/UserProfile";
 
-function App() {
-  const [count, setCount] = useState(0)
-
+function DashboardHome() {
   return (
-    <>
-      <div>
-        <a href="https://vite.dev" target="_blank">
-          <img src={viteLogo} className="logo" alt="Vite logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <h1>Vite + React</h1>
-      <div className="card">
-        <button onClick={() => setCount((count) => count + 1)}>
-          count is {count}
-        </button>
-        <p>
-          Edit <code>src/App.tsx</code> and save to test HMR
+    <div className="page">
+      <header className="hero">
+        <p className="eyebrow">Orca Polymarkets</p>
+        <h1>Orca Dashboard</h1>
+        <p className="hero-text">
+          Front-page view of market and user leaderboards.
         </p>
-      </div>
-      <p className="read-the-docs">
-        Click on the Vite and React logos to learn more
-      </p>
-    </>
-  )
+      </header>
+
+      <main className="leaderboard-grid">
+        <MarketLeaderboard />
+        <UserLeaderboard />
+      </main>
+    </div>
+  );
 }
 
-export default App
+export default function App() {
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<DashboardHome />} />
+        <Route path="/markets/:marketId" element={<MarketProfile />} />
+        <Route path="/users/:userId" element={<UserProfile />} />
+      </Routes>
+    </BrowserRouter>
+  );
+}

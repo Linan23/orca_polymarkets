@@ -5,3 +5,11 @@ nvm use 22
 nvm alias default 22
 node -v
 
+npm install react-router-dom
+
+//to start website 
+cd my-app
+npm run dev 
+
+
+
