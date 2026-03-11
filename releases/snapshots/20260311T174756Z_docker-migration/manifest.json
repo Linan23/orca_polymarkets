@@ -1,0 +1,16 @@
+{
+  "created_at_utc": "2026-03-11T17:47:56.761209+00:00",
+  "note": "migrate homebrew db into docker source of truth",
+  "snapshot_file": "shared_data_snapshot.sql",
+  "snapshot_sha256": "8e2ca12f5289669abf5d2beaefba361da420b216accd274a51d82d703167fe40",
+  "source_psql_url": "postgresql://postgres:***@localhost:5432/whaling",
+  "table_counts": {
+    "analytics.dashboard": 20,
+    "analytics.market_contract": 109,
+    "analytics.market_event": 81,
+    "analytics.orderbook_snapshot": 36,
+    "analytics.position_snapshot": 96,
+    "analytics.transaction_fact": 132,
+    "raw.api_payload": 109
+  }
+}

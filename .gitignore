@@ -33,7 +33,6 @@ kalshi-scraper/kalshi_data/
 polymarket-data/*.jsonl
 polymarket-data/tests/*.jsonl
 data_platform/jobs/sync_homebrew_to_docker.sh
-releases/
 
 # Local secrets
 kalshi-scraper/*.pem
