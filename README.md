@@ -14,14 +14,7 @@ Database setup, operation, reset, and maintenance instructions are documented in
 
 - [`data_platform/README.md`](data_platform/README.md)
 
-From the repository root, set the application and `psql` connection strings first:
-
-```bash
-export DATABASE_URL="postgresql+psycopg://postgres:postgres@localhost:5432/whaling"
-export PSQL_URL="postgresql://postgres:postgres@localhost:5432/whaling"
-```
-
-Docker option (recommended for collaborators):
+From the repository root, use the Docker database as the default local database:
 
 ```bash
 docker compose -f app/compose.yaml up -d db
@@ -29,7 +22,14 @@ export DATABASE_URL="postgresql+psycopg://app:password@localhost:5433/app_db"
 export PSQL_URL="postgresql://app:password@localhost:5433/app_db"
 ```
 
-One-command collaborator DB setup (cross-platform: macOS/Linux/Windows):
+Legacy Homebrew/PostgreSQL fallback remains available if you explicitly need it:
+
+```bash
+export DATABASE_URL="postgresql+psycopg://postgres:postgres@localhost:5432/whaling"
+export PSQL_URL="postgresql://postgres:postgres@localhost:5432/whaling"
+```
+
+One-command collaborator DB setup (macOS, Ubuntu/Linux, Windows):
 
 ```bash
 .venv/bin/python scripts/setup_collab_db.py --snapshot path/to/shared_data_snapshot.sql
@@ -58,6 +58,8 @@ Or open the database directly with:
 ```bash
 ./data_platform/open_psql.sh
 ```
+
+`open_psql.sh` now defaults to the Docker database and falls back to `docker exec` when local `psql` is not installed.
 
 Optional shell shortcut from anywhere inside this repo:
 

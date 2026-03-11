@@ -1,6 +1,6 @@
 # Snapshot Release Process
 
-This runbook defines how to publish a reproducible database snapshot for collaborators.
+This runbook defines how to publish a reproducible Docker database snapshot for collaborators.
 
 ## Purpose
 
@@ -43,6 +43,15 @@ Collaborators import in one command:
 .venv/bin/python scripts/setup_collab_db.py --snapshot path/to/shared_data_snapshot.sql
 ```
 
+macOS or Ubuntu/Linux full setup:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+.venv/bin/python scripts/setup_collab_db.py --snapshot path/to/shared_data_snapshot.sql
+```
+
 PowerShell:
 
 ```powershell
@@ -63,6 +72,12 @@ shasum -a 256 -c SHA256SUMS.txt
 ```bash
 .venv/bin/python data_platform/tests/smoke_validate.py --require-sample-data
 .venv/bin/python data_platform/tests/data_quality_check.py --require-data
+```
+
+3. Confirm Docker DB access:
+
+```bash
+docker exec -it orcaDB psql -U app -d app_db
 ```
 
 ## Notes

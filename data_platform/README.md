@@ -16,7 +16,7 @@ It covers:
 
 This project currently uses:
 - shared data-platform code under `data_platform/`
-- PostgreSQL 16 (Homebrew)
+- PostgreSQL 16 in Docker as the default local database
 - SQLAlchemy ORM models in [`models/`](models/)
 - Alembic migrations via [`../alembic.ini`](../alembic.ini)
 - optional compatibility bootstrap via [`../bootstrap_db.py`](../bootstrap_db.py)
@@ -28,7 +28,43 @@ Important:
 
 ## Current Local Defaults
 
-The current local development database is configured as:
+The default local development database is the Docker PostgreSQL service:
+
+- host: `localhost`
+- port: `5433`
+- database: `app_db`
+- username: `app`
+- password: `password`
+
+Start it:
+
+```bash
+docker compose -f app/compose.yaml up -d db
+```
+
+Application connection string:
+
+```bash
+export DATABASE_URL="postgresql+psycopg://app:password@localhost:5433/app_db"
+```
+
+`psql` connection string:
+
+```bash
+export PSQL_URL="postgresql://app:password@localhost:5433/app_db"
+```
+
+Quick open helper:
+
+```bash
+./data_platform/open_psql.sh
+```
+
+`open_psql.sh` defaults to Docker and falls back to `docker exec` if local `psql` is unavailable.
+
+## Legacy Homebrew Profile
+
+The Homebrew/PostgreSQL profile is still supported when needed:
 
 - host: `localhost`
 - port: `5432`
@@ -48,13 +84,6 @@ export DATABASE_URL="postgresql+psycopg://postgres:postgres@localhost:5432/whali
 export PSQL_URL="postgresql://postgres:postgres@localhost:5432/whaling"
 ```
 
-Quick open helper:
-
-```bash
-./data_platform/open_psql.sh
-```
-
-
 Important:
 - `DATABASE_URL` is for the Python application (`SQLAlchemy` + `psycopg`)
 - `PSQL_URL` is for the `psql` CLI
@@ -63,33 +92,7 @@ Important:
 This is acceptable for local development only.
 Change these credentials before using any shared or remote environment.
 
-## Docker Profile (Collaborator-Friendly)
-
-For reproducible collaborator setup, run PostgreSQL in Docker:
-
-```bash
-docker compose -f app/compose.yaml up -d db
-```
-
-Use these connection values:
-
-- host: `localhost`
-- port: `5433`
-- database: `app_db`
-- username: `app`
-- password: `password`
-
-Application connection string:
-
-```bash
-export DATABASE_URL="postgresql+psycopg://app:password@localhost:5433/app_db"
-```
-
-`psql` connection string:
-
-```bash
-export PSQL_URL="postgresql://app:password@localhost:5433/app_db"
-```
+## Collaborator Docker Setup
 
 If a maintainer shared a database snapshot, load it into Docker with:
 
@@ -103,13 +106,28 @@ Or use the collaborator setup script (recommended, cross-platform):
 .venv/bin/python scripts/setup_collab_db.py --snapshot path/to/shared_data_snapshot.sql
 ```
 
+macOS or Ubuntu/Linux:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+.venv/bin/python scripts/setup_collab_db.py --snapshot path/to/shared_data_snapshot.sql
+```
+
 Windows PowerShell:
 
 ```powershell
 .venv\Scripts\python.exe scripts\setup_collab_db.py --snapshot path\to\shared_data_snapshot.sql
 ```
 
-Windows `psql` access without installing host PostgreSQL CLI:
+Direct Docker `psql` access without installing host PostgreSQL CLI:
+
+```bash
+docker exec -it orcaDB psql -U app -d app_db
+```
+
+Windows PowerShell:
 
 ```powershell
 docker exec -it orcaDB psql -U app -d app_db

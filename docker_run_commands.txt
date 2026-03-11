@@ -5,17 +5,20 @@ docker compose -f app/compose.yaml up -d db
 export DATABASE_URL="postgresql+psycopg://app:password@localhost:5433/app_db"
 export PSQL_URL="postgresql://app:password@localhost:5433/app_db"
 
-# Connect with psql
+# Connect with psql helper (defaults to Docker DB)
 ./data_platform/open_psql.sh
 
 # Schema bootstrap/migrations in Docker DB
 .venv/bin/alembic -c alembic.ini upgrade head
 
-# If a maintainer shared a snapshot, load it into Docker DB:
+# Full collaborator setup in one command:
+.venv/bin/python scripts/setup_collab_db.py --snapshot path/to/shared_data_snapshot.sql
+
+# Manual snapshot import into Docker DB:
 ./data_platform/open_psql.sh < path/to/shared_data_snapshot.sql
 
-# Or do full collaborator setup in one command:
-.venv/bin/python scripts/setup_collab_db.py --snapshot path/to/shared_data_snapshot.sql
+# Publish a snapshot bundle from the Docker DB:
+.venv/bin/python scripts/release_snapshot.py --label collab --note "shared docker db"
 
 # Validate stack
 .venv/bin/python data_platform/tests/smoke_validate.py --require-sample-data
