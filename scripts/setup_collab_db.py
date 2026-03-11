@@ -64,6 +64,19 @@ def wait_for_db(psql_url: str, timeout_seconds: int = 60) -> None:
     raise RuntimeError(f"Database did not become ready in {timeout_seconds}s: {psql_url}")
 
 
+def reset_schema_state(psql_url: str) -> None:
+    """Drop managed schemas and Alembic state so migrations can rebuild cleanly."""
+    with psycopg.connect(psql_url, autocommit=True) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                DROP SCHEMA IF EXISTS analytics CASCADE;
+                DROP SCHEMA IF EXISTS raw CASCADE;
+                DROP TABLE IF EXISTS alembic_version;
+                """
+            )
+
+
 def reset_analytics_raw(psql_url: str) -> None:
     """Truncate analytics/raw tables and restart identities."""
     with psycopg.connect(psql_url, autocommit=True) as conn:
@@ -168,6 +181,10 @@ def main() -> int:
     env = os.environ.copy()
     env["DATABASE_URL"] = args.database_url
     env["PSQL_URL"] = args.psql_url
+
+    if snapshot_path is not None:
+        print("Resetting managed schemas before migrations...")
+        reset_schema_state(args.psql_url)
 
     print("Applying migrations...")
     run([python_bin, "-m", "alembic", "-c", "alembic.ini", "upgrade", "head"], env=env)
