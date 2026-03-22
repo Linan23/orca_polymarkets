@@ -26,52 +26,64 @@ const marketData: MarketRow[] = Array.from({ length: 10 }, (_, i) => ({
   whale_market_focus: `Focus tag ${i + 1}`,
 }));
 
+function getRankClass(rank: number) {
+  if (rank === 1) return "gold";
+  if (rank === 2) return "silver";
+  if (rank === 3) return "bronze";
+  return "default";
+}
+
 export default function MarketLeaderboard() {
   return (
-    <section className="card">
-      <div className="card-header">
-        <p className="card-label">Top 10</p>
+    <section className="leaderboard-card">
+      <div className="leaderboard-top">
+        <p className="leaderboard-kicker">Top 10</p>
         <h2>Market Leaderboard</h2>
       </div>
 
-      <div className="scroll-area">
-        <table className="leaderboard-table">
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>Market</th>
-              <th>Price</th>
-              <th>Volume</th>
-              <th>Odds</th>
-              <th>Whales</th>
-              <th>Trusted</th>
-              <th>Depth</th>
-            </tr>
-          </thead>
-          <tbody>
-            {marketData.map((market, index) => (
-              <tr key={market.market_section_id}>
-                <td>
-                  <span className="rank-badge">{index + 1}</span>
-                </td>
-                <td>
-                  <div className="primary-cell">
-                    <Link to={market.market_url} className="table-link">
-                      {market.market_slug}
-                    </Link>
-                    <span className="subtext">{market.whale_market_focus}</span>
+      <div className="leaderboard-list">
+        {marketData.map((market, index) => {
+          const rank = index + 1;
+
+          return (
+            <Link
+              key={market.market_section_id}
+              to={market.market_url}
+              className="leaderboard-row"
+            >
+              <div className={`leaderboard-rank ${getRankClass(rank)}`}>
+                {rank}
+              </div>
+
+              <div className="leaderboard-main">
+                <div className="leaderboard-main-top">
+                  <div>
+                    <div className="leaderboard-name">{market.market_slug}</div>
+                    <div className="leaderboard-subtext">
+                      {market.whale_market_focus}
+                    </div>
                   </div>
-                </td>
-                <td>${market.price}</td>
-                <td>{market.volume.toLocaleString()}</td>
-                <td>{market.odds}%</td>
-                <td>{market.whale_count}</td>
-                <td>{market.trusted_whale_count}</td>
-                <td>{market.Orderbook_depth.toLocaleString()}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+
+                  <div className="leaderboard-price">${market.price}</div>
+                </div>
+
+                <div className="leaderboard-meta">
+                  <span className="meta-pill">
+                    Vol {market.volume.toLocaleString()}
+                  </span>
+                  <span className="meta-pill">Odds {market.odds}%</span>
+                  <span className="meta-pill">Whales {market.whale_count}</span>
+                  <span className="meta-pill">
+                    Trusted {market.trusted_whale_count}
+                  </span>
+                  <span className="meta-pill">
+                    Depth {market.Orderbook_depth.toLocaleString()}
+                  </span>
+                </div>
+              </div>
+            </Link>
+          );
+        })}
       </div>
     </section>
   );

@@ -20,59 +20,70 @@ const userData: UserRow[] = Array.from({ length: 10 }, (_, i) => ({
   board_type: i % 2 === 0 ? "public" : "internal",
 }));
 
+function getRankClass(rank: number) {
+  if (rank === 1) return "gold";
+  if (rank === 2) return "silver";
+  if (rank === 3) return "bronze";
+  return "default";
+}
+
 export default function UserLeaderboard() {
   return (
-    <section className="card">
-      <div className="card-header">
-        <p className="card-label">Top 10</p>
+    <section className="leaderboard-card">
+      <div className="leaderboard-top">
+        <p className="leaderboard-kicker">Top 10</p>
         <h2>User Leaderboard</h2>
       </div>
 
-      <div className="scroll-area">
-        <table className="leaderboard-table">
-          <thead>
-            <tr>
-              <th>Rank</th>
-              <th>User</th>
-              <th>Market</th>
-              <th>Score</th>
-              <th>Timeframe</th>
-              <th>Board Type</th>
-            </tr>
-          </thead>
-          <tbody>
-            {userData.map((user) => (
-              <tr key={user.leaderboard_section_id}>
-                <td>
-                  <span className="rank-badge">{user.rank}</span>
-                </td>
-                <td>
-                  <Link to={`/users/${user.user_identity_ref}`} className="table-link">
+      <div className="leaderboard-list">
+        {userData.map((user) => (
+          <div key={user.leaderboard_section_id} className="leaderboard-row">
+            <div className={`leaderboard-rank ${getRankClass(user.rank)}`}>
+              {user.rank}
+            </div>
+
+            <div className="leaderboard-avatar">👤</div>
+
+            <div className="leaderboard-main">
+              <div className="leaderboard-main-top">
+                <div>
+                  <Link
+                    to={`/users/${user.user_identity_ref}`}
+                    className="leaderboard-name"
+                  >
                     {user.user_identity_ref}
                   </Link>
-                </td>
-                <td>
-                  <Link to={`/markets/${user.market_ref}`} className="table-link">
-                    {user.market_ref}
-                  </Link>
-                </td>
-                <td>{user.score_metric}</td>
-                <td>{user.timeframe}</td>
-                <td>
-                  <span
-                    className={
-                      user.board_type === "public"
-                        ? "status-pill public"
-                        : "status-pill internal"
-                    }
-                  >
-                    {user.board_type}
-                  </span>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+
+                  <div className="leaderboard-subtext">
+                    Market{" "}
+                    <Link
+                      to={`/markets/${user.market_ref}`}
+                      className="leaderboard-inline-link"
+                    >
+                      {user.market_ref}
+                    </Link>
+                  </div>
+                </div>
+
+                <div className="leaderboard-score">{user.score_metric}</div>
+              </div>
+
+              <div className="leaderboard-meta">
+                <span className="meta-pill">{user.timeframe}</span>
+
+                <span
+                  className={
+                    user.board_type === "public"
+                      ? "meta-pill public-pill"
+                      : "meta-pill internal-pill"
+                  }
+                >
+                  {user.board_type}
+                </span>
+              </div>
+            </div>
+          </div>
+        ))}
       </div>
     </section>
   );
