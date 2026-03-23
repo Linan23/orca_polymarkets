@@ -177,6 +177,7 @@ RESOLVED_TRANSACTION_SQL = text(
       mc.condition_ref,
       tf.outcome_label,
       tf.side,
+      tf.transaction_time,
       COALESCE(tf.shares, 0) AS shares,
       COALESCE(tf.notional_value, 0) AS notional_value
     FROM analytics.transaction_fact tf
@@ -284,6 +285,7 @@ def load_resolved_user_performance(
     session: Session,
     *,
     resolved_outcomes: dict[str, str] | None = None,
+    start_time: datetime | None = None,
 ) -> tuple[dict[int, ResolvedUserPerformance], dict[str, int]]:
     """Return conservative resolved-market performance metrics by user."""
     resolved_outcomes = resolved_outcomes or load_resolved_market_outcomes(session)
@@ -296,6 +298,9 @@ def load_resolved_user_performance(
     for row in rows:
         condition_ref = str(row["condition_ref"])
         if condition_ref not in resolved_outcomes:
+            continue
+        transaction_time = row["transaction_time"]
+        if start_time is not None and transaction_time is not None and transaction_time < start_time:
             continue
         outcome_label = _normalized_label(str(row["outcome_label"]))
         if not outcome_label:

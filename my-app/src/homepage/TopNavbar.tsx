@@ -38,6 +38,15 @@ export default function TopNavbar() {
             >
               Leaderboard
             </NavLink>
+
+            <NavLink
+              to="/analytics"
+              className={({ isActive }) =>
+                isActive ? "topbar-link active" : "topbar-link"
+              }
+            >
+              Analytics
+            </NavLink>
           </nav>
         </div>
 

@@ -60,6 +60,10 @@ a {
   padding: 8px 32px 28px;
 }
 
+.analytics-section {
+  padding: 0 32px 28px;
+}
+
 .summary-section-header {
   margin-bottom: 16px;
 }
@@ -197,6 +201,44 @@ a {
   gap: 10px 16px;
   color: #9cb3d9;
   font-size: 0.95rem;
+}
+
+.analytics-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.analytics-toolbar {
+  margin-top: 16px;
+}
+
+.analytics-timeframe-field {
+  max-width: 220px;
+}
+
+.analytics-export-row {
+  margin-top: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.analytics-export-btn {
+  border: 1px solid rgba(120, 142, 190, 0.16);
+  background: rgba(8, 18, 40, 0.88);
+  color: #f5f7fb;
+  padding: 10px 12px;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: 0.18s ease;
+}
+
+.analytics-export-btn:hover {
+  border-color: rgba(127, 178, 255, 0.45);
+  background: rgba(16, 31, 64, 0.95);
 }
 
 
@@ -523,6 +565,14 @@ a {
   .summary-card-feature,
   .summary-card-wide {
     grid-column: 1 / -1;
+  }
+
+  .analytics-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .analytics-timeframe-field {
+    max-width: none;
   }
 }
 

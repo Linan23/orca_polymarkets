@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import desc, func, select, text
@@ -26,6 +27,17 @@ from data_platform.services.whale_scoring import load_resolved_user_performance
 
 
 DEFAULT_LIMIT = 50
+VALID_TIMEFRAMES = {"7d": 7, "30d": 30, "90d": 90, "all": None}
+
+
+def timeframe_start(timeframe: str) -> datetime | None:
+    """Return the UTC lower-bound datetime for a supported timeframe label."""
+    if timeframe not in VALID_TIMEFRAMES:
+        raise ValueError(f"Unsupported timeframe '{timeframe}'. Use one of: {', '.join(sorted(VALID_TIMEFRAMES))}.")
+    days = VALID_TIMEFRAMES[timeframe]
+    if days is None:
+        return None
+    return datetime.now(timezone.utc) - timedelta(days=days)
 
 
 def _latest_whale_batch(session: Session) -> tuple[Any, Any] | None:
@@ -381,6 +393,303 @@ def home_summary(session: Session) -> dict[str, Any]:
         "most_whale_concentrated_market": most_whale_concentrated_market,
         "latest_ingestion": latest_scrape_run(session),
         "platform_coverage": platform_coverage,
+    }
+
+
+def top_profitable_resolved_users(
+    session: Session,
+    limit: int = DEFAULT_LIMIT,
+    *,
+    timeframe: str = "all",
+) -> dict[str, Any]:
+    """Return the top Polymarket users ranked by conservative resolved-market profitability."""
+    start_time = timeframe_start(timeframe)
+    resolved_performance_by_user, profitability_summary = load_resolved_user_performance(
+        session,
+        start_time=start_time,
+    )
+    latest_batch = _latest_whale_batch(session)
+    if latest_batch is None:
+        return {
+            "scope": "polymarket_users",
+            "timeframe": timeframe,
+            "scoring_version": None,
+            "resolved_markets_observed": profitability_summary["resolved_markets_observed"],
+            "count": 0,
+            "items": [],
+        }
+
+    score_rows = session.execute(
+        select(WhaleScoreSnapshot, UserAccount, Platform)
+        .join(UserAccount, UserAccount.user_id == WhaleScoreSnapshot.user_id)
+        .join(Platform, Platform.platform_id == WhaleScoreSnapshot.platform_id)
+        .where(
+            WhaleScoreSnapshot.snapshot_time == latest_batch.snapshot_time,
+            WhaleScoreSnapshot.scoring_version == latest_batch.scoring_version,
+        )
+    ).all()
+    score_by_user = {
+        account.user_id: {
+            "score": score,
+            "account": account,
+            "platform": platform,
+        }
+        for score, account, platform in score_rows
+    }
+
+    ranked_items: list[dict[str, Any]] = []
+    for user_id, resolved in resolved_performance_by_user.items():
+        if resolved.resolved_market_count <= 0 or resolved.realized_pnl <= 0:
+            continue
+        row = score_by_user.get(user_id)
+        if row is None:
+            continue
+        win_rate = (
+            resolved.winning_market_count / resolved.resolved_market_count
+            if resolved.resolved_market_count > 0
+            else None
+        )
+        ranked_items.append(
+            {
+                "user_id": int(row["account"].user_id),
+                "external_user_ref": row["account"].external_user_ref,
+                "platform_name": row["platform"].platform_name,
+                "resolved_market_count": int(resolved.resolved_market_count),
+                "winning_market_count": int(resolved.winning_market_count),
+                "realized_pnl": float(resolved.realized_pnl),
+                "realized_roi": float(resolved.realized_roi),
+                "win_rate": round(win_rate, 6) if win_rate is not None else None,
+                "trust_score": float(row["score"].trust_score or 0),
+                "profitability_score": float(row["score"].profitability_score or 0),
+                "is_whale": bool(row["score"].is_whale),
+                "is_trusted_whale": bool(row["score"].is_trusted_whale),
+            }
+        )
+
+    ranked_items.sort(
+        key=lambda item: (
+            item["realized_pnl"],
+            item["realized_roi"],
+            item["win_rate"] if item["win_rate"] is not None else -1.0,
+            item["trust_score"],
+        ),
+        reverse=True,
+    )
+    items = ranked_items[:limit]
+    return {
+        "scope": "polymarket_users",
+        "timeframe": timeframe,
+        "scoring_version": latest_batch.scoring_version,
+        "resolved_markets_observed": profitability_summary["resolved_markets_observed"],
+        "count": len(items),
+        "items": items,
+    }
+
+
+def market_whale_concentration(
+    session: Session,
+    limit: int = DEFAULT_LIMIT,
+    *,
+    timeframe: str = "all",
+) -> dict[str, Any] | None:
+    """Return the most whale-concentrated markets within a timeframe."""
+    latest_batch = _latest_whale_batch(session)
+    if latest_batch is None:
+        return None
+    start_time = timeframe_start(timeframe)
+    transaction_window_clause = ""
+    params: dict[str, Any] = {
+        "snapshot_time": latest_batch.snapshot_time,
+        "scoring_version": latest_batch.scoring_version,
+        "limit": limit,
+    }
+    if start_time is not None:
+        transaction_window_clause = "AND tf.transaction_time >= :start_time"
+        params["start_time"] = start_time
+
+    rows = session.execute(
+        text(
+            f"""
+            WITH latest_scores AS (
+              SELECT
+                w.user_id,
+                w.is_whale,
+                w.is_trusted_whale
+              FROM analytics.whale_score_snapshot w
+              WHERE w.snapshot_time = :snapshot_time
+                AND w.scoring_version = :scoring_version
+            )
+            SELECT
+              mc.market_contract_id,
+              mc.market_slug,
+              mc.market_url,
+              mc.question,
+              mc.last_trade_price,
+              mc.volume,
+              p.platform_name,
+              COUNT(DISTINCT CASE WHEN ls.is_whale THEN tf.user_id END) AS whale_count,
+              COUNT(DISTINCT CASE WHEN ls.is_trusted_whale THEN tf.user_id END) AS trusted_whale_count,
+              MAX(tf.transaction_time) AS last_seen_trade_time
+            FROM analytics.transaction_fact tf
+            JOIN latest_scores ls
+              ON ls.user_id = tf.user_id
+            JOIN analytics.market_contract mc
+              ON mc.market_contract_id = tf.market_contract_id
+            JOIN analytics.platform p
+              ON p.platform_id = mc.platform_id
+            WHERE (ls.is_whale = TRUE OR ls.is_trusted_whale = TRUE)
+              {transaction_window_clause}
+            GROUP BY
+              mc.market_contract_id,
+              mc.market_slug,
+              mc.market_url,
+              mc.question,
+              mc.last_trade_price,
+              mc.volume,
+              p.platform_name
+            ORDER BY
+              trusted_whale_count DESC,
+              whale_count DESC,
+              mc.volume DESC NULLS LAST,
+              mc.market_contract_id ASC
+            LIMIT :limit
+            """
+        )
+        ,
+        params,
+    ).mappings().all()
+    items = [
+        {
+            "market_id": int(row["market_contract_id"]),
+            "market_contract_id": int(row["market_contract_id"]),
+            "platform_name": row["platform_name"],
+            "market_slug": row["market_slug"],
+            "market_url": row["market_url"],
+            "question": row["question"],
+            "price": float(row["last_trade_price"]) if row["last_trade_price"] is not None else None,
+            "volume": float(row["volume"]) if row["volume"] is not None else None,
+            "whale_count": int(row["whale_count"] or 0),
+            "trusted_whale_count": int(row["trusted_whale_count"] or 0),
+            "orderbook_depth": None,
+            "read_time": row["last_seen_trade_time"].isoformat() if row["last_seen_trade_time"] else None,
+        }
+        for row in rows
+    ]
+    return {
+        "dashboard_id": None,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "scope": "cross_platform_markets",
+        "timeframe": timeframe,
+        "count": len(items),
+        "items": items,
+    }
+
+
+def whale_entry_behavior(
+    session: Session,
+    limit: int = DEFAULT_LIMIT,
+    *,
+    timeframe: str = "all",
+) -> dict[str, Any] | None:
+    """Return entry-price behavior for whale-labelled Polymarket users."""
+    latest_batch = _latest_whale_batch(session)
+    if latest_batch is None:
+        return None
+    start_time = timeframe_start(timeframe)
+    transaction_window_clause = ""
+    params: dict[str, Any] = {
+        "snapshot_time": latest_batch.snapshot_time,
+        "scoring_version": latest_batch.scoring_version,
+        "limit": limit,
+    }
+    if start_time is not None:
+        transaction_window_clause = "AND tf.transaction_time >= :start_time"
+        params["start_time"] = start_time
+
+    rows = session.execute(
+        text(
+            f"""
+            WITH latest_scores AS (
+              SELECT
+                w.user_id,
+                w.trust_score,
+                w.profitability_score,
+                w.is_whale,
+                w.is_trusted_whale
+              FROM analytics.whale_score_snapshot w
+              JOIN analytics.platform p
+                ON p.platform_id = w.platform_id
+              WHERE w.snapshot_time = :snapshot_time
+                AND w.scoring_version = :scoring_version
+                AND p.platform_name = 'polymarket'
+                AND (w.is_whale = TRUE OR w.is_trusted_whale = TRUE)
+            )
+            SELECT
+              ua.user_id,
+              ua.external_user_ref,
+              ls.trust_score,
+              ls.profitability_score,
+              ls.is_whale,
+              ls.is_trusted_whale,
+              COUNT(tf.transaction_id) AS entry_trade_count,
+              COUNT(DISTINCT tf.market_contract_id) AS distinct_markets,
+              COALESCE(SUM(tf.shares), 0) AS total_entry_shares,
+              COALESCE(SUM(tf.notional_value), 0) AS total_entry_notional,
+              COALESCE(SUM(tf.notional_value) / NULLIF(SUM(tf.shares), 0), 0) AS weighted_avg_entry_price,
+              COALESCE(AVG(tf.shares), 0) AS avg_entry_shares,
+              COALESCE(MIN(tf.price), 0) AS min_entry_price,
+              COALESCE(MAX(tf.price), 0) AS max_entry_price
+            FROM analytics.transaction_fact tf
+            JOIN latest_scores ls
+              ON ls.user_id = tf.user_id
+            JOIN analytics.user_account ua
+              ON ua.user_id = tf.user_id
+            WHERE tf.side = 'buy'
+              AND tf.price IS NOT NULL
+              AND tf.shares IS NOT NULL
+              {transaction_window_clause}
+            GROUP BY
+              ua.user_id,
+              ua.external_user_ref,
+              ls.trust_score,
+              ls.profitability_score,
+              ls.is_whale,
+              ls.is_trusted_whale
+            ORDER BY
+              entry_trade_count DESC,
+              distinct_markets DESC,
+              ls.trust_score DESC,
+              ua.user_id ASC
+            LIMIT :limit
+            """
+        ),
+        params,
+    ).mappings().all()
+    items = [
+        {
+            "user_id": int(row["user_id"]),
+            "external_user_ref": row["external_user_ref"],
+            "trust_score": float(row["trust_score"] or 0),
+            "profitability_score": float(row["profitability_score"] or 0),
+            "is_whale": bool(row["is_whale"]),
+            "is_trusted_whale": bool(row["is_trusted_whale"]),
+            "entry_trade_count": int(row["entry_trade_count"] or 0),
+            "distinct_markets": int(row["distinct_markets"] or 0),
+            "total_entry_shares": float(row["total_entry_shares"] or 0),
+            "total_entry_notional": float(row["total_entry_notional"] or 0),
+            "weighted_avg_entry_price": float(row["weighted_avg_entry_price"] or 0),
+            "avg_entry_shares": float(row["avg_entry_shares"] or 0),
+            "min_entry_price": float(row["min_entry_price"] or 0),
+            "max_entry_price": float(row["max_entry_price"] or 0),
+        }
+        for row in rows
+    ]
+    return {
+        "scope": "polymarket_whales",
+        "timeframe": timeframe,
+        "scoring_version": latest_batch.scoring_version,
+        "count": len(items),
+        "items": items,
     }
 
 

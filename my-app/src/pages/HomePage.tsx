@@ -1,6 +1,7 @@
 import HomepageSummaryCards from "../homepage/HomepageSummaryCards";
 import PolymarketNewsGallery from "../homepage/PolymarketNewsGallery";
 import PolymarketTimeline from "../homepage/PolymarketTimeline";
+import ResearchAnalyticsSection from "../homepage/ResearchAnalyticsSection";
 import TopNavbar from "../homepage/TopNavbar";
 
 export default function HomePage() {
@@ -17,6 +18,7 @@ export default function HomePage() {
       </section>
 
       <HomepageSummaryCards />
+      <ResearchAnalyticsSection />
       <PolymarketNewsGallery />
       <PolymarketTimeline />
     </div>

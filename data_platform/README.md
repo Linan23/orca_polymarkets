@@ -702,6 +702,8 @@ Useful endpoints:
 - `GET /health`
 - `GET /api/status/ingestion`
 - `GET /api/home/summary`
+- `GET /api/analytics/top-profitable-users`
+- `GET /api/analytics/market-whale-concentration`
 - `GET /api/markets`
 - `GET /api/users`
 - `GET /api/transactions`

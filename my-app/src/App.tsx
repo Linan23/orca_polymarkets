@@ -1,4 +1,5 @@
 import { Routes, Route } from "react-router-dom";
+import AnalyticsPage from "./pages/AnalyticsPage";
 import HomePage from "./pages/HomePage";
 import LoginPage from "./pages/LoginPage";
 import MarketProfile from "./pages/MarketProfile";
@@ -10,6 +11,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/" element={<HomePage />} />
+      <Route path="/analytics" element={<AnalyticsPage />} />
       <Route path="/following" element={<FollowingPage />} />
       <Route path="/leaderboard" element={<LeaderboardPage />} />
       <Route path="/login" element={<LoginPage />} />

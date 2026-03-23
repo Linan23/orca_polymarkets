@@ -134,6 +134,55 @@ export type HomeSummary = {
   platform_coverage: HomeSummaryPlatformCoverage[];
 };
 
+export type TopProfitableUserRow = {
+  user_id: number;
+  external_user_ref: string;
+  platform_name: string;
+  resolved_market_count: number;
+  winning_market_count: number;
+  realized_pnl: number;
+  realized_roi: number;
+  win_rate: number | null;
+  trust_score: number;
+  profitability_score: number;
+  is_whale: boolean;
+  is_trusted_whale: boolean;
+};
+
+export type MarketConcentrationRow = {
+  market_id: number;
+  market_contract_id: number;
+  platform_name: string;
+  market_slug: string;
+  market_url: string | null;
+  question: string;
+  price: number | null;
+  volume: number | null;
+  whale_count: number;
+  trusted_whale_count: number;
+  orderbook_depth: number | null;
+  read_time: string | null;
+};
+
+export type AnalyticsTimeframe = "7d" | "30d" | "90d" | "all";
+
+export type WhaleEntryBehaviorRow = {
+  user_id: number;
+  external_user_ref: string;
+  trust_score: number;
+  profitability_score: number;
+  is_whale: boolean;
+  is_trusted_whale: boolean;
+  entry_trade_count: number;
+  distinct_markets: number;
+  total_entry_shares: number;
+  total_entry_notional: number;
+  weighted_avg_entry_price: number;
+  avg_entry_shares: number;
+  min_entry_price: number;
+  max_entry_price: number;
+};
+
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
 
 async function fetchJson<T>(path: string): Promise<T> {
@@ -188,4 +237,34 @@ export async function fetchMarketProfile(marketSlug: string): Promise<MarketProf
 export async function fetchHomeSummary(): Promise<HomeSummary> {
   const payload = await fetchJson<{ summary: HomeSummary }>("/api/home/summary");
   return payload.summary;
+}
+
+export async function fetchTopProfitableUsers(
+  limit = 5,
+  timeframe: AnalyticsTimeframe = "all",
+): Promise<TopProfitableUserRow[]> {
+  const payload = await fetchJson<{ analytics: { items: TopProfitableUserRow[] } | null }>(
+    `/api/analytics/top-profitable-users?limit=${limit}&timeframe=${timeframe}`,
+  );
+  return payload.analytics?.items ?? [];
+}
+
+export async function fetchMarketWhaleConcentration(
+  limit = 5,
+  timeframe: AnalyticsTimeframe = "all",
+): Promise<MarketConcentrationRow[]> {
+  const payload = await fetchJson<{ analytics: { items: MarketConcentrationRow[] } | null }>(
+    `/api/analytics/market-whale-concentration?limit=${limit}&timeframe=${timeframe}`,
+  );
+  return payload.analytics?.items ?? [];
+}
+
+export async function fetchWhaleEntryBehavior(
+  limit = 5,
+  timeframe: AnalyticsTimeframe = "all",
+): Promise<WhaleEntryBehaviorRow[]> {
+  const payload = await fetchJson<{ analytics: { items: WhaleEntryBehaviorRow[] } | null }>(
+    `/api/analytics/whale-entry-behavior?limit=${limit}&timeframe=${timeframe}`,
+  );
+  return payload.analytics?.items ?? [];
 }

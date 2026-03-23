@@ -9,6 +9,7 @@ from data_platform.db.session import session_scope
 from data_platform.services.read_api import (
     database_health,
     home_summary,
+    market_whale_concentration,
     latest_dashboard_snapshot,
     latest_dashboard_markets,
     latest_leaderboard,
@@ -20,6 +21,8 @@ from data_platform.services.read_api import (
     list_positions,
     list_transactions,
     list_users,
+    top_profitable_resolved_users,
+    whale_entry_behavior,
 )
 
 app = FastAPI(
@@ -151,6 +154,51 @@ async def get_home_summary() -> dict[str, object]:
     try:
         with session_scope() as session:
             return {"summary": home_summary(session)}
+    except (OSError, SQLAlchemyError) as exc:
+        raise _service_error(exc) from exc
+
+
+@app.get("/api/analytics/top-profitable-users")
+async def get_top_profitable_users(
+    limit: int = Query(10, ge=1, le=100),
+    timeframe: str = Query("all"),
+) -> dict[str, object]:
+    """Return the top Polymarket users by conservative resolved-market profitability."""
+    try:
+        with session_scope() as session:
+            return {"analytics": top_profitable_resolved_users(session, limit=limit, timeframe=timeframe)}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except (OSError, SQLAlchemyError) as exc:
+        raise _service_error(exc) from exc
+
+
+@app.get("/api/analytics/market-whale-concentration")
+async def get_market_whale_concentration(
+    limit: int = Query(10, ge=1, le=100),
+    timeframe: str = Query("all"),
+) -> dict[str, object | None]:
+    """Return the latest cross-platform market concentration ranking."""
+    try:
+        with session_scope() as session:
+            return {"analytics": market_whale_concentration(session, limit=limit, timeframe=timeframe)}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except (OSError, SQLAlchemyError) as exc:
+        raise _service_error(exc) from exc
+
+
+@app.get("/api/analytics/whale-entry-behavior")
+async def get_whale_entry_behavior(
+    limit: int = Query(10, ge=1, le=100),
+    timeframe: str = Query("all"),
+) -> dict[str, object | None]:
+    """Return Polymarket whale entry-price behavior for the selected timeframe."""
+    try:
+        with session_scope() as session:
+            return {"analytics": whale_entry_behavior(session, limit=limit, timeframe=timeframe)}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except (OSError, SQLAlchemyError) as exc:
         raise _service_error(exc) from exc
 
