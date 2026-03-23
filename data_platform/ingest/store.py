@@ -268,8 +268,31 @@ def upsert_market_event(
         session.flush()
         return row
 
-    for field, value in values.items():
-        setattr(row, field, value)
+    merged_is_closed = row.is_closed or is_closed
+    merged_is_archived = row.is_archived or is_archived
+    merged_is_active = False if merged_is_closed or merged_is_archived else (row.is_active or is_active)
+    row.title = title or row.title
+    row.slug = slug or row.slug
+    row.description = description or row.description
+    row.category = category or row.category
+    row.resolution_source = resolution_source or row.resolution_source
+    row.start_time = start_time or row.start_time
+    row.end_time = end_time or row.end_time
+    row.closed_time = closed_time or row.closed_time
+    row.is_active = merged_is_active
+    row.is_closed = merged_is_closed
+    row.is_archived = merged_is_archived
+    row.status = _status_from_flags(
+        is_active=merged_is_active,
+        is_closed=merged_is_closed,
+        is_archived=merged_is_archived,
+    )
+    row.liquidity = liquidity if liquidity is not None else row.liquidity
+    row.volume = volume if volume is not None else row.volume
+    row.open_interest = open_interest if open_interest is not None else row.open_interest
+    row.raw_payload_id = raw_payload_id or row.raw_payload_id
+    row.last_seen_at = now
+    row.updated_at = now
     session.flush()
     return row
 
@@ -348,8 +371,31 @@ def upsert_market_contract(
         session.flush()
         return row
 
-    for field, value in values.items():
-        setattr(row, field, value)
+    merged_is_closed = row.is_closed or is_closed
+    merged_is_active = False if merged_is_closed else (row.is_active or is_active)
+    row.event_id = event.event_id or row.event_id
+    row.market_url = market_url or row.market_url
+    row.market_slug = market_slug or row.market_slug
+    row.question = question or row.question
+    row.condition_ref = condition_ref or row.condition_ref
+    row.outcome_a_label = outcome_a_label or row.outcome_a_label
+    row.outcome_b_label = outcome_b_label or row.outcome_b_label
+    row.tick_size = tick_size if tick_size is not None else row.tick_size
+    row.min_order_size = min_order_size if min_order_size is not None else row.min_order_size
+    row.is_active = merged_is_active
+    row.is_closed = merged_is_closed
+    row.accepting_orders = accepting_orders if accepting_orders is not None else row.accepting_orders
+    row.liquidity = liquidity if liquidity is not None else row.liquidity
+    row.volume = volume if volume is not None else row.volume
+    row.last_trade_price = last_trade_price if last_trade_price is not None else row.last_trade_price
+    row.best_bid = best_bid if best_bid is not None else row.best_bid
+    row.best_ask = best_ask if best_ask is not None else row.best_ask
+    row.spread = spread if spread is not None else row.spread
+    row.start_time = start_time or row.start_time
+    row.end_time = end_time or row.end_time
+    row.raw_payload_id = raw_payload_id or row.raw_payload_id
+    row.last_seen_at = now
+    row.updated_at = now
     session.flush()
     return row
 

@@ -31,7 +31,8 @@ What it does:
 6. runs Kalshi trades
 7. runs Kalshi order-book snapshots for top tracked markets
 8. runs the optional Dune query ingest
-9. builds the derived dashboard snapshot
+9. builds the preliminary whale score snapshot
+10. builds the derived dashboard snapshot
 
 The runner writes JSONL archives to `data_platform/runtime/` so normal pipeline runs do not modify tracked sample files in the repository.
 
@@ -74,10 +75,35 @@ Run only the Polymarket trades step:
 .venv/bin/python data_platform/jobs/polymarket_trades_ingest.py --limit 200 --max-requests 1
 ```
 
+Backfill trades for deterministically resolved closed Polymarket markets:
+
+```bash
+.venv/bin/python data_platform/jobs/polymarket_resolved_trades_backfill.py \
+  --market-limit 5 \
+  --trade-limit 200 \
+  --max-pages-per-market 5
+```
+
+Backfill only deterministically resolved conditions with no ingested trades yet:
+
+```bash
+.venv/bin/python data_platform/jobs/polymarket_resolved_trades_backfill.py \
+  --only-uncovered \
+  --market-limit 10 \
+  --trade-limit 100 \
+  --max-pages-per-market 3
+```
+
 Run only the Kalshi order-book step:
 
 ```bash
 .venv/bin/python data_platform/jobs/kalshi_orderbook_snapshot.py --environment prod --market-limit 5 --max-requests 1
+```
+
+Build only the whale score snapshot:
+
+```bash
+.venv/bin/python data_platform/jobs/build_whale_scores.py
 ```
 
 Load a shared snapshot into Docker PostgreSQL:

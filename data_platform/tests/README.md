@@ -26,6 +26,18 @@ Week 4/5 readiness gate (structural mode, CI-safe):
 .venv/bin/python data_platform/tests/week45_readiness_check.py
 ```
 
+Week 6 whale analytics validation:
+
+```bash
+.venv/bin/python data_platform/tests/week6_whale_check.py --build --require-data
+```
+
+That Week 6 validator now checks:
+- positive whale and trusted-whale output on the sample database
+- trusted leaderboard row presence and shape
+- homepage summary API contract and count consistency
+- homepage trusted-whale and market summary object shape
+
 The smoke validator is intentionally pragmatic:
 - it uses the live configured database
 - it checks the actual FastAPI app in-process

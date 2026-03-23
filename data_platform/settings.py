@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 
 
-DEFAULT_DATABASE_URL = "postgresql+psycopg://postgres:postgres@localhost:5432/whaling"
+DEFAULT_DATABASE_URL = "postgresql+psycopg://app:password@localhost:5433/app_db"
 
 
 @dataclass(frozen=True)

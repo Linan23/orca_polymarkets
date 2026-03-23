@@ -9,7 +9,8 @@ This runner orchestrates the existing entrypoints in a stable order:
 6. Run Kalshi trades ingestion.
 7. Run Kalshi order-book snapshots.
 8. Run the optional Dune query ingest.
-9. Build the derived dashboard snapshot.
+9. Build preliminary whale scores.
+10. Build the derived dashboard snapshot.
 """
 
 from __future__ import annotations
@@ -88,6 +89,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--skip-positions", action="store_true", help="Skip the Polymarket positions step.")
     parser.add_argument("--skip-kalshi", action="store_true", help="Skip the Kalshi trades step.")
     parser.add_argument("--skip-kalshi-orderbook", action="store_true", help="Skip the Kalshi order-book snapshot step.")
+    parser.add_argument("--skip-whale-scores", action="store_true", help="Skip the preliminary whale scoring step.")
     parser.add_argument("--skip-dashboard", action="store_true", help="Skip the derived dashboard snapshot step.")
     parser.add_argument(
         "--continue-on-error",
@@ -304,6 +306,9 @@ def pipeline_commands(args: argparse.Namespace) -> list[tuple[str, list[str]]]:
                 ],
             )
         )
+
+    if not args.skip_whale_scores:
+        commands.append(("build_whale_scores", [py, "build_whale_scores.py"]))
 
     if not args.skip_dashboard:
         commands.append(("build_dashboard_snapshot", [py, "build_dashboard_snapshot.py"]))

@@ -97,6 +97,55 @@ Build a derived dashboard snapshot from the normalized tables:
 .venv/bin/python build_dashboard_snapshot.py
 ```
 
+Build the preliminary whale score snapshot first when you want the dashboard to include raw whale rankings and market whale counts:
+
+```bash
+.venv/bin/python build_whale_scores.py
+```
+
+Current scoring behavior:
+- raw whale ranking uses trade size, breadth, activity, and current exposure
+- profitability is added only when a Polymarket market is closed and its final outcome can be inferred conservatively from normalized market data
+- trusted whales remain rare until the database contains resolved trade history, not just open-market trades
+
+Week 6 whale methodology (`week6_v3`):
+- scoring is per platform, not cross-platform
+- trust score formula:
+  - `0.50 * raw_volume_score`
+  - `0.20 * market_breadth_score`
+  - `0.20 * consistency_score`
+  - `0.10 * current_exposure_score`
+  - `+ 0.15 * profitability_score`
+  - `- 0.25` insider penalty when `is_likely_insider = true`
+- whale eligibility:
+  - minimum `10` trades
+  - minimum `3` active trade days
+  - minimum traded notional `5000`
+  - excluded if insider-flagged
+  - then keep the top `30%` of eligible users by trust score
+- trusted whale eligibility:
+  - already whale-eligible
+  - minimum `15` trades
+  - minimum `5` active trade days
+  - minimum `2` resolved markets
+  - minimum `60%` resolved-market win rate
+  - positive profitability score
+  - then keep the top `5%` of eligible trusted users by trust score
+- resolved Polymarket markets are inferred conservatively:
+  - closed binary market
+  - one side at `>= 0.98` and the opposite side at `<= 0.02`, using normalized market data and captured trade signals
+- profitability is conservative:
+  - only buy/sell rows are used
+  - markets are excluded when sells exceed captured buys for an outcome, which protects against overstating PnL from partial history
+- current limitation:
+  - user-level whale analytics are meaningful for Polymarket
+  - Kalshi ingestion still lacks strong trader identity coverage, so Kalshi whale scoring should be treated as incomplete
+
+Kalshi identity note:
+- the current public Kalshi `trades` payload does not expose trader ids, so public-trade whale attribution is not reliable there
+- the ingest layer now captures `user_id` when it is present in Kalshi payloads
+- if you want a stable authenticated Kalshi account id in `analytics.user_account`, scrape authenticated order endpoints such as `/trade-api/v2/portfolio/orders` with `--endpoint custom --write-to-db`
+
 Run one automated ingest cycle:
 
 ```bash
@@ -107,6 +156,25 @@ Run one automated ingest cycle:
 ```
 
 When `--enable-dune` is used, the runner reads `DUNE_API_KEY` and `DUNE_QUERY_ID` from the repo-level `.env` file.
+
+Backfill resolved Polymarket trades for deterministically resolved closed markets:
+
+```bash
+.venv/bin/python data_platform/jobs/polymarket_resolved_trades_backfill.py \
+  --market-limit 5 \
+  --trade-limit 200 \
+  --max-pages-per-market 5
+```
+
+Backfill only deterministically resolved conditions that still have no ingested trades:
+
+```bash
+.venv/bin/python data_platform/jobs/polymarket_resolved_trades_backfill.py \
+  --only-uncovered \
+  --market-limit 10 \
+  --trade-limit 100 \
+  --max-pages-per-market 3
+```
 
 Inspect the database schema quickly:
 
@@ -160,6 +228,12 @@ Include Dune in strict readiness when needed:
 
 ```bash
 .venv/bin/python data_platform/tests/week45_readiness_check.py --require-data --require-dune
+```
+
+Run the Week 6 whale analytics validation:
+
+```bash
+.venv/bin/python data_platform/tests/week6_whale_check.py --build --require-data
 ```
 
 Run repository secret scan:

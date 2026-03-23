@@ -8,9 +8,14 @@ from sqlalchemy.exc import SQLAlchemyError
 from data_platform.db.session import session_scope
 from data_platform.services.read_api import (
     database_health,
+    home_summary,
     latest_dashboard_snapshot,
+    latest_dashboard_markets,
     latest_leaderboard,
+    latest_market_profile,
     latest_scrape_run,
+    latest_user_whale_profile,
+    latest_whale_scores,
     list_markets,
     list_positions,
     list_transactions,
@@ -110,11 +115,92 @@ async def get_latest_leaderboard() -> dict[str, object | None]:
         raise _service_error(exc) from exc
 
 
+@app.get("/api/leaderboards/trusted/latest")
+async def get_latest_trusted_leaderboard() -> dict[str, object | None]:
+    """Return the latest trusted-whale leaderboard rows, if present."""
+    try:
+        with session_scope() as session:
+            return {"leaderboard": latest_leaderboard(session, board_type="internal_trusted")}
+    except (OSError, SQLAlchemyError) as exc:
+        raise _service_error(exc) from exc
+
+
 @app.get("/api/dashboards/latest")
 async def get_latest_dashboard() -> dict[str, object | None]:
     """Return the latest derived dashboard snapshot summary, if present."""
     try:
         with session_scope() as session:
             return {"dashboard": latest_dashboard_snapshot(session)}
+    except (OSError, SQLAlchemyError) as exc:
+        raise _service_error(exc) from exc
+
+
+@app.get("/api/dashboards/latest/markets")
+async def get_latest_dashboard_markets(limit: int = Query(50, ge=1, le=250)) -> dict[str, object | None]:
+    """Return the latest dashboard-market rows for frontend leaderboard use."""
+    try:
+        with session_scope() as session:
+            return {"markets": latest_dashboard_markets(session, limit=limit)}
+    except (OSError, SQLAlchemyError) as exc:
+        raise _service_error(exc) from exc
+
+
+@app.get("/api/home/summary")
+async def get_home_summary() -> dict[str, object]:
+    """Return homepage summary cards backed by the latest analytics state."""
+    try:
+        with session_scope() as session:
+            return {"summary": home_summary(session)}
+    except (OSError, SQLAlchemyError) as exc:
+        raise _service_error(exc) from exc
+
+
+@app.get("/api/whales/latest")
+async def get_latest_whales(
+    limit: int = Query(50, ge=1, le=250),
+    whales_only: bool = Query(False),
+    trusted_only: bool = Query(False),
+) -> dict[str, object | None]:
+    """Return the latest whale-score rows with optional whale/trusted filters."""
+    try:
+        with session_scope() as session:
+            return {
+                "whales": latest_whale_scores(
+                    session,
+                    limit=limit,
+                    whales_only=whales_only,
+                    trusted_only=trusted_only,
+                )
+            }
+    except (OSError, SQLAlchemyError) as exc:
+        raise _service_error(exc) from exc
+
+
+@app.get("/api/users/{user_id}/whale-profile")
+async def get_user_whale_profile(user_id: int) -> dict[str, object]:
+    """Return whale-specific resolved-performance details for one user."""
+    try:
+        with session_scope() as session:
+            profile = latest_user_whale_profile(session, user_id=user_id)
+            if profile is None:
+                raise HTTPException(status_code=404, detail=f"User {user_id} not found")
+            return {"profile": profile}
+    except HTTPException:
+        raise
+    except (OSError, SQLAlchemyError) as exc:
+        raise _service_error(exc) from exc
+
+
+@app.get("/api/markets/{market_slug}/profile")
+async def get_market_profile(market_slug: str) -> dict[str, object]:
+    """Return latest dashboard-backed market profile details for one market slug."""
+    try:
+        with session_scope() as session:
+            profile = latest_market_profile(session, market_slug=market_slug)
+            if profile is None:
+                raise HTTPException(status_code=404, detail=f"Market {market_slug} not found")
+            return {"profile": profile}
+    except HTTPException:
+        raise
     except (OSError, SQLAlchemyError) as exc:
         raise _service_error(exc) from exc

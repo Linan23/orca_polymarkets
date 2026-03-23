@@ -20,6 +20,37 @@ from data_platform.ingest.store import (
 )
 
 
+def _kalshi_user_ref(payload: dict[str, Any]) -> str:
+    """Return a stable Kalshi user reference when a payload exposes one."""
+    user_id = payload.get("user_id")
+    if user_id in (None, ""):
+        return UNKNOWN_USER_EXTERNAL_REF
+    return str(user_id).strip() or UNKNOWN_USER_EXTERNAL_REF
+
+
+def _upsert_kalshi_users_from_orders(session: Session, payload: dict[str, Any]) -> int:
+    """Upsert authenticated Kalshi users from order payloads when user ids are present."""
+    orders: list[dict[str, Any]] = []
+    if isinstance(payload.get("orders"), list):
+        orders = [item for item in payload["orders"] if isinstance(item, dict)]
+    elif isinstance(payload.get("order"), dict):
+        orders = [payload["order"]]
+
+    users_written = 0
+    for order in orders:
+        user_ref = _kalshi_user_ref(order)
+        if user_ref == UNKNOWN_USER_EXTERNAL_REF:
+            continue
+        upsert_user_account(
+            session,
+            platform_name="kalshi",
+            external_user_ref=user_ref,
+            display_label=f"Kalshi user {user_ref}",
+        )
+        users_written += 1
+    return users_written
+
+
 def ingest_scrape_record(
     session: Session,
     *,
@@ -83,11 +114,16 @@ def ingest_scrape_record(
                 best_ask=trade.get("no_price_dollars"),
                 raw_payload_id=payload_row.payload_id,
             )
+            user_ref = _kalshi_user_ref(trade)
             user_row = upsert_user_account(
                 session,
                 platform_name="kalshi",
-                external_user_ref=UNKNOWN_USER_EXTERNAL_REF,
-                display_label="Unknown Kalshi participant",
+                external_user_ref=user_ref,
+                display_label=(
+                    "Unknown Kalshi participant"
+                    if user_ref == UNKNOWN_USER_EXTERNAL_REF
+                    else f"Kalshi user {user_ref}"
+                ),
             )
             price = trade.get("price")
             shares = trade.get("count_fp") or trade.get("count")
@@ -111,6 +147,10 @@ def ingest_scrape_record(
                 raw_payload_id=payload_row.payload_id,
             )
             records_written += 1
+    elif endpoint_name == "custom":
+        path = str(record.get("path") or "")
+        if "/portfolio/orders" in path or "/historical/orders" in path:
+            records_written += _upsert_kalshi_users_from_orders(session, data)
 
     finalize_scrape_run(
         session,

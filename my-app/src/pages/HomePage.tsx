@@ -1,3 +1,4 @@
+import HomepageSummaryCards from "../homepage/HomepageSummaryCards";
 import PolymarketNewsGallery from "../homepage/PolymarketNewsGallery";
 import PolymarketTimeline from "../homepage/PolymarketTimeline";
 import TopNavbar from "../homepage/TopNavbar";
@@ -15,6 +16,7 @@ export default function HomePage() {
         </p>
       </section>
 
+      <HomepageSummaryCards />
       <PolymarketNewsGallery />
       <PolymarketTimeline />
     </div>

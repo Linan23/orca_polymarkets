@@ -35,8 +35,16 @@ LIMIT 15;
 
 \echo ''
 \echo '=== Current Whale Leaderboard ==='
-WITH latest_scores AS (
-  SELECT DISTINCT ON (w.user_id)
+WITH latest_batch AS (
+  SELECT
+    w.snapshot_time,
+    w.scoring_version
+  FROM analytics.whale_score_snapshot w
+  ORDER BY w.snapshot_time DESC, w.whale_score_snapshot_id DESC
+  LIMIT 1
+),
+latest_scores AS (
+  SELECT
     w.user_id,
     w.snapshot_time,
     w.raw_volume_score,
@@ -48,7 +56,9 @@ WITH latest_scores AS (
     w.sample_trade_count,
     w.scoring_version
   FROM analytics.whale_score_snapshot w
-  ORDER BY w.user_id, w.snapshot_time DESC, w.whale_score_snapshot_id DESC
+  JOIN latest_batch lb
+    ON lb.snapshot_time = w.snapshot_time
+   AND lb.scoring_version = w.scoring_version
 )
 SELECT
   ls.user_id,
@@ -72,8 +82,16 @@ LIMIT 20;
 
 \echo ''
 \echo '=== Trusted Whale Leaderboard ==='
-WITH latest_scores AS (
-  SELECT DISTINCT ON (w.user_id)
+WITH latest_batch AS (
+  SELECT
+    w.snapshot_time,
+    w.scoring_version
+  FROM analytics.whale_score_snapshot w
+  ORDER BY w.snapshot_time DESC, w.whale_score_snapshot_id DESC
+  LIMIT 1
+),
+latest_scores AS (
+  SELECT
     w.user_id,
     w.trust_score,
     w.raw_volume_score,
@@ -82,7 +100,9 @@ WITH latest_scores AS (
     w.is_trusted_whale,
     w.snapshot_time
   FROM analytics.whale_score_snapshot w
-  ORDER BY w.user_id, w.snapshot_time DESC, w.whale_score_snapshot_id DESC
+  JOIN latest_batch lb
+    ON lb.snapshot_time = w.snapshot_time
+   AND lb.scoring_version = w.scoring_version
 )
 SELECT
   ls.user_id,
@@ -137,13 +157,23 @@ WITH latest_positions AS (
   FROM analytics.position_snapshot ps
   ORDER BY ps.user_id, ps.market_contract_id, ps.snapshot_time DESC, ps.position_snapshot_id DESC
 ),
+latest_batch AS (
+  SELECT
+    w.snapshot_time,
+    w.scoring_version
+  FROM analytics.whale_score_snapshot w
+  ORDER BY w.snapshot_time DESC, w.whale_score_snapshot_id DESC
+  LIMIT 1
+),
 latest_scores AS (
-  SELECT DISTINCT ON (w.user_id)
+  SELECT
     w.user_id,
     w.is_whale,
     w.is_trusted_whale
   FROM analytics.whale_score_snapshot w
-  ORDER BY w.user_id, w.snapshot_time DESC, w.whale_score_snapshot_id DESC
+  JOIN latest_batch lb
+    ON lb.snapshot_time = w.snapshot_time
+   AND lb.scoring_version = w.scoring_version
 )
 SELECT
   mc.market_contract_id,

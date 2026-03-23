@@ -21,6 +21,7 @@ from data_platform.api.server import app
 from data_platform.db.bootstrap import create_database_objects
 from data_platform.db.session import session_scope
 from data_platform.services.dashboard_builder import build_dashboard_snapshot
+from data_platform.services.whale_scoring import build_whale_score_snapshot
 
 
 BASELINE_REVISION = "20260304_1200"
@@ -54,12 +55,16 @@ API_ENDPOINTS = (
     "/",
     "/health",
     "/api/status/ingestion",
+    "/api/home/summary",
     "/api/markets?limit=1",
     "/api/users?limit=1",
     "/api/transactions?limit=1",
     "/api/positions?limit=1",
+    "/api/whales/latest?limit=1",
+    "/api/leaderboards/trusted/latest",
     "/api/leaderboards/latest",
     "/api/dashboards/latest",
+    "/api/dashboards/latest/markets?limit=1",
 )
 
 
@@ -148,6 +153,56 @@ def _run_api_checks() -> list[CheckResult]:
                     },
                 )
             )
+
+        whale_response = client.get("/api/whales/latest?limit=1")
+        if whale_response.status_code == 200:
+            whale_payload = whale_response.json()
+            whale_items = (((whale_payload or {}).get("whales") or {}).get("items") or [])
+            if whale_items:
+                user_id = whale_items[0].get("user_id")
+                if user_id is not None:
+                    response = client.get(f"/api/users/{user_id}/whale-profile")
+                    ok = response.status_code == 200
+                    try:
+                        payload = response.json()
+                    except ValueError:
+                        payload = {"raw_body": response.text[:200]}
+                    results.append(
+                        CheckResult(
+                            "api:/api/users/{user_id}/whale-profile",
+                            ok,
+                            {
+                                "user_id": user_id,
+                                "status_code": response.status_code,
+                                "payload_keys": sorted(payload.keys()) if isinstance(payload, dict) else [],
+                            },
+                        )
+                    )
+
+        market_response = client.get("/api/dashboards/latest/markets?limit=1")
+        if market_response.status_code == 200:
+            market_payload = market_response.json()
+            market_items = (((market_payload or {}).get("markets") or {}).get("items") or [])
+            if market_items:
+                market_slug = market_items[0].get("market_slug")
+                if market_slug:
+                    response = client.get(f"/api/markets/{market_slug}/profile")
+                    ok = response.status_code == 200
+                    try:
+                        payload = response.json()
+                    except ValueError:
+                        payload = {"raw_body": response.text[:200]}
+                    results.append(
+                        CheckResult(
+                            "api:/api/markets/{market_slug}/profile",
+                            ok,
+                            {
+                                "market_slug": market_slug,
+                                "status_code": response.status_code,
+                                "payload_keys": sorted(payload.keys()) if isinstance(payload, dict) else [],
+                            },
+                        )
+                    )
     return results
 
 
@@ -161,12 +216,14 @@ def _run_optional_checks(run_bootstrap: bool, build_dashboard: bool) -> list[Che
 
     if build_dashboard:
         with session_scope() as session:
+            whale_scores = build_whale_score_snapshot(session)
             dashboard = build_dashboard_snapshot(session)
             results.append(
                 CheckResult(
                     "dashboard_build",
                     True,
                     {
+                        "whale_scores": whale_scores,
                         "result": dashboard,
                     },
                 )

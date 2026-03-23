@@ -592,6 +592,81 @@ LIMIT 10;
 
 The normalized layer feeds the dashboard-facing tables.
 
+To build the preliminary whale score snapshot:
+
+```bash
+.venv/bin/python build_whale_scores.py
+```
+
+Current profitability and resolution logic:
+
+- closed Polymarket binary markets are treated as resolved only when `last_trade_price` is effectively `1` or `0`
+- the winning outcome is inferred from the stored normalized outcome labels
+- captured trade signals are also used conservatively, so a condition can count as resolved when one outcome trades at `>= 0.98` and the opposite outcome trades at `<= 0.02`
+- realized profitability is computed only for users whose captured trade history in that resolved market is internally consistent enough to avoid overstating PnL from partial history
+- if no resolved trade overlap exists yet, `profitability_score` stays `0`
+
+Week 6 scoring methodology (`week6_v3`):
+
+- scoring is computed per platform from normalized `transaction_fact` and `position_snapshot`
+- trust score inputs:
+  - `raw_volume_score`: percentile rank of `SUM(notional_value)`
+  - `market_breadth_score`: percentile rank of distinct markets traded
+  - `consistency_score`: percentile rank of active UTC trade days
+  - `current_exposure_score`: percentile rank of latest marked position exposure
+  - `profitability_score`: weighted percentile blend of realized PnL, realized ROI, and resolved-market win rate
+- trust score formula:
+  - `0.50 * raw_volume_score`
+  - `0.20 * market_breadth_score`
+  - `0.20 * consistency_score`
+  - `0.10 * current_exposure_score`
+  - `+ 0.15 * profitability_score`
+  - `- 0.25` insider penalty when `is_likely_insider = true`
+- whale classification:
+  - minimum `10` trades
+  - minimum `3` active trade days
+  - minimum notional `5000`
+  - insider-flagged users are excluded
+  - final `is_whale` label = top `30%` of eligible users by trust score
+- trusted whale classification:
+  - already whale-eligible
+  - minimum `15` trades
+  - minimum `5` active trade days
+  - minimum `2` resolved markets
+  - minimum win rate `0.60`
+  - positive profitability score
+  - final `is_trusted_whale` label = top `5%` of eligible trusted users by trust score
+- conservative profitability rules:
+  - only Polymarket resolved markets are used right now
+  - only `buy`/`sell` trades are considered for realized profitability
+  - a market is excluded for that user when captured sells exceed captured buys for an outcome, because that indicates incomplete local history
+- current limitation:
+  - Polymarket whale analytics are materially useful now
+  - Kalshi user-level whale analytics are still incomplete because current Kalshi ingest does not yet provide strong trader identity coverage
+- practical Kalshi note:
+  - the current public Kalshi `trades` payload does not expose trader ids
+  - the ingest layer now captures `user_id` automatically when it appears in Kalshi payloads or authenticated order responses
+  - to seed a stable authenticated Kalshi account id into `analytics.user_account`, use a custom authenticated endpoint such as `/trade-api/v2/portfolio/orders`
+
+To backfill deterministically resolved closed-market trades into `transaction_fact`:
+
+```bash
+.venv/bin/python data_platform/jobs/polymarket_resolved_trades_backfill.py \
+  --market-limit 5 \
+  --trade-limit 200 \
+  --max-pages-per-market 5
+```
+
+To backfill only deterministically resolved conditions that still have no ingested trades:
+
+```bash
+.venv/bin/python data_platform/jobs/polymarket_resolved_trades_backfill.py \
+  --only-uncovered \
+  --market-limit 10 \
+  --trade-limit 100 \
+  --max-pages-per-market 3
+```
+
 To build one snapshot:
 
 ```bash
@@ -600,11 +675,17 @@ To build one snapshot:
 
 This populates:
 
+- `analytics.whale_score_snapshot`
 - `analytics.dashboard`
 - `analytics.dashboard_market`
 - `analytics.market_profile`
 - `analytics.user_profile`
 - `analytics.user_leaderboard`
+
+Recommended order:
+
+1. build whale scores
+2. build the dashboard snapshot
 
 This can be rerun to generate additional snapshots over time.
 
@@ -620,10 +701,14 @@ Useful endpoints:
 
 - `GET /health`
 - `GET /api/status/ingestion`
+- `GET /api/home/summary`
 - `GET /api/markets`
 - `GET /api/users`
 - `GET /api/transactions`
 - `GET /api/positions`
+- `GET /api/whales/latest`
+- `GET /api/leaderboards/trusted/latest`
+- `GET /api/users/{user_id}/whale-profile`
 - `GET /api/leaderboards/latest`
 - `GET /api/dashboards/latest`
 
@@ -758,6 +843,22 @@ For this phase, the stable local workflow is:
 3. Run `alembic upgrade head` when setting up a fresh DB
 4. Export `DUNE_API_KEY` if the Dune step is enabled
 5. Run one or more scrapers with `--write-to-db` or use `data_platform/jobs/run_ingest_cycle.py`
+6. Build `analytics.whale_score_snapshot` with `build_whale_scores.py`
+7. Build the dashboard snapshot with `build_dashboard_snapshot.py`
+
+## Validation Commands
+
+Week 4/5 readiness:
+
+```bash
+.venv/bin/python data_platform/tests/week45_readiness_check.py --require-data
+```
+
+Week 6 whale analytics:
+
+```bash
+.venv/bin/python data_platform/tests/week6_whale_check.py --build --require-data
+```
 6. Run `build_dashboard_snapshot.py`
 7. Inspect via `psql` and the FastAPI read endpoints
 

@@ -1,30 +1,7 @@
+import { useCallback, useMemo } from "react";
 import { Link } from "react-router-dom";
-
-type MarketRow = {
-  market_section_id: string;
-  market_slug: string;
-  market_url: string;
-  price: number;
-  volume: number;
-  odds: number;
-  whale_count: number;
-  trusted_whale_count: number;
-  Orderbook_depth: number;
-  whale_market_focus: string;
-};
-
-const marketData: MarketRow[] = Array.from({ length: 10 }, (_, i) => ({
-  market_section_id: `market-${i + 1}`,
-  market_slug: `market-${i + 1}`,
-  market_url: `/markets/market-${i + 1}`,
-  price: Number((0.45 + i * 0.02).toFixed(2)),
-  volume: 50000 + i * 10000,
-  odds: 50 + i * 2,
-  whale_count: 3 + i,
-  trusted_whale_count: 1 + Math.floor(i / 2),
-  Orderbook_depth: 12000 + i * 2000,
-  whale_market_focus: `Focus tag ${i + 1}`,
-}));
+import { fetchDashboardMarkets, type DashboardMarketRow } from "../lib/api";
+import { useApiData } from "../hooks/useApiData";
 
 function getRankClass(rank: number) {
   if (rank === 1) return "gold";
@@ -33,58 +10,106 @@ function getRankClass(rank: number) {
   return "default";
 }
 
-export default function MarketLeaderboard() {
+function formatPercent(value: number | null) {
+  if (value === null) return "--";
+  return `${Math.round(value * 100)}%`;
+}
+
+function formatCurrency(value: number | null) {
+  if (value === null) return "--";
+  return `$${value.toLocaleString()}`;
+}
+
+function formatDepth(value: number | null) {
+  if (value === null) return "--";
+  return value.toLocaleString();
+}
+
+type MarketLeaderboardProps = {
+  search: string;
+  minWhaleCount: number;
+  sortBy: "trusted" | "whales" | "volume";
+};
+
+function MarketRows({ items }: { items: DashboardMarketRow[] }) {
+  return (
+    <div className="leaderboard-list">
+      {items.map((market, index) => {
+        const rank = index + 1;
+
+        return (
+          <Link
+            key={`${market.market_id}-${market.market_slug}`}
+            to={`/markets/${market.market_slug}`}
+            className="leaderboard-row"
+          >
+            <div className={`leaderboard-rank ${getRankClass(rank)}`}>{rank}</div>
+
+            <div className="leaderboard-main">
+              <div className="leaderboard-main-top">
+                <div>
+                  <div className="leaderboard-name">{market.question}</div>
+                  <div className="leaderboard-subtext">
+                    {market.whale_market_focus || market.market_slug}
+                  </div>
+                </div>
+
+                <div className="leaderboard-price">{formatPercent(market.price)}</div>
+              </div>
+
+              <div className="leaderboard-meta">
+                <span className="meta-pill">Vol {formatCurrency(market.volume)}</span>
+                <span className="meta-pill">Odds {formatPercent(market.odds)}</span>
+                <span className="meta-pill">Whales {market.whale_count}</span>
+                <span className="meta-pill">Trusted {market.trusted_whale_count}</span>
+                <span className="meta-pill">Depth {formatDepth(market.orderbook_depth)}</span>
+              </div>
+            </div>
+          </Link>
+        );
+      })}
+    </div>
+  );
+}
+
+export default function MarketLeaderboard({ search, minWhaleCount, sortBy }: MarketLeaderboardProps) {
+  const loadMarkets = useCallback(() => fetchDashboardMarkets(100), []);
+  const { data, loading, error } = useApiData(loadMarkets);
+  const filtered = useMemo(() => {
+    if (!data) return [];
+    const normalizedSearch = search.trim().toLowerCase();
+    const items = data.filter((market) => {
+      const haystack = `${market.question} ${market.market_slug} ${market.whale_market_focus ?? ""}`.toLowerCase();
+      const matchesSearch = normalizedSearch.length === 0 || haystack.includes(normalizedSearch);
+      const matchesWhales = market.whale_count >= minWhaleCount;
+      return matchesSearch && matchesWhales;
+    });
+    items.sort((left, right) => {
+      if (sortBy === "volume") {
+        return (right.volume ?? 0) - (left.volume ?? 0);
+      }
+      if (sortBy === "whales") {
+        return right.whale_count - left.whale_count || right.trusted_whale_count - left.trusted_whale_count;
+      }
+      return right.trusted_whale_count - left.trusted_whale_count || right.whale_count - left.whale_count;
+    });
+    return items;
+  }, [data, minWhaleCount, search, sortBy]);
+
   return (
     <section className="leaderboard-card">
       <div className="leaderboard-top">
-        <p className="leaderboard-kicker">Top 10</p>
+        <p className="leaderboard-kicker">Live Dashboard</p>
         <h2>Market Leaderboard</h2>
+        {!loading && !error && <p className="leaderboard-count">{filtered.length} matching markets</p>}
       </div>
 
-      <div className="leaderboard-list">
-        {marketData.map((market, index) => {
-          const rank = index + 1;
-
-          return (
-            <Link
-              key={market.market_section_id}
-              to={market.market_url}
-              className="leaderboard-row"
-            >
-              <div className={`leaderboard-rank ${getRankClass(rank)}`}>
-                {rank}
-              </div>
-
-              <div className="leaderboard-main">
-                <div className="leaderboard-main-top">
-                  <div>
-                    <div className="leaderboard-name">{market.market_slug}</div>
-                    <div className="leaderboard-subtext">
-                      {market.whale_market_focus}
-                    </div>
-                  </div>
-
-                  <div className="leaderboard-price">${market.price}</div>
-                </div>
-
-                <div className="leaderboard-meta">
-                  <span className="meta-pill">
-                    Vol {market.volume.toLocaleString()}
-                  </span>
-                  <span className="meta-pill">Odds {market.odds}%</span>
-                  <span className="meta-pill">Whales {market.whale_count}</span>
-                  <span className="meta-pill">
-                    Trusted {market.trusted_whale_count}
-                  </span>
-                  <span className="meta-pill">
-                    Depth {market.Orderbook_depth.toLocaleString()}
-                  </span>
-                </div>
-              </div>
-            </Link>
-          );
-        })}
-      </div>
+      {loading && <div className="status-panel">Loading market leaderboard...</div>}
+      {error && <div className="status-panel error-panel">{error}</div>}
+      {!loading && !error && filtered.length === 0 && (
+        <div className="status-panel">No dashboard markets are available yet.</div>
+      )}
+      {!loading && !error && filtered.length > 0 && <MarketRows items={filtered} />}
     </section>
   );
 }
