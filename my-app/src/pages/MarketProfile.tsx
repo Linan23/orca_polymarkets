@@ -1,5 +1,7 @@
 import { useCallback } from "react";
 import { Link, useParams } from "react-router-dom";
+import FollowButton from "../components/FollowButton";
+import { useWatchlist } from "../hooks/useWatchlist";
 import { fetchMarketProfile } from "../lib/api";
 import { useApiData } from "../hooks/useApiData";
 
@@ -20,6 +22,7 @@ function renderJson(value: unknown) {
 export default function MarketProfile() {
   const { marketId } = useParams();
   const marketSlug = marketId ?? "";
+  const { isMarketFollowed, toggleMarket } = useWatchlist();
   const loadMarket = useCallback(() => fetchMarketProfile(marketSlug), [marketSlug]);
   const { data, loading, error } = useApiData(loadMarket);
 
@@ -31,6 +34,13 @@ export default function MarketProfile() {
             <p className="eyebrow">Market Profile</p>
             <h1 className="market-title">{data?.question ?? marketSlug}</h1>
             <p className="hero-text">Latest dashboard-backed market snapshot and whale concentration details.</p>
+          </div>
+
+          <div className="hero-action-stack">
+            <FollowButton
+              isFollowing={isMarketFollowed(marketSlug)}
+              onToggle={() => toggleMarket(marketSlug)}
+            />
           </div>
         </div>
 

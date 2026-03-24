@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useApiData } from "../hooks/useApiData";
 import {
@@ -10,6 +10,7 @@ import {
   type TopProfitableUserRow,
   type WhaleEntryBehaviorRow,
 } from "../lib/api";
+import { deriveUserIdentity, matchesUserIdentityQuery } from "../lib/userIdentity";
 
 function formatPercent(value: number | null) {
   if (value === null) return "--";
@@ -56,27 +57,30 @@ function downloadRowsAsJson(filename: string, rows: Array<Record<string, unknown
 function ResearchUserRows({ items }: { items: TopProfitableUserRow[] }) {
   return (
     <div className="leaderboard-list">
-      {items.map((user, index) => (
-        <Link key={`${user.user_id}-${user.external_user_ref}`} to={`/users/${user.user_id}`} className="leaderboard-row">
-          <div className="leaderboard-rank">{index + 1}</div>
-          <div className="leaderboard-main">
-            <div className="leaderboard-main-top">
-              <div>
-                <div className="leaderboard-name">{user.external_user_ref}</div>
-                <div className="leaderboard-subtext">
-                  {user.resolved_market_count} resolved markets · {user.winning_market_count} wins
+      {items.map((user, index) => {
+        const identity = deriveUserIdentity(user);
+        return (
+          <Link key={`${user.user_id}-${user.external_user_ref}`} to={`/users/${user.user_id}`} className="leaderboard-row">
+            <div className="leaderboard-rank">{index + 1}</div>
+            <div className="leaderboard-main">
+              <div className="leaderboard-main-top">
+                <div>
+                  <div className="leaderboard-name">{identity.primary}</div>
+                  <div className="leaderboard-subtext">
+                    {identity.secondary} · {user.resolved_market_count} resolved markets · {user.winning_market_count} wins
+                  </div>
                 </div>
+                <div className="leaderboard-score">{formatCurrency(user.realized_pnl)}</div>
               </div>
-              <div className="leaderboard-score">{formatCurrency(user.realized_pnl)}</div>
+              <div className="leaderboard-meta">
+                <span className="meta-pill">ROI {formatPercent(user.realized_roi)}</span>
+                <span className="meta-pill">Win {formatPercent(user.win_rate)}</span>
+                <span className="meta-pill">Trust {user.trust_score.toFixed(3)}</span>
+              </div>
             </div>
-            <div className="leaderboard-meta">
-              <span className="meta-pill">ROI {formatPercent(user.realized_roi)}</span>
-              <span className="meta-pill">Win {formatPercent(user.win_rate)}</span>
-              <span className="meta-pill">Trust {user.trust_score.toFixed(3)}</span>
-            </div>
-          </div>
-        </Link>
-      ))}
+          </Link>
+        );
+      })}
     </div>
   );
 }
@@ -110,30 +114,33 @@ function ResearchMarketRows({ items }: { items: MarketConcentrationRow[] }) {
 function ResearchEntryRows({ items }: { items: WhaleEntryBehaviorRow[] }) {
   return (
     <div className="leaderboard-list">
-      {items.map((user, index) => (
-        <Link key={`${user.user_id}-${user.external_user_ref}`} to={`/users/${user.user_id}`} className="leaderboard-row">
-          <div className="leaderboard-rank">{index + 1}</div>
-          <div className="leaderboard-main">
-            <div className="leaderboard-main-top">
-              <div>
-                <div className="leaderboard-name">{user.external_user_ref}</div>
-                <div className="leaderboard-subtext">
-                  {user.entry_trade_count} buy entries · {user.distinct_markets} markets
+      {items.map((user, index) => {
+        const identity = deriveUserIdentity(user);
+        return (
+          <Link key={`${user.user_id}-${user.external_user_ref}`} to={`/users/${user.user_id}`} className="leaderboard-row">
+            <div className="leaderboard-rank">{index + 1}</div>
+            <div className="leaderboard-main">
+              <div className="leaderboard-main-top">
+                <div>
+                  <div className="leaderboard-name">{identity.primary}</div>
+                  <div className="leaderboard-subtext">
+                    {identity.secondary} · {user.entry_trade_count} buy entries · {user.distinct_markets} markets
+                  </div>
                 </div>
+                <div className="leaderboard-score">{formatPercent(user.weighted_avg_entry_price)}</div>
               </div>
-              <div className="leaderboard-score">{formatPercent(user.weighted_avg_entry_price)}</div>
+              <div className="leaderboard-meta">
+                <span className="meta-pill">Avg shares {user.avg_entry_shares.toFixed(1)}</span>
+                <span className="meta-pill">Min {formatPercent(user.min_entry_price)}</span>
+                <span className="meta-pill">Max {formatPercent(user.max_entry_price)}</span>
+                <span className={`meta-pill ${user.is_trusted_whale ? "internal-pill" : "public-pill"}`}>
+                  {user.is_trusted_whale ? "trusted" : user.is_whale ? "whale" : "candidate"}
+                </span>
+              </div>
             </div>
-            <div className="leaderboard-meta">
-              <span className="meta-pill">Avg shares {user.avg_entry_shares.toFixed(1)}</span>
-              <span className="meta-pill">Min {formatPercent(user.min_entry_price)}</span>
-              <span className="meta-pill">Max {formatPercent(user.max_entry_price)}</span>
-              <span className={`meta-pill ${user.is_trusted_whale ? "internal-pill" : "public-pill"}`}>
-                {user.is_trusted_whale ? "trusted" : user.is_whale ? "whale" : "candidate"}
-              </span>
-            </div>
-          </div>
-        </Link>
-      ))}
+          </Link>
+        );
+      })}
     </div>
   );
 }
@@ -146,6 +153,7 @@ export default function ResearchAnalyticsSection({
   showExportControls = false,
 }: ResearchAnalyticsSectionProps) {
   const [timeframe, setTimeframe] = useState<AnalyticsTimeframe>("all");
+  const [userSearch, setUserSearch] = useState("");
   const loadAnalytics = useCallback(
     async () => {
       const [topUsers, topMarkets, entryBehavior] = await Promise.all([
@@ -158,6 +166,14 @@ export default function ResearchAnalyticsSection({
     [timeframe],
   );
   const { data, loading, error } = useApiData(loadAnalytics);
+  const filteredTopUsers = useMemo(() => {
+    if (!data) return [];
+    return data.topUsers.filter((user) => matchesUserIdentityQuery(user, userSearch));
+  }, [data, userSearch]);
+  const filteredEntryBehavior = useMemo(() => {
+    if (!data) return [];
+    return data.entryBehavior.filter((user) => matchesUserIdentityQuery(user, userSearch));
+  }, [data, userSearch]);
 
   return (
     <section className="analytics-section">
@@ -168,6 +184,15 @@ export default function ResearchAnalyticsSection({
           Conservative resolved-user profitability and latest market concentration, ready for report/dashboard use.
         </p>
         <div className="analytics-toolbar">
+          <label className="filter-field filter-field-search">
+            <span>Search trader</span>
+            <input
+              value={userSearch}
+              onChange={(event) => setUserSearch(event.target.value)}
+              placeholder="username or wallet"
+              type="search"
+            />
+          </label>
           <label className="filter-field analytics-timeframe-field">
             <span>Timeframe</span>
             <select value={timeframe} onChange={(event) => setTimeframe(event.target.value as AnalyticsTimeframe)}>
@@ -190,29 +215,34 @@ export default function ResearchAnalyticsSection({
               <p className="leaderboard-kicker">Polymarket</p>
               <h2>Top Profitable Resolved Users</h2>
               <p className="leaderboard-count">Ranked by conservative realized P&amp;L on resolved markets for {timeframe}.</p>
-              {showExportControls && data.topUsers.length > 0 && (
+              <p className="leaderboard-count">{filteredTopUsers.length} matching traders</p>
+              {showExportControls && filteredTopUsers.length > 0 && (
                 <div className="analytics-export-row">
                   <button
                     type="button"
                     className="analytics-export-btn"
-                    onClick={() => downloadRowsAsCsv(`top_profitable_resolved_users_${timeframe}.csv`, data.topUsers)}
+                    onClick={() => downloadRowsAsCsv(`top_profitable_resolved_users_${timeframe}.csv`, filteredTopUsers)}
                   >
                     Export CSV
                   </button>
                   <button
                     type="button"
                     className="analytics-export-btn"
-                    onClick={() => downloadRowsAsJson(`top_profitable_resolved_users_${timeframe}.json`, data.topUsers)}
+                    onClick={() => downloadRowsAsJson(`top_profitable_resolved_users_${timeframe}.json`, filteredTopUsers)}
                   >
                     Export JSON
                   </button>
                 </div>
               )}
             </div>
-            {data.topUsers.length > 0 ? (
-              <ResearchUserRows items={data.topUsers} />
+            {filteredTopUsers.length > 0 ? (
+              <ResearchUserRows items={filteredTopUsers} />
             ) : (
-              <div className="status-panel">No resolved-user profitability rows are available yet.</div>
+              <div className="status-panel">
+                {userSearch.trim().length > 0
+                  ? "No profitable traders match that username or wallet."
+                  : "No resolved-user profitability rows are available yet."}
+              </div>
             )}
           </section>
 
@@ -252,29 +282,34 @@ export default function ResearchAnalyticsSection({
               <p className="leaderboard-kicker">Polymarket Whales</p>
               <h2>Whale Entry Behavior</h2>
               <p className="leaderboard-count">Weighted average buy-entry price and entry size for {timeframe}.</p>
-              {showExportControls && data.entryBehavior.length > 0 && (
+              <p className="leaderboard-count">{filteredEntryBehavior.length} matching traders</p>
+              {showExportControls && filteredEntryBehavior.length > 0 && (
                 <div className="analytics-export-row">
                   <button
                     type="button"
                     className="analytics-export-btn"
-                    onClick={() => downloadRowsAsCsv(`whale_entry_behavior_${timeframe}.csv`, data.entryBehavior)}
+                    onClick={() => downloadRowsAsCsv(`whale_entry_behavior_${timeframe}.csv`, filteredEntryBehavior)}
                   >
                     Export CSV
                   </button>
                   <button
                     type="button"
                     className="analytics-export-btn"
-                    onClick={() => downloadRowsAsJson(`whale_entry_behavior_${timeframe}.json`, data.entryBehavior)}
+                    onClick={() => downloadRowsAsJson(`whale_entry_behavior_${timeframe}.json`, filteredEntryBehavior)}
                   >
                     Export JSON
                   </button>
                 </div>
               )}
             </div>
-            {data.entryBehavior.length > 0 ? (
-              <ResearchEntryRows items={data.entryBehavior} />
+            {filteredEntryBehavior.length > 0 ? (
+              <ResearchEntryRows items={filteredEntryBehavior} />
             ) : (
-              <div className="status-panel">No whale entry rows are available yet.</div>
+              <div className="status-panel">
+                {userSearch.trim().length > 0
+                  ? "No whale entry rows match that username or wallet."
+                  : "No whale entry rows are available yet."}
+              </div>
             )}
           </section>
         </div>

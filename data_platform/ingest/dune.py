@@ -122,6 +122,7 @@ def ingest_query_pages(
                 platform_name="dune",
                 external_user_ref=maker,
                 wallet_address=maker if maker.startswith("0x") else None,
+                preferred_username=None,
                 display_label=maker,
             )
             event_row = upsert_market_event(

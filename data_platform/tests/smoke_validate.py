@@ -24,7 +24,7 @@ from data_platform.services.dashboard_builder import build_dashboard_snapshot
 from data_platform.services.whale_scoring import build_whale_score_snapshot
 
 
-BASELINE_REVISION = "20260304_1200"
+BASELINE_REVISION = "20260323_1200"
 REQUIRED_TABLES = {
     "analytics.dashboard",
     "analytics.dashboard_market",
@@ -132,6 +132,37 @@ def _run_database_checks(require_sample_data: bool) -> list[CheckResult]:
                 {"required": require_sample_data, "counts": counts},
             )
         )
+
+        preferred_username_count = int(
+            session.execute(
+                text("SELECT COUNT(*) FROM analytics.user_account WHERE COALESCE(preferred_username, '') <> ''")
+            ).scalar_one()
+        )
+        named_polymarket_wallets = int(
+            session.execute(
+                text(
+                    """
+                    SELECT COUNT(DISTINCT lower(COALESCE(trade->>'proxyWallet', '')))
+                    FROM raw.api_payload payload_row
+                    CROSS JOIN LATERAL jsonb_array_elements(payload_row.payload->'trades') AS trade
+                    WHERE payload_row.entity_type = 'trades'
+                      AND COALESCE(trade->>'name', '') <> ''
+                      AND NOT (trade->>'name' ~* '^0x[0-9a-f]{8,}(-[0-9]+)?$')
+                    """
+                )
+            ).scalar_one()
+        )
+        results.append(
+            CheckResult(
+                "preferred_username_backfill",
+                (not require_sample_data) or named_polymarket_wallets == 0 or preferred_username_count > 0,
+                {
+                    "required": require_sample_data,
+                    "named_polymarket_wallets": named_polymarket_wallets,
+                    "preferred_username_count": preferred_username_count,
+                },
+            )
+        )
     return results
 
 
@@ -163,6 +194,13 @@ def _run_api_checks() -> list[CheckResult]:
             whale_payload = whale_response.json()
             whale_items = (((whale_payload or {}).get("whales") or {}).get("items") or [])
             if whale_items:
+                results.append(
+                    CheckResult(
+                        "api:/api/whales/latest identity_fields",
+                        {"wallet_address", "preferred_username", "display_label"}.issubset(whale_items[0].keys()),
+                        {"payload_keys": sorted(whale_items[0].keys())},
+                    )
+                )
                 user_id = whale_items[0].get("user_id")
                 if user_id is not None:
                     response = client.get(f"/api/users/{user_id}/whale-profile")
@@ -180,6 +218,39 @@ def _run_api_checks() -> list[CheckResult]:
                                 "status_code": response.status_code,
                                 "payload_keys": sorted(payload.keys()) if isinstance(payload, dict) else [],
                             },
+                        )
+                    )
+                    if ok and isinstance(payload, dict):
+                        profile = payload.get("profile") or {}
+                        results.append(
+                            CheckResult(
+                                "api:/api/users/{user_id}/whale-profile identity_fields",
+                                {"wallet_address", "preferred_username", "display_label"}.issubset(profile.keys()),
+                                {"payload_keys": sorted(profile.keys()) if isinstance(profile, dict) else []},
+                            )
+                        )
+
+                    insights_response = client.get(f"/api/users/{user_id}/activity-insights?timeframe=30d")
+                    insights_ok = insights_response.status_code == 200
+                    try:
+                        insights_payload = insights_response.json()
+                    except ValueError:
+                        insights_payload = {"raw_body": insights_response.text[:200]}
+                    details: dict[str, Any] = {
+                        "user_id": user_id,
+                        "status_code": insights_response.status_code,
+                        "payload_keys": sorted(insights_payload.keys()) if isinstance(insights_payload, dict) else [],
+                    }
+                    if insights_ok and isinstance(insights_payload, dict):
+                        insights = insights_payload.get("insights") or {}
+                        details["hourly_bucket_count"] = len(insights.get("hourly_activity_utc") or [])
+                        details["recent_trade_count"] = len(insights.get("recent_trades") or [])
+                        details["position_count"] = len(insights.get("current_positions") or [])
+                    results.append(
+                        CheckResult(
+                            "api:/api/users/{user_id}/activity-insights",
+                            insights_ok,
+                            details,
                         )
                     )
 

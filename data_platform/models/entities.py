@@ -82,6 +82,7 @@ class UserAccount(Base):
     platform_id: Mapped[int] = mapped_column(ForeignKey("analytics.platform.platform_id"), nullable=False)
     external_user_ref: Mapped[str] = mapped_column(String(255), nullable=False)
     wallet_address: Mapped[str | None] = mapped_column(String(255))
+    preferred_username: Mapped[str | None] = mapped_column(String(255))
     display_label: Mapped[str | None] = mapped_column(String(255))
     first_seen_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
     last_seen_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)

@@ -28,6 +28,7 @@ from data_platform.services.whale_scoring import load_resolved_user_performance
 
 DEFAULT_LIMIT = 50
 VALID_TIMEFRAMES = {"7d": 7, "30d": 30, "90d": 90, "all": None}
+USER_ACTIVITY_RECENT_TRADE_LIMIT = 15
 
 
 def timeframe_start(timeframe: str) -> datetime | None:
@@ -133,6 +134,7 @@ def list_users(session: Session, limit: int = DEFAULT_LIMIT) -> list[dict[str, A
             "user_id": row.user_id,
             "external_user_ref": row.external_user_ref,
             "wallet_address": row.wallet_address,
+            "preferred_username": row.preferred_username,
             "display_label": row.display_label,
             "is_active": row.is_active,
             "is_likely_insider": row.is_likely_insider,
@@ -210,8 +212,8 @@ def latest_leaderboard(session: Session, *, board_type: str | None = None) -> di
             .limit(DEFAULT_LIMIT)
         )
     rows = session.scalars(statement).all()
-    user_refs = {
-        row.user_id: row.external_user_ref
+    user_accounts = {
+        row.user_id: row
         for row in session.scalars(
             select(UserAccount).where(UserAccount.user_id.in_([row.user_id for row in rows]))
         ).all()
@@ -225,7 +227,10 @@ def latest_leaderboard(session: Session, *, board_type: str | None = None) -> di
             {
                 "leaderboard_id": row.leaderboard_id,
                 "user_id": row.user_id,
-                "external_user_ref": user_refs.get(row.user_id),
+                "external_user_ref": user_accounts.get(row.user_id).external_user_ref if user_accounts.get(row.user_id) else None,
+                "wallet_address": user_accounts.get(row.user_id).wallet_address if user_accounts.get(row.user_id) else None,
+                "preferred_username": user_accounts.get(row.user_id).preferred_username if user_accounts.get(row.user_id) else None,
+                "display_label": user_accounts.get(row.user_id).display_label if user_accounts.get(row.user_id) else None,
                 "board_type": row.board_type,
                 "rank": row.rank,
                 "score_metric": row.score_metric,
@@ -324,6 +329,9 @@ def home_summary(session: Session) -> dict[str, Any]:
             top_trusted_whale = {
                 "user_id": account.user_id,
                 "external_user_ref": account.external_user_ref,
+                "wallet_address": account.wallet_address,
+                "preferred_username": account.preferred_username,
+                "display_label": account.display_label,
                 "trust_score": float(score.trust_score or 0),
                 "profitability_score": float(score.profitability_score or 0),
                 "sample_trade_count": int(score.sample_trade_count or 0),
@@ -453,6 +461,9 @@ def top_profitable_resolved_users(
             {
                 "user_id": int(row["account"].user_id),
                 "external_user_ref": row["account"].external_user_ref,
+                "wallet_address": row["account"].wallet_address,
+                "preferred_username": row["account"].preferred_username,
+                "display_label": row["account"].display_label,
                 "platform_name": row["platform"].platform_name,
                 "resolved_market_count": int(resolved.resolved_market_count),
                 "winning_market_count": int(resolved.winning_market_count),
@@ -627,6 +638,9 @@ def whale_entry_behavior(
             SELECT
               ua.user_id,
               ua.external_user_ref,
+              ua.wallet_address,
+              ua.preferred_username,
+              ua.display_label,
               ls.trust_score,
               ls.profitability_score,
               ls.is_whale,
@@ -651,6 +665,9 @@ def whale_entry_behavior(
             GROUP BY
               ua.user_id,
               ua.external_user_ref,
+              ua.wallet_address,
+              ua.preferred_username,
+              ua.display_label,
               ls.trust_score,
               ls.profitability_score,
               ls.is_whale,
@@ -669,6 +686,9 @@ def whale_entry_behavior(
         {
             "user_id": int(row["user_id"]),
             "external_user_ref": row["external_user_ref"],
+            "wallet_address": row["wallet_address"],
+            "preferred_username": row["preferred_username"],
+            "display_label": row["display_label"],
             "trust_score": float(row["trust_score"] or 0),
             "profitability_score": float(row["profitability_score"] or 0),
             "is_whale": bool(row["is_whale"]),
@@ -690,6 +710,323 @@ def whale_entry_behavior(
         "scoring_version": latest_batch.scoring_version,
         "count": len(items),
         "items": items,
+    }
+
+
+def user_activity_insights(
+    session: Session,
+    user_id: int,
+    *,
+    timeframe: str = "all",
+) -> dict[str, Any] | None:
+    """Return user-level activity insights for the selected timeframe."""
+    user = session.get(UserAccount, user_id)
+    if user is None:
+        return None
+
+    start_time = timeframe_start(timeframe)
+    transaction_window_clause = ""
+    params: dict[str, Any] = {"user_id": user_id}
+    if start_time is not None:
+        transaction_window_clause = "AND tf.transaction_time >= :start_time"
+        params["start_time"] = start_time
+
+    summary_row = session.execute(
+        text(
+            f"""
+            SELECT
+              COUNT(tf.transaction_id) AS trade_count,
+              COUNT(DISTINCT tf.market_contract_id) AS distinct_markets,
+              COUNT(DISTINCT DATE(tf.transaction_time AT TIME ZONE 'UTC')) AS active_days,
+              COALESCE(SUM(tf.notional_value), 0) AS total_notional,
+              MAX(tf.transaction_time) AS latest_trade_time
+            FROM analytics.transaction_fact tf
+            WHERE tf.user_id = :user_id
+              {transaction_window_clause}
+            """
+        ),
+        params,
+    ).mappings().one()
+
+    tag_rows = session.execute(
+        text(
+            f"""
+            WITH filtered_tx AS (
+              SELECT
+                tf.transaction_id,
+                tf.event_id,
+                COALESCE(tf.notional_value, 0) AS notional_value
+              FROM analytics.transaction_fact tf
+              WHERE tf.user_id = :user_id
+                {transaction_window_clause}
+            ),
+            event_tag_counts AS (
+              SELECT
+                ft.event_id,
+                COUNT(DISTINCT mtm.tag_id) AS tag_count
+              FROM filtered_tx ft
+              LEFT JOIN analytics.market_tag_map mtm
+                ON mtm.event_id = ft.event_id
+              GROUP BY ft.event_id
+            )
+            SELECT
+              COALESCE(mt.tag_label, 'Unlabeled') AS tag_label,
+              COALESCE(
+                SUM(
+                  ft.notional_value / CASE
+                    WHEN COALESCE(etc.tag_count, 0) > 0 THEN etc.tag_count
+                    ELSE 1
+                  END
+                ),
+                0
+              ) AS weighted_notional,
+              COUNT(DISTINCT ft.transaction_id) AS trade_count
+            FROM filtered_tx ft
+            LEFT JOIN event_tag_counts etc
+              ON etc.event_id = ft.event_id
+            LEFT JOIN analytics.market_tag_map mtm
+              ON mtm.event_id = ft.event_id
+            LEFT JOIN analytics.market_tag mt
+              ON mt.tag_id = mtm.tag_id
+            GROUP BY COALESCE(mt.tag_label, 'Unlabeled')
+            ORDER BY weighted_notional DESC, tag_label ASC
+            """
+        ),
+        params,
+    ).mappings().all()
+    total_tag_notional = sum(float(row["weighted_notional"] or 0) for row in tag_rows)
+    top_tag_rows = tag_rows[:5]
+    other_tag_notional = sum(float(row["weighted_notional"] or 0) for row in tag_rows[5:])
+    other_trade_count = sum(int(row["trade_count"] or 0) for row in tag_rows[5:])
+    tag_exposure = [
+        {
+            "label": row["tag_label"],
+            "total_notional": float(row["weighted_notional"] or 0),
+            "trade_count": int(row["trade_count"] or 0),
+        }
+        for row in top_tag_rows
+    ]
+    if other_tag_notional > 0:
+        tag_exposure.append(
+            {
+                "label": "Other",
+                "total_notional": other_tag_notional,
+                "trade_count": other_trade_count,
+            }
+        )
+    for item in tag_exposure:
+        item["percentage"] = (
+            round(item["total_notional"] / total_tag_notional, 6)
+            if total_tag_notional > 0
+            else 0.0
+        )
+
+    outcome_rows = session.execute(
+        text(
+            f"""
+            SELECT
+              CASE
+                WHEN LOWER(COALESCE(tf.outcome_label, '')) = 'yes' THEN 'yes'
+                WHEN LOWER(COALESCE(tf.outcome_label, '')) = 'no' THEN 'no'
+                ELSE 'other'
+              END AS outcome_label,
+              COUNT(tf.transaction_id) AS trade_count,
+              COALESCE(SUM(tf.notional_value), 0) AS total_notional
+            FROM analytics.transaction_fact tf
+            WHERE tf.user_id = :user_id
+              {transaction_window_clause}
+            GROUP BY 1
+            """
+        ),
+        params,
+    ).mappings().all()
+    outcome_map = {
+        "yes": {"label": "yes", "trade_count": 0, "total_notional": 0.0},
+        "no": {"label": "no", "trade_count": 0, "total_notional": 0.0},
+        "other": {"label": "other", "trade_count": 0, "total_notional": 0.0},
+    }
+    for row in outcome_rows:
+        bucket = outcome_map[str(row["outcome_label"])]
+        bucket["trade_count"] = int(row["trade_count"] or 0)
+        bucket["total_notional"] = float(row["total_notional"] or 0)
+    total_outcome_trades = sum(item["trade_count"] for item in outcome_map.values())
+    outcome_bias = []
+    for label in ("yes", "no", "other"):
+        bucket = outcome_map[label]
+        outcome_bias.append(
+            {
+                **bucket,
+                "percentage": (
+                    round(bucket["trade_count"] / total_outcome_trades, 6)
+                    if total_outcome_trades > 0
+                    else 0.0
+                ),
+            }
+        )
+
+    hourly_rows = session.execute(
+        text(
+            f"""
+            SELECT
+              EXTRACT(HOUR FROM tf.transaction_time AT TIME ZONE 'UTC')::integer AS hour_utc,
+              COUNT(tf.transaction_id) AS trade_count,
+              COALESCE(SUM(tf.notional_value), 0) AS total_notional
+            FROM analytics.transaction_fact tf
+            WHERE tf.user_id = :user_id
+              AND tf.transaction_time IS NOT NULL
+              {transaction_window_clause}
+            GROUP BY 1
+            ORDER BY 1 ASC
+            """
+        ),
+        params,
+    ).mappings().all()
+    hourly_map = {
+        int(row["hour_utc"]): {
+            "hour_utc": int(row["hour_utc"]),
+            "trade_count": int(row["trade_count"] or 0),
+            "total_notional": float(row["total_notional"] or 0),
+        }
+        for row in hourly_rows
+    }
+    hourly_activity_utc = [
+        hourly_map.get(hour, {"hour_utc": hour, "trade_count": 0, "total_notional": 0.0})
+        for hour in range(24)
+    ]
+
+    recent_trade_rows = session.execute(
+        text(
+            f"""
+            SELECT
+              tf.transaction_id,
+              tf.transaction_time,
+              tf.transaction_type,
+              tf.market_contract_id,
+              mc.market_slug,
+              mc.question,
+              tf.outcome_label,
+              tf.price,
+              tf.shares,
+              tf.notional_value
+            FROM analytics.transaction_fact tf
+            JOIN analytics.market_contract mc
+              ON mc.market_contract_id = tf.market_contract_id
+            WHERE tf.user_id = :user_id
+              {transaction_window_clause}
+            ORDER BY tf.transaction_time DESC NULLS LAST, tf.transaction_id DESC
+            LIMIT :recent_limit
+            """
+        ),
+        {
+            **params,
+            "recent_limit": USER_ACTIVITY_RECENT_TRADE_LIMIT,
+        },
+    ).mappings().all()
+    recent_trades = [
+        {
+            "transaction_id": int(row["transaction_id"]),
+            "transaction_time": row["transaction_time"].isoformat() if row["transaction_time"] else None,
+            "transaction_type": row["transaction_type"],
+            "market_contract_id": int(row["market_contract_id"]),
+            "market_slug": row["market_slug"],
+            "question": row["question"],
+            "outcome_label": row["outcome_label"],
+            "price": float(row["price"]) if row["price"] is not None else None,
+            "shares": float(row["shares"]) if row["shares"] is not None else None,
+            "notional_value": float(row["notional_value"]) if row["notional_value"] is not None else None,
+        }
+        for row in recent_trade_rows
+    ]
+
+    current_position_rows = session.execute(
+        text(
+            """
+            WITH ranked_positions AS (
+              SELECT
+                ps.position_snapshot_id,
+                ps.market_contract_id,
+                ps.snapshot_time,
+                ps.position_size,
+                ps.avg_entry_price,
+                ps.current_mark_price,
+                ps.market_value,
+                ps.cash_pnl,
+                ps.realized_pnl,
+                ps.unrealized_pnl,
+                ps.is_redeemable,
+                ps.is_mergeable,
+                ROW_NUMBER() OVER (
+                  PARTITION BY ps.market_contract_id
+                  ORDER BY ps.snapshot_time DESC, ps.position_snapshot_id DESC
+                ) AS row_num
+              FROM analytics.position_snapshot ps
+              WHERE ps.user_id = :user_id
+            )
+            SELECT
+              rp.position_snapshot_id,
+              rp.market_contract_id,
+              mc.market_slug,
+              mc.question,
+              rp.snapshot_time,
+              rp.position_size,
+              rp.avg_entry_price,
+              rp.current_mark_price,
+              rp.market_value,
+              rp.cash_pnl,
+              rp.realized_pnl,
+              rp.unrealized_pnl,
+              rp.is_redeemable,
+              rp.is_mergeable
+            FROM ranked_positions rp
+            JOIN analytics.market_contract mc
+              ON mc.market_contract_id = rp.market_contract_id
+            WHERE rp.row_num = 1
+            ORDER BY ABS(COALESCE(rp.market_value, 0)) DESC,
+                     rp.snapshot_time DESC NULLS LAST,
+                     rp.position_snapshot_id DESC
+            """
+        ),
+        {"user_id": user_id},
+    ).mappings().all()
+    current_positions = [
+        {
+            "position_snapshot_id": int(row["position_snapshot_id"]),
+            "market_contract_id": int(row["market_contract_id"]),
+            "market_slug": row["market_slug"],
+            "question": row["question"],
+            "snapshot_time": row["snapshot_time"].isoformat() if row["snapshot_time"] else None,
+            "position_size": float(row["position_size"]) if row["position_size"] is not None else None,
+            "avg_entry_price": float(row["avg_entry_price"]) if row["avg_entry_price"] is not None else None,
+            "current_mark_price": float(row["current_mark_price"]) if row["current_mark_price"] is not None else None,
+            "market_value": float(row["market_value"]) if row["market_value"] is not None else None,
+            "cash_pnl": float(row["cash_pnl"]) if row["cash_pnl"] is not None else None,
+            "realized_pnl": float(row["realized_pnl"]) if row["realized_pnl"] is not None else None,
+            "unrealized_pnl": float(row["unrealized_pnl"]) if row["unrealized_pnl"] is not None else None,
+            "is_redeemable": bool(row["is_redeemable"]),
+            "is_mergeable": bool(row["is_mergeable"]),
+        }
+        for row in current_position_rows
+    ]
+
+    return {
+        "user_id": user.user_id,
+        "timeframe": timeframe,
+        "summary": {
+            "trade_count": int(summary_row["trade_count"] or 0),
+            "distinct_markets": int(summary_row["distinct_markets"] or 0),
+            "active_days": int(summary_row["active_days"] or 0),
+            "total_notional": float(summary_row["total_notional"] or 0),
+            "latest_trade_time": (
+                summary_row["latest_trade_time"].isoformat()
+                if summary_row["latest_trade_time"]
+                else None
+            ),
+        },
+        "tag_exposure": tag_exposure,
+        "outcome_bias": outcome_bias,
+        "hourly_activity_utc": hourly_activity_utc,
+        "recent_trades": recent_trades,
+        "current_positions": current_positions,
     }
 
 
@@ -774,6 +1111,9 @@ def latest_whale_scores(
         {
             "user_id": account.user_id,
             "external_user_ref": account.external_user_ref,
+            "wallet_address": account.wallet_address,
+            "preferred_username": account.preferred_username,
+            "display_label": account.display_label,
             "platform_name": platform.platform_name,
             "snapshot_time": score.snapshot_time.isoformat() if score.snapshot_time else None,
             "scoring_version": score.scoring_version,
@@ -824,6 +1164,7 @@ def latest_user_whale_profile(session: Session, user_id: int) -> dict[str, Any] 
         "user_id": user.user_id,
         "external_user_ref": user.external_user_ref,
         "wallet_address": user.wallet_address,
+        "preferred_username": user.preferred_username,
         "display_label": user.display_label,
         "is_likely_insider": bool(user.is_likely_insider),
         "latest_whale_score": (

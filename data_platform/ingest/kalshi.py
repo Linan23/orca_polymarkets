@@ -45,6 +45,7 @@ def _upsert_kalshi_users_from_orders(session: Session, payload: dict[str, Any]) 
             session,
             platform_name="kalshi",
             external_user_ref=user_ref,
+            preferred_username=None,
             display_label=f"Kalshi user {user_ref}",
         )
         users_written += 1
@@ -119,6 +120,7 @@ def ingest_scrape_record(
                 session,
                 platform_name="kalshi",
                 external_user_ref=user_ref,
+                preferred_username=None,
                 display_label=(
                     "Unknown Kalshi participant"
                     if user_ref == UNKNOWN_USER_EXTERNAL_REF

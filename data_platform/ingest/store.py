@@ -159,6 +159,7 @@ def upsert_user_account(
     platform_name: str,
     external_user_ref: str,
     wallet_address: str | None = None,
+    preferred_username: str | None = None,
     display_label: str | None = None,
 ) -> UserAccount:
     """Create or update a canonical user account row."""
@@ -167,6 +168,17 @@ def upsert_user_account(
     if not canonical_external_ref:
         canonical_external_ref = UNKNOWN_USER_EXTERNAL_REF
     canonical_wallet_address = normalize_wallet_ref(wallet_address)
+    canonical_preferred_username = (
+        preferred_username.strip() if isinstance(preferred_username, str) and preferred_username.strip() else None
+    )
+    if canonical_preferred_username:
+        lowered_username = canonical_preferred_username.lower()
+        if lowered_username == canonical_external_ref.lower() or (
+            canonical_wallet_address and lowered_username == canonical_wallet_address.lower()
+        ):
+            canonical_preferred_username = None
+        elif lowered_username.startswith("0x"):
+            canonical_preferred_username = None
     canonical_display_label = display_label.strip() if isinstance(display_label, str) and display_label.strip() else None
     row = session.scalar(
         select(UserAccount).where(
@@ -180,6 +192,7 @@ def upsert_user_account(
             platform_id=platform.platform_id,
             external_user_ref=canonical_external_ref,
             wallet_address=canonical_wallet_address,
+            preferred_username=canonical_preferred_username,
             display_label=canonical_display_label,
             first_seen_at=now,
             last_seen_at=now,
@@ -189,6 +202,7 @@ def upsert_user_account(
         return row
 
     row.wallet_address = canonical_wallet_address or row.wallet_address
+    row.preferred_username = canonical_preferred_username or row.preferred_username
     row.display_label = canonical_display_label or row.display_label
     row.last_seen_at = now
     row.updated_at = now

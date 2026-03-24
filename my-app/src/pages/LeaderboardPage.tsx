@@ -50,11 +50,11 @@ export default function LeaderboardPage() {
         {activeBoard === "user" && (
           <div className="leaderboard-filters">
             <label className="filter-field filter-field-search">
-              <span>Search wallet</span>
+              <span>Search trader</span>
               <input
                 value={userSearch}
                 onChange={(event) => setUserSearch(event.target.value)}
-                placeholder="0x..."
+                placeholder="username or wallet"
                 type="search"
               />
             </label>

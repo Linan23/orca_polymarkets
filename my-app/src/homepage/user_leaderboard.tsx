@@ -1,6 +1,7 @@
 import { useCallback, useMemo } from "react";
 import { Link } from "react-router-dom";
 import { fetchLatestWhales, type WhaleScoreRow } from "../lib/api";
+import { deriveUserIdentity, matchesUserIdentityQuery } from "../lib/userIdentity";
 import { useApiData } from "../hooks/useApiData";
 
 function getRankClass(rank: number) {
@@ -30,6 +31,7 @@ function UserRows({ items }: { items: WhaleScoreRow[] }) {
       {items.map((user, index) => {
         const rank = index + 1;
         const label = boardLabel(user);
+        const identity = deriveUserIdentity(user);
 
         return (
           <div key={`${user.user_id}-${user.external_user_ref}`} className="leaderboard-row">
@@ -40,10 +42,10 @@ function UserRows({ items }: { items: WhaleScoreRow[] }) {
               <div className="leaderboard-main-top">
                 <div>
                   <Link to={`/users/${user.user_id}`} className="leaderboard-name">
-                    {user.external_user_ref}
+                    {identity.primary}
                   </Link>
                   <div className="leaderboard-subtext">
-                    {user.platform_name} · {user.sample_trade_count} scored trades
+                    {identity.secondary} · {user.platform_name} · {user.sample_trade_count} scored trades
                   </div>
                 </div>
 
@@ -75,11 +77,8 @@ export default function UserLeaderboard({
   const { data, loading, error } = useApiData(loadWhales);
   const filtered = useMemo(() => {
     if (!data) return [];
-    const normalizedSearch = search.trim().toLowerCase();
     const items = data.filter((user) => {
-      const matchesSearch =
-        normalizedSearch.length === 0 ||
-        user.external_user_ref.toLowerCase().includes(normalizedSearch);
+      const matchesSearch = matchesUserIdentityQuery(user, search);
       const matchesBoard =
         boardFilter === "all" ||
         (boardFilter === "trusted" && user.is_trusted_whale) ||
@@ -112,7 +111,11 @@ export default function UserLeaderboard({
       {loading && <div className="status-panel">Loading whale leaderboard...</div>}
       {error && <div className="status-panel error-panel">{error}</div>}
       {!loading && !error && filtered.length === 0 && (
-        <div className="status-panel">No whale scores are available yet.</div>
+        <div className="status-panel">
+          {search.trim().length > 0
+            ? "No traders match that username or wallet."
+            : "No whale scores are available yet."}
+        </div>
       )}
       {!loading && !error && filtered.length > 0 && <UserRows items={filtered} />}
     </section>

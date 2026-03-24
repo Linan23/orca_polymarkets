@@ -17,6 +17,9 @@ export type DashboardMarketRow = {
 export type WhaleScoreRow = {
   user_id: number;
   external_user_ref: string;
+  wallet_address: string | null;
+  preferred_username: string | null;
+  display_label: string | null;
   platform_name: string;
   snapshot_time: string | null;
   scoring_version: string;
@@ -41,6 +44,7 @@ export type WhaleProfile = {
   user_id: number;
   external_user_ref: string;
   wallet_address: string | null;
+  preferred_username: string | null;
   display_label: string | null;
   is_likely_insider: boolean;
   latest_whale_score: {
@@ -109,6 +113,9 @@ export type HomeSummary = {
   top_trusted_whale: {
     user_id: number;
     external_user_ref: string;
+    wallet_address: string | null;
+    preferred_username: string | null;
+    display_label: string | null;
     trust_score: number;
     profitability_score: number;
     sample_trade_count: number;
@@ -137,6 +144,9 @@ export type HomeSummary = {
 export type TopProfitableUserRow = {
   user_id: number;
   external_user_ref: string;
+  wallet_address: string | null;
+  preferred_username: string | null;
+  display_label: string | null;
   platform_name: string;
   resolved_market_count: number;
   winning_market_count: number;
@@ -169,6 +179,9 @@ export type AnalyticsTimeframe = "7d" | "30d" | "90d" | "all";
 export type WhaleEntryBehaviorRow = {
   user_id: number;
   external_user_ref: string;
+  wallet_address: string | null;
+  preferred_username: string | null;
+  display_label: string | null;
   trust_score: number;
   profitability_score: number;
   is_whale: boolean;
@@ -181,6 +194,75 @@ export type WhaleEntryBehaviorRow = {
   avg_entry_shares: number;
   min_entry_price: number;
   max_entry_price: number;
+};
+
+export type UserActivitySummary = {
+  trade_count: number;
+  distinct_markets: number;
+  active_days: number;
+  total_notional: number;
+  latest_trade_time: string | null;
+};
+
+export type TagExposureSlice = {
+  label: string;
+  total_notional: number;
+  trade_count: number;
+  percentage: number;
+};
+
+export type OutcomeBias = {
+  label: "yes" | "no" | "other";
+  trade_count: number;
+  total_notional: number;
+  percentage: number;
+};
+
+export type HourlyActivityBucket = {
+  hour_utc: number;
+  trade_count: number;
+  total_notional: number;
+};
+
+export type RecentTradeRow = {
+  transaction_id: number;
+  transaction_time: string | null;
+  transaction_type: string;
+  market_contract_id: number;
+  market_slug: string;
+  question: string;
+  outcome_label: string | null;
+  price: number | null;
+  shares: number | null;
+  notional_value: number | null;
+};
+
+export type CurrentPositionRow = {
+  position_snapshot_id: number;
+  market_contract_id: number;
+  market_slug: string;
+  question: string;
+  snapshot_time: string | null;
+  position_size: number | null;
+  avg_entry_price: number | null;
+  current_mark_price: number | null;
+  market_value: number | null;
+  cash_pnl: number | null;
+  realized_pnl: number | null;
+  unrealized_pnl: number | null;
+  is_redeemable: boolean;
+  is_mergeable: boolean;
+};
+
+export type UserActivityInsights = {
+  user_id: number;
+  timeframe: AnalyticsTimeframe;
+  summary: UserActivitySummary;
+  tag_exposure: TagExposureSlice[];
+  outcome_bias: OutcomeBias[];
+  hourly_activity_utc: HourlyActivityBucket[];
+  recent_trades: RecentTradeRow[];
+  current_positions: CurrentPositionRow[];
 };
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
@@ -267,4 +349,14 @@ export async function fetchWhaleEntryBehavior(
     `/api/analytics/whale-entry-behavior?limit=${limit}&timeframe=${timeframe}`,
   );
   return payload.analytics?.items ?? [];
+}
+
+export async function fetchUserActivityInsights(
+  userId: number,
+  timeframe: AnalyticsTimeframe = "all",
+): Promise<UserActivityInsights> {
+  const payload = await fetchJson<{ insights: UserActivityInsights }>(
+    `/api/users/${userId}/activity-insights?timeframe=${timeframe}`,
+  );
+  return payload.insights;
 }

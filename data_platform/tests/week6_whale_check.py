@@ -230,17 +230,31 @@ def _run_checks(require_data: bool) -> list[CheckResult]:
     expected_trusted_keys = sorted(
         [
             "external_user_ref",
+            "display_label",
             "profitability_score",
+            "preferred_username",
             "sample_trade_count",
             "trust_score",
             "user_id",
+            "wallet_address",
         ]
     )
     expected_market_keys = sorted(
         ["market_slug", "price", "question", "trusted_whale_count", "whale_count"]
     )
     expected_leaderboard_row_keys = sorted(
-        ["board_type", "external_user_ref", "leaderboard_id", "rank", "score_metric", "score_value", "user_id"]
+        [
+            "board_type",
+            "display_label",
+            "external_user_ref",
+            "leaderboard_id",
+            "preferred_username",
+            "rank",
+            "score_metric",
+            "score_value",
+            "user_id",
+            "wallet_address",
+        ]
     )
 
     results = [

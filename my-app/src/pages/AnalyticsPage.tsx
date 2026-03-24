@@ -8,10 +8,10 @@ export default function AnalyticsPage() {
       <TopNavbar />
 
       <section className="hero">
-        <p className="eyebrow">Research Analytics</p>
-        <h1>Whale Analytics</h1>
+        <p className="eyebrow">Global Research Analytics</p>
+        <h1>Market-Wide Whale Signals</h1>
         <p className="hero-text">
-          Review live whale coverage, resolved-user profitability, and market concentration signals from the current database.
+          Review cross-market whale coverage, resolved-user profitability, and concentration signals across the current database.
         </p>
       </section>
 

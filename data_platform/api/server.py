@@ -22,6 +22,7 @@ from data_platform.services.read_api import (
     list_transactions,
     list_users,
     top_profitable_resolved_users,
+    user_activity_insights,
     whale_entry_behavior,
 )
 
@@ -233,6 +234,26 @@ async def get_user_whale_profile(user_id: int) -> dict[str, object]:
             if profile is None:
                 raise HTTPException(status_code=404, detail=f"User {user_id} not found")
             return {"profile": profile}
+    except HTTPException:
+        raise
+    except (OSError, SQLAlchemyError) as exc:
+        raise _service_error(exc) from exc
+
+
+@app.get("/api/users/{user_id}/activity-insights")
+async def get_user_activity_insights(
+    user_id: int,
+    timeframe: str = Query("all"),
+) -> dict[str, object]:
+    """Return user-specific activity insights for the selected timeframe."""
+    try:
+        with session_scope() as session:
+            insights = user_activity_insights(session, user_id=user_id, timeframe=timeframe)
+            if insights is None:
+                raise HTTPException(status_code=404, detail=f"User {user_id} not found")
+            return {"insights": insights}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except HTTPException:
         raise
     except (OSError, SQLAlchemyError) as exc:

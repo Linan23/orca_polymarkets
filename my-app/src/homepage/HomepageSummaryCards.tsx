@@ -2,6 +2,7 @@ import { useCallback } from "react";
 import { Link } from "react-router-dom";
 import { useApiData } from "../hooks/useApiData";
 import { fetchHomeSummary } from "../lib/api";
+import { deriveUserIdentity } from "../lib/userIdentity";
 
 function formatPercent(value: number | null) {
   if (value === null) return "--";
@@ -47,10 +48,14 @@ export default function HomepageSummaryCards() {
           <article className="summary-card">
             <p className="summary-card-label">Top Trusted Whale (Polymarket)</p>
             {data.top_trusted_whale ? (
-              <>
+              (() => {
+                const identity = deriveUserIdentity(data.top_trusted_whale);
+                return (
+                  <>
                 <Link to={`/users/${data.top_trusted_whale.user_id}`} className="summary-card-link">
-                  {data.top_trusted_whale.external_user_ref}
+                  {identity.primary}
                 </Link>
+                <p className="summary-card-subtext">{identity.secondary}</p>
                 <div className="summary-stat-list">
                   <div>
                     <span>Trust</span>
@@ -66,6 +71,8 @@ export default function HomepageSummaryCards() {
                   </div>
                 </div>
               </>
+                );
+              })()
             ) : (
               <p className="summary-card-subtext">No trusted whale qualifies in the latest batch yet.</p>
             )}

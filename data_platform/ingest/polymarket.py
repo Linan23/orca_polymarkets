@@ -94,6 +94,7 @@ def ingest_trades_record(
             platform_name="polymarket",
             external_user_ref=wallet_ref or UNKNOWN_USER_EXTERNAL_REF,
             wallet_address=wallet_ref or None,
+            preferred_username=str(trade.get("name") or "").strip() or None,
             display_label=str(trade.get("pseudonym") or trade.get("name") or wallet_ref or "unknown-polymarket-user"),
         )
 
@@ -329,6 +330,7 @@ def ingest_positions_record(
             platform_name="polymarket",
             external_user_ref=proxy_wallet,
             wallet_address=proxy_wallet,
+            preferred_username=None,
             display_label=proxy_wallet,
         )
 
