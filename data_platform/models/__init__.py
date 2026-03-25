@@ -3,6 +3,11 @@
 from data_platform.models.base import Base
 from data_platform.models.entities import (
     ApiPayload,
+    AppAccount,
+    AppAccountPreferences,
+    AppSession,
+    AppWatchlistMarket,
+    AppWatchlistUser,
     Dashboard,
     DashboardMarket,
     MarketContract,
@@ -23,6 +28,11 @@ from data_platform.models.entities import (
 
 __all__ = [
     "ApiPayload",
+    "AppAccount",
+    "AppAccountPreferences",
+    "AppSession",
+    "AppWatchlistMarket",
+    "AppWatchlistUser",
     "Base",
     "Dashboard",
     "DashboardMarket",

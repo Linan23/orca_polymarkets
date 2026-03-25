@@ -16,6 +16,7 @@ class Settings:
 
     app_env: str
     database_url: str
+    frontend_origin: str
     polymarket_active_window_start: str
     polymarket_active_window_end: str
     kalshi_active_window_start: str
@@ -28,6 +29,7 @@ def get_settings() -> Settings:
     return Settings(
         app_env=os.getenv("APP_ENV", "development"),
         database_url=os.getenv("DATABASE_URL", DEFAULT_DATABASE_URL),
+        frontend_origin=os.getenv("FRONTEND_ORIGIN", "http://localhost:5173"),
         polymarket_active_window_start=os.getenv("POLYMARKET_ACTIVE_WINDOW_START", ""),
         polymarket_active_window_end=os.getenv("POLYMARKET_ACTIVE_WINDOW_END", ""),
         kalshi_active_window_start=os.getenv("KALSHI_ACTIVE_WINDOW_START", ""),
