@@ -8,6 +8,7 @@ import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -18,14 +19,20 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 
 from data_platform.api.server import app
+from data_platform.services.account_auth import SESSION_COOKIE_NAME
 from data_platform.db.bootstrap import create_database_objects
 from data_platform.db.session import session_scope
 from data_platform.services.dashboard_builder import build_dashboard_snapshot
 from data_platform.services.whale_scoring import build_whale_score_snapshot
 
 
-BASELINE_REVISION = "20260323_1200"
+BASELINE_REVISION = "20260325_1100"
 REQUIRED_TABLES = {
+    "app.app_account",
+    "app.app_account_preferences",
+    "app.app_session",
+    "app.app_watchlist_market",
+    "app.app_watchlist_user",
     "analytics.dashboard",
     "analytics.dashboard_market",
     "analytics.market_contract",
@@ -44,6 +51,16 @@ REQUIRED_TABLES = {
     "analytics.whale_score_snapshot",
     "raw.api_payload",
 }
+REQUIRED_INDEXES = {
+    "analytics.ix_dashboard_market_dashboard_slug",
+    "analytics.ix_market_contract_market_slug",
+    "analytics.ix_market_profile_dashboard_market",
+    "analytics.ix_position_snapshot_user_market_time",
+    "analytics.ix_transaction_fact_user_market_time",
+    "analytics.ix_transaction_fact_user_time",
+    "analytics.ix_user_profile_dashboard_user",
+    "analytics.ix_whale_score_snapshot_batch_user",
+}
 CORE_TABLES = (
     "analytics.market_event",
     "analytics.market_contract",
@@ -59,6 +76,7 @@ API_ENDPOINTS = (
     "/api/analytics/top-profitable-users?limit=1",
     "/api/analytics/market-whale-concentration?limit=1",
     "/api/analytics/whale-entry-behavior?limit=1",
+    "/api/analytics/recent-whale-entries?limit=1",
     "/api/analytics/top-profitable-users?limit=1&timeframe=30d",
     "/api/markets?limit=1",
     "/api/users?limit=1",
@@ -109,7 +127,7 @@ def _run_database_checks(require_sample_data: bool) -> list[CheckResult]:
                 """
                 SELECT table_schema || '.' || table_name AS table_name
                 FROM information_schema.tables
-                WHERE table_schema IN ('analytics', 'raw')
+                WHERE table_schema IN ('app', 'analytics', 'raw')
                 """
             )
         ).scalars()
@@ -120,6 +138,25 @@ def _run_database_checks(require_sample_data: bool) -> list[CheckResult]:
                 "required_tables",
                 not missing_tables,
                 {"required": len(REQUIRED_TABLES), "found": len(found_tables), "missing": missing_tables},
+            )
+        )
+
+        index_rows = session.execute(
+            text(
+                """
+                SELECT schemaname || '.' || indexname AS index_name
+                FROM pg_indexes
+                WHERE schemaname IN ('analytics', 'app', 'raw')
+                """
+            )
+        ).scalars()
+        found_indexes = set(index_rows)
+        missing_indexes = sorted(REQUIRED_INDEXES - found_indexes)
+        results.append(
+            CheckResult(
+                "required_indexes",
+                not missing_indexes,
+                {"required": len(REQUIRED_INDEXES), "found": len(found_indexes), "missing": missing_indexes},
             )
         )
 
@@ -169,7 +206,33 @@ def _run_database_checks(require_sample_data: bool) -> list[CheckResult]:
 def _run_api_checks() -> list[CheckResult]:
     """Run in-process FastAPI endpoint smoke checks."""
     results: list[CheckResult] = []
+    historical_market_slug: str | None = None
+    with session_scope() as session:
+        historical_market_slug = session.execute(
+            text(
+                """
+                WITH latest_dashboard AS (
+                  SELECT dashboard_id
+                  FROM analytics.dashboard
+                  ORDER BY generated_at DESC, dashboard_id DESC
+                  LIMIT 1
+                )
+                SELECT mc.market_slug
+                FROM analytics.market_contract mc
+                LEFT JOIN analytics.dashboard_market dm
+                  ON dm.dashboard_id = (SELECT dashboard_id FROM latest_dashboard)
+                 AND dm.market_slug = mc.market_slug
+                WHERE mc.market_slug IS NOT NULL
+                  AND dm.market_slug IS NULL
+                ORDER BY mc.updated_at DESC NULLS LAST, mc.market_contract_id DESC
+                LIMIT 1
+                """
+            )
+        ).scalar_one_or_none()
+
     with TestClient(app) as client:
+        candidate_user_id: int | None = None
+        candidate_market_slug: str | None = None
         for endpoint in API_ENDPOINTS:
             response = client.get(endpoint)
             ok = response.status_code == 200
@@ -190,9 +253,117 @@ def _run_api_checks() -> list[CheckResult]:
             )
 
         whale_response = client.get("/api/whales/latest?limit=1")
+        top_profitable_response = client.get("/api/analytics/top-profitable-users?limit=1")
+        if top_profitable_response.status_code == 200:
+            top_profitable_payload = top_profitable_response.json()
+            top_profitable_items = (((top_profitable_payload or {}).get("analytics") or {}).get("items") or [])
+            if top_profitable_items:
+                results.append(
+                    CheckResult(
+                        "api:/api/analytics/top-profitable-users fields",
+                        {"sample_trade_count", "latest_trade_time"}.issubset(top_profitable_items[0].keys()),
+                        {"payload_keys": sorted(top_profitable_items[0].keys())},
+                    )
+                )
+
+        market_concentration_response = client.get("/api/analytics/market-whale-concentration?limit=1")
+        if market_concentration_response.status_code == 200:
+            market_concentration_payload = market_concentration_response.json()
+            market_concentration_items = (((market_concentration_payload or {}).get("analytics") or {}).get("items") or [])
+            if market_concentration_items:
+                results.append(
+                    CheckResult(
+                        "api:/api/analytics/market-whale-concentration fields",
+                        {"last_entry_time", "market_status_label", "whale_bias_label"}.issubset(
+                            market_concentration_items[0].keys()
+                        ),
+                        {"payload_keys": sorted(market_concentration_items[0].keys())},
+                    )
+                )
+
+        whale_entry_response = client.get("/api/analytics/whale-entry-behavior?limit=1")
+        if whale_entry_response.status_code == 200:
+            whale_entry_payload = whale_entry_response.json()
+            whale_entry_items = (((whale_entry_payload or {}).get("analytics") or {}).get("items") or [])
+            if whale_entry_items:
+                results.append(
+                    CheckResult(
+                        "api:/api/analytics/whale-entry-behavior fields",
+                        {
+                            "weighted_current_price",
+                            "yes_entry_trade_count",
+                            "no_entry_trade_count",
+                            "last_entry_time",
+                            "entry_edge",
+                        }.issubset(whale_entry_items[0].keys()),
+                        {"payload_keys": sorted(whale_entry_items[0].keys())},
+                    )
+                )
+
+        recent_entry_response = client.get("/api/analytics/recent-whale-entries?limit=1")
+        if recent_entry_response.status_code == 200:
+            recent_entry_payload = recent_entry_response.json()
+            recent_entry_items = (((recent_entry_payload or {}).get("analytics") or {}).get("items") or [])
+            if recent_entry_items:
+                results.append(
+                    CheckResult(
+                        "api:/api/analytics/recent-whale-entries fields",
+                        {
+                            "entry_trade_count",
+                            "total_entry_notional",
+                            "latest_entry_time",
+                            "market_status_label",
+                            "whale_bias_label",
+                        }.issubset(recent_entry_items[0].keys()),
+                        {"payload_keys": sorted(recent_entry_items[0].keys())},
+                    )
+                )
+
         if whale_response.status_code == 200:
             whale_payload = whale_response.json()
             whale_items = (((whale_payload or {}).get("whales") or {}).get("items") or [])
+            potential_tier_response = client.get("/api/whales/latest?limit=3&tier=potential")
+            potential_tier_ok = potential_tier_response.status_code == 200
+            try:
+                potential_tier_payload = potential_tier_response.json()
+            except ValueError:
+                potential_tier_payload = {"raw_body": potential_tier_response.text[:200]}
+            potential_tier_items = (((potential_tier_payload or {}).get("whales") or {}).get("items") or [])
+            potential_tier_flags_ok = all(
+                not bool(item.get("is_whale")) and not bool(item.get("is_trusted_whale"))
+                for item in potential_tier_items
+            )
+            results.append(
+                CheckResult(
+                    "api:/api/whales/latest?tier=potential",
+                    potential_tier_ok and potential_tier_flags_ok,
+                    {
+                        "status_code": potential_tier_response.status_code,
+                        "item_count": len(potential_tier_items),
+                    },
+                )
+            )
+            standard_tier_response = client.get("/api/whales/latest?limit=3&tier=standard")
+            standard_tier_ok = standard_tier_response.status_code == 200
+            try:
+                standard_tier_payload = standard_tier_response.json()
+            except ValueError:
+                standard_tier_payload = {"raw_body": standard_tier_response.text[:200]}
+            standard_tier_items = (((standard_tier_payload or {}).get("whales") or {}).get("items") or [])
+            standard_tier_flags_ok = all(
+                not bool(item.get("is_whale")) and not bool(item.get("is_trusted_whale"))
+                for item in standard_tier_items
+            )
+            results.append(
+                CheckResult(
+                    "api:/api/whales/latest?tier=standard",
+                    standard_tier_ok and standard_tier_flags_ok,
+                    {
+                        "status_code": standard_tier_response.status_code,
+                        "item_count": len(standard_tier_items),
+                    },
+                )
+            )
             if whale_items:
                 results.append(
                     CheckResult(
@@ -203,6 +374,7 @@ def _run_api_checks() -> list[CheckResult]:
                 )
                 user_id = whale_items[0].get("user_id")
                 if user_id is not None:
+                    candidate_user_id = int(user_id)
                     response = client.get(f"/api/users/{user_id}/whale-profile")
                     ok = response.status_code == 200
                     try:
@@ -261,6 +433,7 @@ def _run_api_checks() -> list[CheckResult]:
             if market_items:
                 market_slug = market_items[0].get("market_slug")
                 if market_slug:
+                    candidate_market_slug = str(market_slug)
                     response = client.get(f"/api/markets/{market_slug}/profile")
                     ok = response.status_code == 200
                     try:
@@ -278,6 +451,354 @@ def _run_api_checks() -> list[CheckResult]:
                             },
                         )
                     )
+        if historical_market_slug:
+            response = client.get(f"/api/markets/{historical_market_slug}/profile")
+            ok = response.status_code == 200
+            try:
+                payload = response.json()
+            except ValueError:
+                payload = {"raw_body": response.text[:200]}
+            results.append(
+                CheckResult(
+                    "api:/api/markets/{market_slug}/profile historical_fallback",
+                    ok,
+                    {
+                        "market_slug": historical_market_slug,
+                        "status_code": response.status_code,
+                        "payload_keys": sorted(payload.keys()) if isinstance(payload, dict) else [],
+                    },
+                )
+            )
+
+        following_response = client.post(
+            "/api/following/overview",
+            json={
+                "user_ids": [candidate_user_id] if candidate_user_id is not None else [],
+                "market_slugs": [candidate_market_slug] if candidate_market_slug else [],
+            },
+        )
+        following_ok = following_response.status_code == 200
+        try:
+            following_payload = following_response.json()
+        except ValueError:
+            following_payload = {"raw_body": following_response.text[:200]}
+        results.append(
+            CheckResult(
+                "api:/api/following/overview",
+                following_ok,
+                {
+                    "status_code": following_response.status_code,
+                    "payload_keys": sorted(following_payload.keys()) if isinstance(following_payload, dict) else [],
+                },
+            )
+        )
+        if following_ok and isinstance(following_payload, dict):
+            overview = following_payload.get("overview") or {}
+            results.append(
+                CheckResult(
+                    "api:/api/following/overview keys",
+                    {
+                        "summary",
+                        "inflow_24h",
+                        "market_focus_recent",
+                        "recent_closed_markets",
+                        "trader_focus",
+                    }.issubset(overview.keys()),
+                    {"payload_keys": sorted(overview.keys()) if isinstance(overview, dict) else []},
+                )
+            )
+            trader_focus_rows = overview.get("trader_focus") or []
+            recent_closed_rows = overview.get("recent_closed_markets") or []
+            status_rows_ok = True
+            if trader_focus_rows:
+                status_rows_ok = "market_status_label" in trader_focus_rows[0]
+            if status_rows_ok and recent_closed_rows:
+                status_rows_ok = {
+                    "market_status_label",
+                    "result_label",
+                }.issubset(recent_closed_rows[0].keys())
+            results.append(
+                CheckResult(
+                    "api:/api/following/overview market_labels",
+                    status_rows_ok,
+                    {
+                        "trader_focus_count": len(trader_focus_rows),
+                        "recent_closed_count": len(recent_closed_rows),
+                    },
+                )
+            )
+
+        following_dashboard_response = client.post(
+            "/api/following/dashboard",
+            json={
+                "user_ids": [candidate_user_id] if candidate_user_id is not None else [],
+                "market_slugs": [candidate_market_slug] if candidate_market_slug else [],
+            },
+        )
+        following_dashboard_ok = following_dashboard_response.status_code == 200
+        try:
+            following_dashboard_payload = following_dashboard_response.json()
+        except ValueError:
+            following_dashboard_payload = {"raw_body": following_dashboard_response.text[:200]}
+        results.append(
+            CheckResult(
+                "api:/api/following/dashboard",
+                following_dashboard_ok,
+                {
+                    "status_code": following_dashboard_response.status_code,
+                    "payload_keys": (
+                        sorted(following_dashboard_payload.keys())
+                        if isinstance(following_dashboard_payload, dict)
+                        else []
+                    ),
+                },
+            )
+        )
+        if following_dashboard_ok and isinstance(following_dashboard_payload, dict):
+            dashboard_payload = following_dashboard_payload.get("dashboard") or {}
+            results.append(
+                CheckResult(
+                    "api:/api/following/dashboard keys",
+                    {
+                        "overview",
+                        "users",
+                        "markets",
+                    }.issubset(dashboard_payload.keys()),
+                    {"payload_keys": sorted(dashboard_payload.keys()) if isinstance(dashboard_payload, dict) else []},
+                )
+            )
+
+        auth_email = f"smoke-{uuid4().hex[:12]}@example.com"
+        auth_password = "SmokePass123!"
+        signup_response = client.post(
+            "/api/auth/signup",
+            json={
+                "display_name": "Smoke User",
+                "email": auth_email,
+                "password": auth_password,
+            },
+        )
+        signup_ok = signup_response.status_code == 200
+        signup_payload: dict[str, Any]
+        try:
+            signup_payload = signup_response.json()
+        except ValueError:
+            signup_payload = {"raw_body": signup_response.text[:200]}
+        results.append(
+            CheckResult(
+                "api:/api/auth/signup",
+                signup_ok,
+                {
+                    "status_code": signup_response.status_code,
+                    "has_cookie": SESSION_COOKIE_NAME in signup_response.cookies,
+                    "payload_keys": sorted(signup_payload.keys()) if isinstance(signup_payload, dict) else [],
+                },
+            )
+        )
+        if signup_ok:
+            with session_scope() as session:
+                stored_password_hash = session.execute(
+                    text("SELECT password_hash FROM app.app_account WHERE email = :email"),
+                    {"email": auth_email},
+                ).scalar_one_or_none()
+            results.append(
+                CheckResult(
+                    "api:/api/auth/signup stored_hash",
+                    bool(stored_password_hash) and stored_password_hash != auth_password,
+                    {
+                        "email": auth_email,
+                        "password_hash_prefix": stored_password_hash[:32] if stored_password_hash else None,
+                    },
+                )
+            )
+
+        duplicate_signup_response = client.post(
+            "/api/auth/signup",
+            json={
+                "display_name": "Smoke User",
+                "email": auth_email,
+                "password": auth_password,
+            },
+        )
+        results.append(
+            CheckResult(
+                "api:/api/auth/signup duplicate_email",
+                duplicate_signup_response.status_code == 409,
+                {"status_code": duplicate_signup_response.status_code},
+            )
+        )
+
+        auth_me_response = client.get("/api/auth/me")
+        auth_me_ok = auth_me_response.status_code == 200
+        try:
+            auth_me_payload = auth_me_response.json()
+        except ValueError:
+            auth_me_payload = {"raw_body": auth_me_response.text[:200]}
+        results.append(
+            CheckResult(
+                "api:/api/auth/me signed_in",
+                auth_me_ok,
+                {
+                    "status_code": auth_me_response.status_code,
+                    "payload_keys": sorted(auth_me_payload.keys()) if isinstance(auth_me_payload, dict) else [],
+                },
+            )
+        )
+
+        if candidate_user_id is not None:
+            follow_user_response = client.post(f"/api/account/follow/users/{candidate_user_id}")
+            follow_user_ok = follow_user_response.status_code == 200
+            try:
+                follow_user_payload = follow_user_response.json()
+            except ValueError:
+                follow_user_payload = {"raw_body": follow_user_response.text[:200]}
+            results.append(
+                CheckResult(
+                    "api:/api/account/follow/users/{user_id}",
+                    follow_user_ok,
+                    {
+                        "status_code": follow_user_response.status_code,
+                        "watchlist": (follow_user_payload.get("watchlist") or {}) if isinstance(follow_user_payload, dict) else {},
+                    },
+                )
+            )
+
+        preferences_response = client.patch(
+            "/api/account/preferences",
+            json={
+                "homepage": {"research_timeframe": "30d"},
+                "leaderboard": {
+                    "active_board": "user",
+                    "user_filters": {"board": "potential", "min_trades": 5, "sort": "profitability"},
+                    "market_filters": {"min_whales": 2, "sort": "whales"},
+                },
+            },
+        )
+        preferences_ok = preferences_response.status_code == 200
+        try:
+            preferences_payload = preferences_response.json()
+        except ValueError:
+            preferences_payload = {"raw_body": preferences_response.text[:200]}
+        results.append(
+            CheckResult(
+                "api:/api/account/preferences valid_patch",
+                preferences_ok,
+                {
+                    "status_code": preferences_response.status_code,
+                    "payload_keys": sorted(preferences_payload.keys()) if isinstance(preferences_payload, dict) else [],
+                },
+            )
+        )
+
+        invalid_preferences_response = client.patch(
+            "/api/account/preferences",
+            json={"homepage": {"research_timeframe": "1d"}},
+        )
+        results.append(
+            CheckResult(
+                "api:/api/account/preferences invalid_patch",
+                invalid_preferences_response.status_code == 422,
+                {"status_code": invalid_preferences_response.status_code},
+            )
+        )
+
+        with TestClient(app) as second_client:
+            second_email = f"smoke-{uuid4().hex[:12]}@example.com"
+            second_signup = second_client.post(
+                "/api/auth/signup",
+                json={
+                    "display_name": "Second Smoke",
+                    "email": second_email,
+                    "password": auth_password,
+                },
+            )
+            second_signup_ok = second_signup.status_code == 200
+            results.append(
+                CheckResult(
+                    "api:/api/auth/signup second_account",
+                    second_signup_ok,
+                    {"status_code": second_signup.status_code},
+                )
+            )
+
+            second_me_before = second_client.get("/api/auth/me")
+            second_watchlist_before = (((second_me_before.json() if second_me_before.status_code == 200 else {}) or {}).get("session") or {}).get("watchlist") or {}
+            results.append(
+                CheckResult(
+                    "api:/api/auth/me account_isolation_initial",
+                    second_me_before.status_code == 200
+                    and second_watchlist_before.get("users", []) == []
+                    and second_watchlist_before.get("markets", []) == [],
+                    {
+                        "status_code": second_me_before.status_code,
+                        "watchlist": second_watchlist_before,
+                    },
+                )
+            )
+
+            import_payload = {
+                "user_ids": [candidate_user_id, candidate_user_id, 0] if candidate_user_id is not None else [],
+                "market_slugs": [candidate_market_slug, candidate_market_slug, "missing-market"] if candidate_market_slug else [],
+            }
+            import_response = second_client.post("/api/account/watchlist/import-local", json=import_payload)
+            import_ok = import_response.status_code == 200
+            try:
+                import_result = import_response.json()
+            except ValueError:
+                import_result = {"raw_body": import_response.text[:200]}
+            imported_watchlist = (import_result.get("watchlist") or {}) if isinstance(import_result, dict) else {}
+            expected_users = [candidate_user_id] if candidate_user_id is not None else []
+            expected_markets = [candidate_market_slug] if candidate_market_slug else []
+            results.append(
+                CheckResult(
+                    "api:/api/account/watchlist/import-local",
+                    import_ok
+                    and imported_watchlist.get("users", []) == expected_users
+                    and imported_watchlist.get("markets", []) == expected_markets,
+                    {
+                        "status_code": import_response.status_code,
+                        "watchlist": imported_watchlist,
+                        "imported": (import_result.get("imported") or {}) if isinstance(import_result, dict) else {},
+                    },
+                )
+            )
+
+        bad_login_response = client.post(
+            "/api/auth/login",
+            json={
+                "email": auth_email,
+                "password": "wrong-password",
+            },
+        )
+        results.append(
+            CheckResult(
+                "api:/api/auth/login invalid_credentials",
+                bad_login_response.status_code == 401,
+                {"status_code": bad_login_response.status_code},
+            )
+        )
+
+        logout_response = client.post("/api/auth/logout")
+        logout_ok = logout_response.status_code == 200
+        results.append(
+            CheckResult(
+                "api:/api/auth/logout",
+                logout_ok,
+                {
+                    "status_code": logout_response.status_code,
+                    "cookie_cleared": SESSION_COOKIE_NAME not in logout_response.cookies,
+                },
+            )
+        )
+
+        auth_me_signed_out = client.get("/api/auth/me")
+        results.append(
+            CheckResult(
+                "api:/api/auth/me signed_out",
+                auth_me_signed_out.status_code == 401,
+                {"status_code": auth_me_signed_out.status_code},
+            )
+        )
     return results
 
 

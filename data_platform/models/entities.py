@@ -128,6 +128,7 @@ class MarketEvent(Base):
 class MarketContract(Base):
     __tablename__ = "market_contract"
     __table_args__ = (
+        Index("ix_market_contract_market_slug", "market_slug"),
         UniqueConstraint("platform_id", "external_market_ref", name="uq_market_contract_platform_external"),
         {"schema": "analytics"},
     )
@@ -211,6 +212,8 @@ class OrderbookSnapshot(Base):
 class TransactionFact(Base):
     __tablename__ = "transaction_fact"
     __table_args__ = (
+        Index("ix_transaction_fact_user_time", "user_id", "transaction_time"),
+        Index("ix_transaction_fact_user_market_time", "user_id", "market_contract_id", "transaction_time"),
         UniqueConstraint("platform_id", "source_transaction_id", name="uq_transaction_platform_source"),
         {"schema": "analytics"},
     )
@@ -239,7 +242,10 @@ class TransactionFact(Base):
 
 class PositionSnapshot(Base):
     __tablename__ = "position_snapshot"
-    __table_args__ = {"schema": "analytics"}
+    __table_args__ = (
+        Index("ix_position_snapshot_user_market_time", "user_id", "market_contract_id", "snapshot_time"),
+        {"schema": "analytics"},
+    )
 
     position_snapshot_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("analytics.user_account.user_id"), nullable=False)
@@ -262,7 +268,10 @@ class PositionSnapshot(Base):
 
 class WhaleScoreSnapshot(Base):
     __tablename__ = "whale_score_snapshot"
-    __table_args__ = {"schema": "analytics"}
+    __table_args__ = (
+        Index("ix_whale_score_snapshot_batch_user", "snapshot_time", "scoring_version", "user_id"),
+        {"schema": "analytics"},
+    )
 
     whale_score_snapshot_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("analytics.user_account.user_id"), nullable=False)
@@ -295,7 +304,10 @@ class Dashboard(Base):
 
 class DashboardMarket(Base):
     __tablename__ = "dashboard_market"
-    __table_args__ = {"schema": "analytics"}
+    __table_args__ = (
+        Index("ix_dashboard_market_dashboard_slug", "dashboard_id", "market_slug"),
+        {"schema": "analytics"},
+    )
 
     market_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     dashboard_id: Mapped[int] = mapped_column(ForeignKey("analytics.dashboard.dashboard_id"), nullable=False)
@@ -315,7 +327,10 @@ class DashboardMarket(Base):
 
 class UserProfile(Base):
     __tablename__ = "user_profile"
-    __table_args__ = {"schema": "analytics"}
+    __table_args__ = (
+        Index("ix_user_profile_dashboard_user", "dashboard_id", "user_id"),
+        {"schema": "analytics"},
+    )
 
     user_profile_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     dashboard_id: Mapped[int] = mapped_column(ForeignKey("analytics.dashboard.dashboard_id"), nullable=False)
@@ -338,7 +353,10 @@ class UserProfile(Base):
 
 class MarketProfile(Base):
     __tablename__ = "market_profile"
-    __table_args__ = {"schema": "analytics"}
+    __table_args__ = (
+        Index("ix_market_profile_dashboard_market", "dashboard_id", "market_contract_id"),
+        {"schema": "analytics"},
+    )
 
     market_profile_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     dashboard_id: Mapped[int] = mapped_column(ForeignKey("analytics.dashboard.dashboard_id"), nullable=False)
@@ -364,3 +382,70 @@ class UserLeaderboard(Base):
     score_metric: Mapped[str] = mapped_column(String(128), nullable=False)
     score_value: Mapped[float | None] = mapped_column(MONEY)
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
+class AppAccount(Base):
+    __tablename__ = "app_account"
+    __table_args__ = {"schema": "app"}
+
+    account_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    email: Mapped[str] = mapped_column(String(320), unique=True, nullable=False)
+    password_hash: Mapped[str] = mapped_column(String(512), nullable=False)
+    display_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    last_login_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+    updated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
+class AppSession(Base):
+    __tablename__ = "app_session"
+    __table_args__ = (
+        UniqueConstraint("session_token_hash", name="uq_app_session_token_hash"),
+        {"schema": "app"},
+    )
+
+    session_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey("app.app_account.account_id", ondelete="CASCADE"), nullable=False)
+    session_token_hash: Mapped[str] = mapped_column(String(128), nullable=False)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+    expires_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_seen_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
+class AppWatchlistUser(Base):
+    __tablename__ = "app_watchlist_user"
+    __table_args__ = {"schema": "app"}
+
+    account_id: Mapped[int] = mapped_column(
+        ForeignKey("app.app_account.account_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    user_id: Mapped[int] = mapped_column(ForeignKey("analytics.user_account.user_id"), primary_key=True)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
+class AppWatchlistMarket(Base):
+    __tablename__ = "app_watchlist_market"
+    __table_args__ = {"schema": "app"}
+
+    account_id: Mapped[int] = mapped_column(
+        ForeignKey("app.app_account.account_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    market_slug: Mapped[str] = mapped_column(String(255), primary_key=True)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
+class AppAccountPreferences(Base):
+    __tablename__ = "app_account_preferences"
+    __table_args__ = (
+        UniqueConstraint("account_id", name="uq_app_account_preferences_account_id"),
+        {"schema": "app"},
+    )
+
+    account_preferences_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey("app.app_account.account_id", ondelete="CASCADE"), nullable=False)
+    preference_payload: Mapped[dict] = mapped_column(JSON_VARIANT, nullable=False, default=dict)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+    updated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
