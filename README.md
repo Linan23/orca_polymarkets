@@ -9,6 +9,7 @@ The shared data/database code now lives under `data_platform/`:
 - `data_platform/models/` for ORM schema definitions
 - `data_platform/ingest/` for DB write helpers
 - `data_platform/services/` for read/query and dashboard builders
+- `data_platform/ml/` for the first model-ready dataset export and baseline training code
 
 Database setup, operation, reset, and maintenance instructions are documented in:
 
@@ -102,6 +103,80 @@ Build the preliminary whale score snapshot first when you want the dashboard to 
 ```bash
 .venv/bin/python build_whale_scores.py
 ```
+
+Export the first ML-ready dataset:
+
+```bash
+.venv/bin/python data_platform/jobs/export_ml_dataset.py
+```
+
+Train the first baseline ML model:
+
+```bash
+.venv/bin/python data_platform/jobs/train_ml_baseline.py
+```
+
+Validate the ML starter:
+
+```bash
+.venv/bin/python data_platform/tests/ml_baseline_check.py --require-data
+```
+
+ML starter scope:
+- target: conservative `positive_realized_pnl` on resolved Polymarket `user x market` rows
+- current model: baseline random-forest classifier
+- current role: establish a reproducible feature export and benchmark, not finalize the semester model choice
+- interpretation caution: this is built from full resolved trade trajectories, so it is a starter benchmark, not a final forward-looking prediction model
+
+Primary next ML dataset:
+
+```bash
+.venv/bin/python data_platform/jobs/export_market_ml_dataset.py
+```
+
+That export defines the main project-aligned ML target:
+- one row = one resolved Polymarket market side snapshot at a fixed pre-close horizon
+- target = whether that side eventually wins
+- role = build the point-in-time market dataset needed for later time-based outcome modeling
+
+Train the grouped time-aware market baseline:
+
+```bash
+.venv/bin/python data_platform/jobs/train_market_ml_baseline.py
+```
+
+Train the grouped time-aware LightGBM market model:
+
+```bash
+.venv/bin/python data_platform/jobs/train_market_lightgbm.py
+```
+
+Compare price-only and price-plus-whale market models:
+
+```bash
+.venv/bin/python data_platform/jobs/compare_market_feature_sets.py
+```
+
+Compare Random Forest and LightGBM on the same grouped market split:
+
+```bash
+.venv/bin/python data_platform/jobs/compare_market_model_families.py
+```
+
+Compare LightGBM price-only vs price-plus-whale market models:
+
+```bash
+.venv/bin/python data_platform/jobs/compare_market_feature_sets_lightgbm.py
+```
+
+LightGBM note for macOS:
+- install the Python package with `pip install -r requirements.txt`
+- if the runtime fails with `libomp.dylib` missing, install the native dependency with `brew install libomp`
+
+Current market ML dataset behavior:
+- dataset version = `ml_market_snapshot_v3`
+- whale participation features are computed from trade and resolved-market history available on or before each observation cutoff
+- historical current exposure is approximated from open shares valued at average buy price
 
 Current scoring behavior:
 - raw whale ranking uses trade size, breadth, activity, and current exposure

@@ -11,6 +11,7 @@ It covers:
 - schema bootstrap and migrations
 - ingestion into the database
 - dashboard snapshot generation
+- ML starter export/training
 - routine maintenance
 - recovery/reset workflows
 

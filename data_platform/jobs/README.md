@@ -106,6 +106,58 @@ Build only the whale score snapshot:
 .venv/bin/python data_platform/jobs/build_whale_scores.py
 ```
 
+Export the first ML dataset from resolved Polymarket user/market history:
+
+```bash
+.venv/bin/python data_platform/jobs/export_ml_dataset.py
+```
+
+Train the baseline profitability model on that dataset:
+
+```bash
+.venv/bin/python data_platform/jobs/train_ml_baseline.py
+```
+
+Export the market-level snapshot dataset for outcome prediction:
+
+```bash
+.venv/bin/python data_platform/jobs/export_market_ml_dataset.py
+```
+
+Train the grouped time-aware market outcome baseline:
+
+```bash
+.venv/bin/python data_platform/jobs/train_market_ml_baseline.py
+```
+
+Train the grouped time-aware LightGBM market outcome model:
+
+```bash
+.venv/bin/python data_platform/jobs/train_market_lightgbm.py
+```
+
+Compare price-only and price-plus-whale market models:
+
+```bash
+.venv/bin/python data_platform/jobs/compare_market_feature_sets.py
+```
+
+Compare LightGBM price-only and price-plus-whale market models:
+
+```bash
+.venv/bin/python data_platform/jobs/compare_market_feature_sets_lightgbm.py
+```
+
+Compare Random Forest and LightGBM on the same grouped market split:
+
+```bash
+.venv/bin/python data_platform/jobs/compare_market_model_families.py
+```
+
+Note:
+- the market export behind this comparison now uses historical-as-of-cutoff whale features (`ml_market_snapshot_v3`)
+- expect this export/comparison path to run noticeably slower than the earlier prototype
+
 Load a shared snapshot into Docker PostgreSQL:
 
 ```bash

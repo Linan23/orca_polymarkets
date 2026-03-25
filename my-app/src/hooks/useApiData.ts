@@ -1,15 +1,30 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
-export function useApiData<T>(loader: () => Promise<T>) {
+type UseApiDataOptions = {
+  keepPreviousData?: boolean;
+};
+
+export function useApiData<T>(loader: () => Promise<T>, options?: UseApiDataOptions) {
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const hasDataRef = useRef(false);
+
+  useEffect(() => {
+    hasDataRef.current = data !== null;
+  }, [data]);
 
   useEffect(() => {
     let cancelled = false;
 
     async function run() {
-      setLoading(true);
+      const shouldKeepPreviousData = Boolean(options?.keepPreviousData && hasDataRef.current);
+      if (shouldKeepPreviousData) {
+        setRefreshing(true);
+      } else {
+        setLoading(true);
+      }
       setError(null);
       try {
         const result = await loader();
@@ -23,6 +38,7 @@ export function useApiData<T>(loader: () => Promise<T>) {
       } finally {
         if (!cancelled) {
           setLoading(false);
+          setRefreshing(false);
         }
       }
     }
@@ -32,7 +48,7 @@ export function useApiData<T>(loader: () => Promise<T>) {
     return () => {
       cancelled = true;
     };
-  }, [loader]);
+  }, [loader, options?.keepPreviousData]);
 
-  return { data, loading, error };
+  return { data, loading, refreshing, error };
 }

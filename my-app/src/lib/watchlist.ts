@@ -1,10 +1,6 @@
-export type WatchlistState = {
-  users: number[];
-  markets: string[];
-};
+import type { WatchlistState } from "./api";
 
-export const WATCHLIST_STORAGE_KEY = "orca.following.v1";
-const WATCHLIST_EVENT = "orca:watchlist-updated";
+export const LEGACY_WATCHLIST_STORAGE_KEY = "orca.following.v1";
 
 const EMPTY_WATCHLIST: WatchlistState = {
   users: [],
@@ -38,99 +34,30 @@ function uniqueMarketSlugs(values: unknown): string[] {
   return items;
 }
 
-function normalizeWatchlist(value: unknown): WatchlistState {
-  if (!value || typeof value !== "object") {
-    return EMPTY_WATCHLIST;
-  }
-
-  const record = value as Record<string, unknown>;
-  return {
-    users: uniqueNumbers(record.users),
-    markets: uniqueMarketSlugs(record.markets),
-  };
-}
-
-export function readWatchlist(): WatchlistState {
+export function readLegacyWatchlist(): WatchlistState {
   if (typeof window === "undefined") {
     return EMPTY_WATCHLIST;
   }
 
-  const rawValue = window.localStorage.getItem(WATCHLIST_STORAGE_KEY);
+  const rawValue = window.localStorage.getItem(LEGACY_WATCHLIST_STORAGE_KEY);
   if (!rawValue) {
     return EMPTY_WATCHLIST;
   }
 
   try {
-    return normalizeWatchlist(JSON.parse(rawValue));
+    const parsed = JSON.parse(rawValue) as Record<string, unknown>;
+    return {
+      users: uniqueNumbers(parsed.users),
+      markets: uniqueMarketSlugs(parsed.markets),
+    };
   } catch {
     return EMPTY_WATCHLIST;
   }
 }
 
-function writeWatchlist(nextState: WatchlistState) {
+export function clearLegacyWatchlist() {
   if (typeof window === "undefined") {
     return;
   }
-
-  window.localStorage.setItem(WATCHLIST_STORAGE_KEY, JSON.stringify(nextState));
-  window.dispatchEvent(new Event(WATCHLIST_EVENT));
-}
-
-export function subscribeWatchlist(listener: () => void): () => void {
-  if (typeof window === "undefined") {
-    return () => undefined;
-  }
-
-  const onStorage = (event: Event) => {
-    const storageEvent = event as StorageEvent;
-    if (storageEvent.type === "storage" && storageEvent.key && storageEvent.key !== WATCHLIST_STORAGE_KEY) {
-      return;
-    }
-    listener();
-  };
-
-  window.addEventListener("storage", onStorage);
-  window.addEventListener(WATCHLIST_EVENT, onStorage);
-
-  return () => {
-    window.removeEventListener("storage", onStorage);
-    window.removeEventListener(WATCHLIST_EVENT, onStorage);
-  };
-}
-
-export function toggleWatchlistUser(userId: number) {
-  const current = readWatchlist();
-  const exists = current.users.includes(userId);
-  writeWatchlist({
-    ...current,
-    users: exists ? current.users.filter((value) => value !== userId) : [userId, ...current.users],
-  });
-}
-
-export function toggleWatchlistMarket(marketSlug: string) {
-  const normalized = marketSlug.trim().toLowerCase();
-  if (!normalized) return;
-  const current = readWatchlist();
-  const exists = current.markets.includes(normalized);
-  writeWatchlist({
-    ...current,
-    markets: exists ? current.markets.filter((value) => value !== normalized) : [normalized, ...current.markets],
-  });
-}
-
-export function removeWatchlistUser(userId: number) {
-  const current = readWatchlist();
-  writeWatchlist({
-    ...current,
-    users: current.users.filter((value) => value !== userId),
-  });
-}
-
-export function removeWatchlistMarket(marketSlug: string) {
-  const normalized = marketSlug.trim().toLowerCase();
-  const current = readWatchlist();
-  writeWatchlist({
-    ...current,
-    markets: current.markets.filter((value) => value !== normalized),
-  });
+  window.localStorage.removeItem(LEGACY_WATCHLIST_STORAGE_KEY);
 }

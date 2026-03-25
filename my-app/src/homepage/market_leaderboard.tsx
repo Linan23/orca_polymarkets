@@ -15,6 +15,12 @@ function formatPercent(value: number | null) {
   return `${Math.round(value * 100)}%`;
 }
 
+function formatOpposingPercent(value: number | null) {
+  if (value === null) return "--";
+  const normalized = Math.min(Math.max(value, 0), 1);
+  return `${Math.round((1 - normalized) * 100)}%`;
+}
+
 function formatCurrency(value: number | null) {
   if (value === null) return "--";
   return `$${value.toLocaleString()}`;
@@ -54,14 +60,14 @@ function MarketRows({ items }: { items: DashboardMarketRow[] }) {
                   </div>
                 </div>
 
-                <div className="leaderboard-price">{formatPercent(market.price)}</div>
+                <div className="leaderboard-price">Yes {formatPercent(market.price)}</div>
               </div>
 
               <div className="leaderboard-meta">
                 <span className="meta-pill">Vol {formatCurrency(market.volume)}</span>
-                <span className="meta-pill">Odds {formatPercent(market.odds)}</span>
-                <span className="meta-pill">Whales {market.whale_count}</span>
-                <span className="meta-pill">Trusted {market.trusted_whale_count}</span>
+                <span className="meta-pill">No {formatOpposingPercent(market.odds ?? market.price)}</span>
+                <span className="meta-pill">Whale Traders {market.whale_count}</span>
+                <span className="meta-pill">Trusted Whales {market.trusted_whale_count}</span>
                 <span className="meta-pill">Depth {formatDepth(market.orderbook_depth)}</span>
               </div>
             </div>

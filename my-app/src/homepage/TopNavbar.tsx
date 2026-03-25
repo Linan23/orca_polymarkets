@@ -1,6 +1,9 @@
 import { NavLink, Link } from "react-router-dom";
+import { useAuth } from "../auth/AuthContext";
 
 export default function TopNavbar() {
+  const { account, isAuthenticated, logout } = useAuth();
+
   return (
     <header className="topbar">
       <div className="topbar-inner">
@@ -38,21 +41,24 @@ export default function TopNavbar() {
             >
               Leaderboard
             </NavLink>
-
-            <NavLink
-              to="/analytics"
-              className={({ isActive }) =>
-                isActive ? "topbar-link active" : "topbar-link"
-              }
-            >
-              Analytics
-            </NavLink>
           </nav>
         </div>
 
-        <Link to="/login" className="topbar-signin">
-          Sign In
-        </Link>
+        {isAuthenticated && account ? (
+          <div className="topbar-account">
+            <div className="topbar-account-copy">
+              <span className="topbar-account-label">Signed in</span>
+              <strong>{account.display_name}</strong>
+            </div>
+            <button type="button" className="topbar-signout" onClick={() => void logout()}>
+              Sign Out
+            </button>
+          </div>
+        ) : (
+          <Link to="/login" className="topbar-signin">
+            Sign In
+          </Link>
+        )}
       </div>
     </header>
   );

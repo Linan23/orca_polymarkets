@@ -201,6 +201,13 @@ def _percentile_rank(value: float, values: list[float]) -> float:
     return round(bisect_right(ordered, value) / len(ordered), 6)
 
 
+def _percentile_rank_sorted(value: float, ordered_values: list[float]) -> float:
+    """Return a percentile rank when the input values are already sorted."""
+    if not ordered_values:
+        return 0.0
+    return round(bisect_right(ordered_values, value) / len(ordered_values), 6)
+
+
 def _top_count(size: int, fraction: float) -> int:
     """Return the number of rows to keep for a top-fraction selection."""
     if size <= 0:
@@ -413,21 +420,29 @@ def _compute_platform_scores(
     market_counts = [float(item.distinct_markets) for item in metrics]
     active_trade_days = [float(item.active_trade_days) for item in metrics]
     exposures = [item.current_exposure for item in metrics]
+    ordered_total_notionals = sorted(total_notionals)
+    ordered_market_counts = sorted(market_counts)
+    ordered_active_trade_days = sorted(active_trade_days)
+    ordered_exposures = sorted(exposures)
+    metric_user_ids = {item.user_id for item in metrics}
     pnl_values = [
         performance.realized_pnl
         for performance in resolved_performance_by_user.values()
-        if performance.user_id in {item.user_id for item in metrics} and performance.resolved_market_count > 0
+        if performance.user_id in metric_user_ids and performance.resolved_market_count > 0
     ]
     roi_values = [
         performance.realized_roi
         for performance in resolved_performance_by_user.values()
-        if performance.user_id in {item.user_id for item in metrics} and performance.resolved_market_count > 0
+        if performance.user_id in metric_user_ids and performance.resolved_market_count > 0
     ]
     win_rate_values = [
         (performance.winning_market_count / performance.resolved_market_count)
         for performance in resolved_performance_by_user.values()
-        if performance.user_id in {item.user_id for item in metrics} and performance.resolved_market_count > 0
+        if performance.user_id in metric_user_ids and performance.resolved_market_count > 0
     ]
+    ordered_pnl_values = sorted(pnl_values)
+    ordered_roi_values = sorted(roi_values)
+    ordered_win_rate_values = sorted(win_rate_values)
 
     scored: list[WhaleScoreResult] = []
     for item in metrics:
@@ -442,16 +457,16 @@ def _compute_platform_scores(
                 excluded_market_count=0,
             ),
         )
-        raw_volume_score = _percentile_rank(item.total_notional, total_notionals)
-        market_breadth_score = _percentile_rank(float(item.distinct_markets), market_counts)
-        consistency_score = _percentile_rank(float(item.active_trade_days), active_trade_days)
-        current_exposure_score = _percentile_rank(item.current_exposure, exposures)
+        raw_volume_score = _percentile_rank_sorted(item.total_notional, ordered_total_notionals)
+        market_breadth_score = _percentile_rank_sorted(float(item.distinct_markets), ordered_market_counts)
+        consistency_score = _percentile_rank_sorted(float(item.active_trade_days), ordered_active_trade_days)
+        current_exposure_score = _percentile_rank_sorted(item.current_exposure, ordered_exposures)
         insider_penalty = INSIDER_PENALTY if item.is_likely_insider else 0.0
         if resolved_performance.resolved_market_count > 0:
-            realized_pnl_score = _percentile_rank(resolved_performance.realized_pnl, pnl_values)
-            realized_roi_score = _percentile_rank(resolved_performance.realized_roi, roi_values)
+            realized_pnl_score = _percentile_rank_sorted(resolved_performance.realized_pnl, ordered_pnl_values)
+            realized_roi_score = _percentile_rank_sorted(resolved_performance.realized_roi, ordered_roi_values)
             win_rate = resolved_performance.winning_market_count / resolved_performance.resolved_market_count
-            win_rate_score = _percentile_rank(win_rate, win_rate_values)
+            win_rate_score = _percentile_rank_sorted(win_rate, ordered_win_rate_values)
             profitability_score = round(
                 (0.40 * realized_pnl_score) + (0.30 * realized_roi_score) + (0.30 * win_rate_score),
                 6,
@@ -542,6 +557,18 @@ def _compute_platform_scores(
             )
         )
     return final_results
+
+
+def compute_whale_scores(
+    metrics: list[WhaleMetricInput],
+    *,
+    resolved_performance_by_user: dict[int, ResolvedUserPerformance],
+) -> list[WhaleScoreResult]:
+    """Return whale scores for one platform from supplied point-in-time metrics."""
+    return _compute_platform_scores(
+        metrics,
+        resolved_performance_by_user=resolved_performance_by_user,
+    )
 
 
 def build_whale_score_snapshot(session: Session, *, scoring_version: str = SCORING_VERSION) -> dict[str, Any]:

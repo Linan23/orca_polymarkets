@@ -6,6 +6,20 @@ type UserIdentitySource = {
   display_label?: string | null;
 };
 
+type WhaleStatusSource = {
+  is_whale?: boolean | null;
+  is_trusted_whale?: boolean | null;
+  is_likely_insider?: boolean | null;
+  trust_score?: number | null;
+  sample_trade_count?: number | null;
+  entry_trade_count?: number | null;
+};
+
+export type WhaleTier = "trusted" | "whale" | "potential" | "standard";
+
+const POTENTIAL_WHALE_MIN_TRUST_SCORE = 1.08;
+const POTENTIAL_WHALE_MIN_ACTIVITY_COUNT = 5;
+
 function looksGeneratedDisplayLabel(value: string | null | undefined) {
   if (!value || !value.includes("-")) return false;
   const parts = value.split("-");
@@ -70,4 +84,42 @@ export function matchesUserIdentityQuery(user: UserIdentitySource, query: string
   const normalizedQuery = query.trim().toLowerCase();
   if (!normalizedQuery) return true;
   return userIdentitySearchTokens(user).some((value) => value.includes(normalizedQuery));
+}
+
+export function deriveWhaleTier(user: WhaleStatusSource): WhaleTier {
+  if (user.is_trusted_whale) return "trusted";
+  if (user.is_whale) return "whale";
+  if (user.is_likely_insider) return "standard";
+  const trustScore = typeof user.trust_score === "number" ? user.trust_score : null;
+  const activityCount =
+    typeof user.sample_trade_count === "number"
+      ? user.sample_trade_count
+      : typeof user.entry_trade_count === "number"
+        ? user.entry_trade_count
+        : null;
+  if (
+    trustScore !== null &&
+    activityCount !== null &&
+    trustScore >= POTENTIAL_WHALE_MIN_TRUST_SCORE &&
+    activityCount >= POTENTIAL_WHALE_MIN_ACTIVITY_COUNT
+  ) {
+    return "potential";
+  }
+  return "standard";
+}
+
+export function deriveWhaleTierLabel(user: WhaleStatusSource | WhaleTier) {
+  const tier = typeof user === "string" ? user : deriveWhaleTier(user);
+  if (tier === "trusted") return "Trusted Whale";
+  if (tier === "whale") return "Whale";
+  if (tier === "potential") return "Potential Whale";
+  return "Standard Trader";
+}
+
+export function deriveWhaleTierPillClass(user: WhaleStatusSource | WhaleTier) {
+  const tier = typeof user === "string" ? user : deriveWhaleTier(user);
+  if (tier === "trusted") return "internal-pill";
+  if (tier === "whale") return "public-pill";
+  if (tier === "potential") return "potential-pill";
+  return "standard-pill";
 }

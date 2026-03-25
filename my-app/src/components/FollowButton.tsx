@@ -1,13 +1,14 @@
 type FollowButtonProps = {
   isFollowing: boolean;
-  onToggle: () => void;
+  onToggle: () => void | Promise<void>;
+  compact?: boolean;
 };
 
-export default function FollowButton({ isFollowing, onToggle }: FollowButtonProps) {
+export default function FollowButton({ isFollowing, onToggle, compact = false }: FollowButtonProps) {
   return (
     <button
       type="button"
-      className={`follow-btn ${isFollowing ? "active" : ""}`}
+      className={`follow-btn ${compact ? "compact" : ""} ${isFollowing ? "active" : ""}`}
       onClick={onToggle}
       aria-pressed={isFollowing}
     >

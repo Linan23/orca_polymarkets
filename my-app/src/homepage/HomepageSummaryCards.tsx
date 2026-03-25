@@ -94,11 +94,11 @@ export default function HomepageSummaryCards() {
                     <strong>{formatPercent(data.most_whale_concentrated_market.price)}</strong>
                   </div>
                   <div>
-                    <span>Whales</span>
+                    <span>Whale Traders</span>
                     <strong>{data.most_whale_concentrated_market.whale_count}</strong>
                   </div>
                   <div>
-                    <span>Trusted</span>
+                    <span>Trusted Whales</span>
                     <strong>{data.most_whale_concentrated_market.trusted_whale_count}</strong>
                   </div>
                 </div>

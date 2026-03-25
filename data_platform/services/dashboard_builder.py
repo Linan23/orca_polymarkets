@@ -27,6 +27,15 @@ DEFAULT_MARKET_LIMIT = 25
 DEFAULT_USER_LIMIT = 25
 
 
+def _market_focus_identity(preferred_username: str | None, external_user_ref: str | None) -> str:
+    """Return the best available user-facing name for market focus summaries."""
+    preferred = (preferred_username or "").strip()
+    if preferred:
+        return preferred
+    fallback = (external_user_ref or "").strip()
+    return fallback or "Unknown trader"
+
+
 def _load_latest_orderbook_depths(session: Session, market_ids: list[int]) -> dict[int, int]:
     """Return the latest observed order-book depth for each tracked market."""
     if not market_ids:
@@ -97,6 +106,7 @@ def _load_market_whale_activity(
         select(
             TransactionFact.market_contract_id,
             TransactionFact.user_id,
+            UserAccount.preferred_username,
             UserAccount.external_user_ref,
             func.count(TransactionFact.transaction_id).label("trade_count"),
             func.coalesce(func.sum(TransactionFact.notional_value), 0).label("total_notional"),
@@ -107,6 +117,7 @@ def _load_market_whale_activity(
         .group_by(
             TransactionFact.market_contract_id,
             TransactionFact.user_id,
+            UserAccount.preferred_username,
             UserAccount.external_user_ref,
         )
     ).all()
@@ -130,11 +141,14 @@ def _load_market_whale_activity(
         )
         if score.is_whale:
             market_activity["whale_users"].add(int(row.user_id))
-            market_activity["focus_refs"].append((float(score.trust_score or 0), str(row.external_user_ref)))
+            identity_label = _market_focus_identity(row.preferred_username, row.external_user_ref)
+            market_activity["focus_refs"].append((float(score.trust_score or 0), identity_label))
             market_activity["whale_entry_prices"].append(
                 {
                     "user_id": int(row.user_id),
                     "external_user_ref": str(row.external_user_ref),
+                    "preferred_username": row.preferred_username,
+                    "display_name": identity_label,
                     "avg_trade_price": float(row.avg_trade_price) if row.avg_trade_price is not None else None,
                     "trade_count": int(row.trade_count or 0),
                     "total_notional": float(row.total_notional or 0),

@@ -1,26 +1,24 @@
 import HomepageSummaryCards from "../homepage/HomepageSummaryCards";
 import PolymarketNewsGallery from "../homepage/PolymarketNewsGallery";
-import PolymarketTimeline from "../homepage/PolymarketTimeline";
 import ResearchAnalyticsSection from "../homepage/ResearchAnalyticsSection";
 import TopNavbar from "../homepage/TopNavbar";
 
 export default function HomePage() {
   return (
-    <div className="page">
+    <div className="page page-home">
       <TopNavbar />
 
       <section className="hero">
         <p className="eyebrow">Orca Polymarkets</p>
         <h1>Orca Dashboard</h1>
         <p className="hero-text">
-          Follow markets, keep up with the latest Polymarket news, and explore whale activity.
+          Follow markets, monitor whale activity, and track the strongest signals across Polymarket.
         </p>
       </section>
 
-      <HomepageSummaryCards />
-      <ResearchAnalyticsSection />
       <PolymarketNewsGallery />
-      <PolymarketTimeline />
+      <HomepageSummaryCards />
+      <ResearchAnalyticsSection persistTimeframePreference />
     </div>
   );
 }

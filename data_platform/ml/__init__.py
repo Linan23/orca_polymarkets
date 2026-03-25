@@ -1,1 +1,1 @@
-"""Placeholder package for future ML model selection and training code."""
+"""ML dataset and baseline training helpers."""

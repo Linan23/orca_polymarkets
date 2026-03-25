@@ -55,7 +55,7 @@ export default function PolymarketNewsGallery() {
   return (
     <section className="pm-news-section">
       <div className="pm-news-header">
-        <h2>LATEST NEWS &amp; UPDATES</h2>
+        <h2>LIVE TWEET FEED</h2>
       </div>
 
       <div className="pm-news-carousel">

@@ -1,5 +1,6 @@
 import { useCallback, useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import { useAuth } from "../auth/AuthContext";
 import FollowButton from "../components/FollowButton";
 import { useApiData } from "../hooks/useApiData";
 import { useWatchlist } from "../hooks/useWatchlist";
@@ -12,7 +13,7 @@ import {
   fetchUserActivityInsights,
   fetchUserWhaleProfile,
 } from "../lib/api";
-import { deriveUserIdentity } from "../lib/userIdentity";
+import { deriveUserIdentity, deriveWhaleTierLabel } from "../lib/userIdentity";
 import {
   HourlyActivityChart,
   OutcomeBiasBar,
@@ -124,6 +125,10 @@ function OverviewTab({
   const resolved = profile.resolved_performance;
   const dashboard = profile.dashboard_profile;
   const { primary, secondary } = deriveUserIdentity(profile);
+  const traderTierSource = {
+    is_likely_insider: profile.is_likely_insider,
+    ...(score ?? {}),
+  };
 
   return (
     <div className="tab-panel">
@@ -141,9 +146,9 @@ function OverviewTab({
               <strong>{secondary}</strong>
             </div>
             <div>
-              <span>Trader Status</span>
+              <span>Trader Tier</span>
               <strong>
-                {score?.is_trusted_whale ? "Trusted Whale" : score?.is_whale ? "Whale" : "Candidate"}
+                {deriveWhaleTierLabel(traderTierSource)}
               </strong>
             </div>
             <div>
@@ -308,11 +313,28 @@ function CurrentPositionsTable({ positions }: { positions: CurrentPositionRow[] 
 
 export default function UserProfile() {
   const { userId } = useParams();
+  const { isAuthenticated, preferences, updatePreferences } = useAuth();
   const parsedUserId = Number(userId);
   const invalidUser = Number.isNaN(parsedUserId);
   const [activeTab, setActiveTab] = useState<ProfileTab>("overview");
-  const [timeframe, setTimeframe] = useState<AnalyticsTimeframe>("30d");
+  const [publicTimeframe, setPublicTimeframe] = useState<AnalyticsTimeframe>("30d");
   const { isUserFollowed, toggleUser } = useWatchlist();
+  const timeframe = isAuthenticated ? preferences.user_profile.analytics_timeframe : publicTimeframe;
+  const handleTimeframeChange = useCallback(
+    (value: AnalyticsTimeframe) => {
+      if (isAuthenticated) {
+        if (preferences.user_profile.analytics_timeframe === value) return;
+        void updatePreferences({
+          user_profile: {
+            analytics_timeframe: value,
+          },
+        });
+        return;
+      }
+      setPublicTimeframe(value);
+    },
+    [isAuthenticated, preferences.user_profile.analytics_timeframe, updatePreferences],
+  );
 
   const loadProfile = useCallback(async () => {
     if (invalidUser) {
@@ -331,8 +353,9 @@ export default function UserProfile() {
   const {
     data: insights,
     loading: insightsLoading,
+    refreshing: insightsRefreshing,
     error: insightsError,
-  } = useApiData(loadInsights);
+  } = useApiData(loadInsights, { keepPreviousData: true });
 
   if (invalidUser) {
     return (
@@ -350,6 +373,10 @@ export default function UserProfile() {
   const resolved = data?.resolved_performance;
   const dashboard = data?.dashboard_profile;
   const { primary, secondary } = deriveUserIdentity(data ?? {});
+  const traderTierSource = {
+    is_likely_insider: data?.is_likely_insider,
+    ...(score ?? {}),
+  };
 
   return (
     <div className="page user-profile-page">
@@ -380,9 +407,7 @@ export default function UserProfile() {
           {data && (
             <div className="hero-pills">
               <span className="hero-pill">User #{data.user_id}</span>
-              <span className="hero-pill">
-                {score?.is_trusted_whale ? "Trusted Whale" : score?.is_whale ? "Whale" : "Candidate"}
-              </span>
+              <span className="hero-pill">{deriveWhaleTierLabel(traderTierSource)}</span>
               <span className="hero-pill">Trades {score?.sample_trade_count ?? 0}</span>
             </div>
           )}
@@ -452,8 +477,8 @@ export default function UserProfile() {
 
             <div className="trader-overview-side">
               <div className="side-metric-card accent">
-                <span>Status</span>
-                <strong>{score?.is_trusted_whale ? "Trusted" : score?.is_whale ? "Whale" : "Candidate"}</strong>
+                <span>Trader Tier</span>
+                <strong>{deriveWhaleTierLabel(traderTierSource)}</strong>
               </div>
               <div className="side-metric-card surface">
                 <span>Active Markets</span>
@@ -491,7 +516,8 @@ export default function UserProfile() {
 
             {activeTab === "analytics" && (
               <div className="tab-panel">
-                <TimeframeField timeframe={timeframe} onChange={setTimeframe} />
+                <TimeframeField timeframe={timeframe} onChange={handleTimeframeChange} />
+                {insightsRefreshing && <p className="tab-copy">Updating trader analytics...</p>}
                 {insightsLoading && <div className="status-panel">Loading trader analytics...</div>}
                 {insightsError && <div className="status-panel error-panel">{insightsError}</div>}
                 {!insightsLoading && !insightsError && insights && (
@@ -523,7 +549,8 @@ export default function UserProfile() {
 
             {activeTab === "activity" && (
               <div className="tab-panel">
-                <TimeframeField timeframe={timeframe} onChange={setTimeframe} />
+                <TimeframeField timeframe={timeframe} onChange={handleTimeframeChange} />
+                {insightsRefreshing && <p className="tab-copy">Updating past activity...</p>}
                 {insightsLoading && <div className="status-panel">Loading past activity...</div>}
                 {insightsError && <div className="status-panel error-panel">{insightsError}</div>}
                 {!insightsLoading && !insightsError && insights && (

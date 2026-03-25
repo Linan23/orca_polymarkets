@@ -10,6 +10,12 @@ function formatPercent(value: number | null) {
   return `${Math.round(value * 100)}%`;
 }
 
+function formatOpposingPercent(value: number | null) {
+  if (value === null) return "--";
+  const normalized = Math.min(Math.max(value, 0), 1);
+  return `${Math.round((1 - normalized) * 100)}%`;
+}
+
 function formatCurrency(value: number | null) {
   if (value === null) return "--";
   return `$${value.toLocaleString()}`;
@@ -52,8 +58,8 @@ export default function MarketProfile() {
           {data && (
             <div className="hero-pills">
               <span className="hero-pill">{data.market_slug}</span>
-              <span className="hero-pill">Whales {data.whale_count}</span>
-              <span className="hero-pill">Trusted {data.trusted_whale_count}</span>
+              <span className="hero-pill">Whale Traders {data.whale_count}</span>
+              <span className="hero-pill">Trusted Whales {data.trusted_whale_count}</span>
             </div>
           )}
         </div>
@@ -66,10 +72,10 @@ export default function MarketProfile() {
         <>
           <section className="market-summary-card">
             <div className="market-summary-left">
-              <p className="summary-label">Current Probability</p>
+              <p className="summary-label">Current Yes Probability</p>
               <div className="summary-main">
                 <h2>{formatPercent(data.price)}</h2>
-                <span className="summary-trend">Odds {formatPercent(data.odds)}</span>
+                <span className="summary-trend">No {formatOpposingPercent(data.odds ?? data.price)}</span>
               </div>
 
               <div className="summary-stats">
@@ -82,11 +88,11 @@ export default function MarketProfile() {
                   <strong>{data.orderbook_depth?.toLocaleString() ?? "--"}</strong>
                 </div>
                 <div className="stat-chip">
-                  <span className="stat-chip-label">Whales</span>
+                  <span className="stat-chip-label">Whale Traders</span>
                   <strong>{data.whale_count}</strong>
                 </div>
                 <div className="stat-chip">
-                  <span className="stat-chip-label">Trusted</span>
+                  <span className="stat-chip-label">Trusted Whales</span>
                   <strong>{data.trusted_whale_count}</strong>
                 </div>
               </div>
@@ -94,7 +100,7 @@ export default function MarketProfile() {
 
             <div className="market-summary-right">
               <button className="trade-btn trade-btn-yes" type="button">
-                <span className="trade-label">Market Focus</span>
+                <span className="trade-label">Top Whale Traders</span>
                 <strong>{data.whale_market_focus ?? "Broad"}</strong>
               </button>
               <button className="trade-btn trade-btn-no" type="button">
