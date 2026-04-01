@@ -15,6 +15,7 @@ __pycache__*/
 # Environment variables
 .env
 .env.local
+.bootstrap-state.json
 
 # IDE
 .vscode/

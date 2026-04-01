@@ -154,7 +154,7 @@ def main() -> int:
     print(f"- SHA256: {checksum_path}")
     print(f"- manifest: {manifest_path}")
     print("\nCollaborator import command:")
-    print(f'.venv/bin/python scripts/setup_collab_db.py --snapshot "{snapshot_path}"')
+    print(f'./scripts/bootstrap.sh --snapshot "{snapshot_path}"')
     return 0
 
 

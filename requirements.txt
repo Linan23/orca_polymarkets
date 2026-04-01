@@ -5,6 +5,7 @@ alembic>=1.14,<2
 argon2-cffi>=23.1,<24
 certifi==2026.2.25
 click==8.3.1
+cryptography==44.0.2
 dnspython==2.8.0
 email-validator==2.3.0
 fastapi==0.133.0
@@ -29,14 +30,15 @@ pydantic-settings==2.13.1
 pydantic_core==2.41.5
 psycopg[binary]>=3.2,<4
 Pygments==2.19.2
+python-dateutil==2.9.0.post0
 python-dotenv==1.2.1
 python-multipart==0.0.22
 PyYAML==6.0.3
+requests==2.32.3
 rich==14.3.3
 rich-toolkit==0.19.7
 rignore==0.7.6
 scikit-learn>=1.6,<2
-SQLAlchemy>=2.0,<3
 sentry-sdk==2.53.0
 shellingham==1.5.4
 SQLAlchemy==2.0.48

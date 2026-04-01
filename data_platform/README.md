@@ -95,13 +95,52 @@ Change these credentials before using any shared or remote environment.
 
 ## Collaborator Docker Setup
 
-If a maintainer shared a database snapshot, load it into Docker with:
+Preferred macOS and Ubuntu onboarding path:
+
+```bash
+./scripts/bootstrap.sh
+```
+
+Optional variants:
+
+```bash
+./scripts/bootstrap.sh --snapshot path/to/shared_data_snapshot.sql
+./scripts/bootstrap.sh --empty-db
+./scripts/bootstrap.sh --reset-db
+```
+
+`bootstrap.sh` validates machine prerequisites, creates `.venv`, installs Python and frontend dependencies, copies `.env.example` files when needed, starts Docker PostgreSQL, applies migrations, imports a snapshot only when the DB is empty, runs verification, and tracks the active dependency/snapshot hashes in a local bootstrap state file so reruns can stay current.
+
+If no bundled snapshot is present, use `--snapshot PATH` or `--empty-db`.
+
+Common collaborator commands from the repo root:
+
+```bash
+# Full setup
+./scripts/bootstrap.sh
+
+# Setup variants
+./scripts/bootstrap.sh --empty-db
+./scripts/bootstrap.sh --snapshot path/to/shared_data_snapshot.sql
+./scripts/bootstrap.sh --reset-db
+./scripts/bootstrap.sh --help
+
+# DB-only helper
+.venv/bin/python scripts/setup_collab_db.py
+.venv/bin/python scripts/setup_collab_db.py --help
+
+# Start local services after setup
+.venv/bin/python -m uvicorn data_platform.api.server:app --reload --host 127.0.0.1 --port 8000
+npm --prefix my-app run dev
+```
+
+If a maintainer shared a database snapshot and you only need the DB import path, you can still load it manually with:
 
 ```bash
 ./data_platform/open_psql.sh < path/to/shared_data_snapshot.sql
 ```
 
-Or use the collaborator setup script (recommended, cross-platform):
+Or use the DB-only collaborator helper directly:
 
 ```bash
 .venv/bin/python scripts/setup_collab_db.py --snapshot path/to/shared_data_snapshot.sql
@@ -240,7 +279,7 @@ psql "$PSQL_URL" -Atqc "SELECT current_database(), current_user;"
 Expected:
 
 ```text
-whaling|postgres
+app_db|app
 ```
 
 ### List the project tables
@@ -695,7 +734,7 @@ This can be rerun to generate additional snapshots over time.
 Start the API:
 
 ```bash
-.venv/bin/python -m uvicorn main:app --reload
+.venv/bin/python -m uvicorn data_platform.api.server:app --reload --host 127.0.0.1 --port 8000
 ```
 
 Useful endpoints:

@@ -4,8 +4,8 @@ This script works on macOS/Linux/Windows and performs:
 1. start Docker PostgreSQL via compose
 2. wait for DB readiness
 3. run Alembic migrations
-4. optional snapshot import (with table reset)
-5. smoke validation
+4. optionally import a snapshot when the DB is empty or reset is requested
+5. optionally run smoke validation
 """
 
 from __future__ import annotations
@@ -25,6 +25,16 @@ DEFAULT_PSQL_URL = "postgresql://app:password@localhost:5433/app_db"
 DEFAULT_CONTAINER = "orcaDB"
 DEFAULT_DB_USER = "app"
 DEFAULT_DB_NAME = "app_db"
+SNAPSHOT_DATA_TABLES = (
+    "analytics.scrape_run",
+    "analytics.market_event",
+    "analytics.market_contract",
+    "analytics.transaction_fact",
+    "analytics.position_snapshot",
+    "analytics.orderbook_snapshot",
+    "analytics.dashboard",
+    "raw.api_payload",
+)
 
 
 def run(
@@ -34,7 +44,17 @@ def run(
     check: bool = True,
     stdin_file: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    """Run a subprocess with optional file stdin."""
+    """Run one subprocess command.
+
+    Args:
+        cmd: Argument vector passed directly to ``subprocess.run``.
+        env: Optional environment overrides for the child process.
+        check: When true, raise ``CalledProcessError`` on non-zero exit codes.
+        stdin_file: Optional file streamed into stdin for commands such as ``psql``.
+
+    Returns:
+        ``subprocess.CompletedProcess[str]`` describing the finished process.
+    """
     if stdin_file is None:
         return subprocess.run(cmd, env=env, text=True, check=check)
     with stdin_file.open("rb") as handle:
@@ -42,7 +62,15 @@ def run(
 
 
 def resolve_python(repo_root: Path) -> str:
-    """Resolve project virtualenv python when available."""
+    """Resolve the preferred Python interpreter for repo-local commands.
+
+    Args:
+        repo_root: Repository root used to look for ``.venv``.
+
+    Returns:
+        Path to the project virtualenv interpreter when present, otherwise the
+        current Python executable.
+    """
     win_py = repo_root / ".venv" / "Scripts" / "python.exe"
     unix_py = repo_root / ".venv" / "bin" / "python"
     if win_py.exists():
@@ -53,7 +81,18 @@ def resolve_python(repo_root: Path) -> str:
 
 
 def wait_for_db(psql_url: str, timeout_seconds: int = 60) -> None:
-    """Wait until the target PostgreSQL database accepts connections."""
+    """Wait until PostgreSQL accepts connections.
+
+    Args:
+        psql_url: Standard PostgreSQL connection string.
+        timeout_seconds: Maximum wait time before failing.
+
+    Returns:
+        ``None``.
+
+    Raises:
+        RuntimeError: If the database does not become reachable in time.
+    """
     deadline = time.time() + timeout_seconds
     while time.time() < deadline:
         try:
@@ -65,11 +104,19 @@ def wait_for_db(psql_url: str, timeout_seconds: int = 60) -> None:
 
 
 def reset_schema_state(psql_url: str) -> None:
-    """Drop managed schemas and Alembic state so migrations can rebuild cleanly."""
+    """Drop managed schemas and Alembic state so migrations can rebuild cleanly.
+
+    Args:
+        psql_url: Standard PostgreSQL connection string.
+
+    Returns:
+        ``None``.
+    """
     with psycopg.connect(psql_url, autocommit=True) as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
+                DROP SCHEMA IF EXISTS app CASCADE;
                 DROP SCHEMA IF EXISTS analytics CASCADE;
                 DROP SCHEMA IF EXISTS raw CASCADE;
                 DROP TABLE IF EXISTS alembic_version;
@@ -78,7 +125,14 @@ def reset_schema_state(psql_url: str) -> None:
 
 
 def reset_analytics_raw(psql_url: str) -> None:
-    """Truncate analytics/raw tables and restart identities."""
+    """Truncate the snapshot-managed schemas and restart identities.
+
+    Args:
+        psql_url: Standard PostgreSQL connection string.
+
+    Returns:
+        ``None``.
+    """
     with psycopg.connect(psql_url, autocommit=True) as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -102,8 +156,45 @@ def reset_analytics_raw(psql_url: str) -> None:
             )
 
 
+def _table_has_rows(cur: psycopg.Cursor[tuple[object, ...]], qualified_name: str) -> bool:
+    """Return whether a table exists and contains at least one row.
+
+    Args:
+        cur: Active psycopg cursor.
+        qualified_name: Fully qualified ``schema.table`` name.
+
+    Returns:
+        ``True`` when the table exists and has at least one row, else ``False``.
+    """
+    regclass_name = cur.execute("SELECT to_regclass(%s)", (qualified_name,)).fetchone()
+    if not regclass_name or regclass_name[0] is None:
+        return False
+
+    schema_name, table_name = qualified_name.split(".", 1)
+    query = f'SELECT EXISTS (SELECT 1 FROM "{schema_name}"."{table_name}" LIMIT 1)'
+    return bool(cur.execute(query).fetchone()[0])
+
+
+def database_has_snapshot_data(psql_url: str) -> bool:
+    """Return whether the snapshot-managed tables already contain data.
+
+    Args:
+        psql_url: Standard PostgreSQL connection string.
+
+    Returns:
+        ``True`` when any tracked snapshot table contains rows, else ``False``.
+    """
+    with psycopg.connect(psql_url) as conn:
+        with conn.cursor() as cur:
+            return any(_table_has_rows(cur, table_name) for table_name in SNAPSHOT_DATA_TABLES)
+
+
 def parse_args() -> argparse.Namespace:
-    """Parse CLI args."""
+    """Parse CLI arguments for the DB bootstrap helper.
+
+    Returns:
+        Parsed ``argparse.Namespace``.
+    """
     parser = argparse.ArgumentParser(
         description="Set up collaborator Docker DB: compose up, migrate, import snapshot, validate."
     )
@@ -114,9 +205,19 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--skip-import", action="store_true", help="Skip snapshot import.")
     parser.add_argument(
+        "--reset-db",
+        action="store_true",
+        help="Drop managed schemas, reapply migrations, and import the snapshot when import is enabled.",
+    )
+    parser.add_argument(
         "--no-sample-validation",
         action="store_true",
         help="Run smoke validation without requiring sample data rows.",
+    )
+    parser.add_argument(
+        "--skip-validate",
+        action="store_true",
+        help="Skip smoke validation entirely.",
     )
     parser.add_argument(
         "--database-url",
@@ -140,7 +241,19 @@ def parse_args() -> argparse.Namespace:
 
 
 def resolve_snapshot(repo_root: Path, snapshot_arg: str, skip_import: bool) -> Path | None:
-    """Resolve snapshot file path when import is enabled."""
+    """Resolve the snapshot file path when import is enabled.
+
+    Args:
+        repo_root: Repository root used for relative-path resolution.
+        snapshot_arg: Optional CLI snapshot override.
+        skip_import: Whether snapshot import is disabled.
+
+    Returns:
+        Snapshot ``Path`` when import should run, or ``None`` when import is skipped.
+
+    Raises:
+        FileNotFoundError: If import is enabled but no snapshot can be resolved.
+    """
     if skip_import:
         return None
     if snapshot_arg:
@@ -159,17 +272,20 @@ def resolve_snapshot(repo_root: Path, snapshot_arg: str, skip_import: bool) -> P
         if path.exists():
             return path
     raise FileNotFoundError(
-        "No snapshot found. Use --snapshot PATH or run with --skip-import."
+        "No snapshot found. Use --snapshot PATH or run with --skip-import/--empty-db."
     )
 
 
 def main() -> int:
-    """CLI entrypoint."""
+    """Run the end-to-end DB bootstrap workflow.
+
+    Returns:
+        Exit code ``0`` on success.
+    """
     args = parse_args()
     repo_root = Path(__file__).resolve().parents[1]
     os.chdir(repo_root)
 
-    snapshot_path = resolve_snapshot(repo_root, args.snapshot, args.skip_import)
     python_bin = resolve_python(repo_root)
 
     print("Starting Docker PostgreSQL...")
@@ -182,14 +298,27 @@ def main() -> int:
     env["DATABASE_URL"] = args.database_url
     env["PSQL_URL"] = args.psql_url
 
-    if snapshot_path is not None:
+    if args.reset_db:
         print("Resetting managed schemas before migrations...")
         reset_schema_state(args.psql_url)
 
     print("Applying migrations...")
     run([python_bin, "-m", "alembic", "-c", "alembic.ini", "upgrade", "head"], env=env)
 
-    if snapshot_path is not None:
+    should_import_snapshot = False
+    snapshot_path: Path | None = None
+    if args.skip_import:
+        print("Snapshot import skipped.")
+    elif args.reset_db:
+        snapshot_path = resolve_snapshot(repo_root, args.snapshot, args.skip_import)
+        should_import_snapshot = True
+    elif database_has_snapshot_data(args.psql_url):
+        print("Snapshot-managed tables already contain data; skipping snapshot import.")
+    else:
+        snapshot_path = resolve_snapshot(repo_root, args.snapshot, args.skip_import)
+        should_import_snapshot = True
+
+    if should_import_snapshot and snapshot_path is not None:
         print(f"Importing snapshot: {snapshot_path}")
         print("Resetting analytics/raw tables before import...")
         reset_analytics_raw(args.psql_url)
@@ -210,11 +339,14 @@ def main() -> int:
             stdin_file=snapshot_path,
         )
 
-    print("Running smoke validation...")
-    smoke_cmd = [python_bin, "data_platform/tests/smoke_validate.py"]
-    if not args.no_sample_validation:
-        smoke_cmd.append("--require-sample-data")
-    run(smoke_cmd, env=env)
+    if args.skip_validate:
+        print("Skipping smoke validation.")
+    else:
+        print("Running smoke validation...")
+        smoke_cmd = [python_bin, "data_platform/tests/smoke_validate.py"]
+        if not args.no_sample_validation:
+            smoke_cmd.append("--require-sample-data")
+        run(smoke_cmd, env=env)
 
     print("\nSetup complete.")
     print("Use these in your shell:")
@@ -227,4 +359,11 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except FileNotFoundError as exc:
+        print(str(exc), file=sys.stderr)
+        raise SystemExit(1) from exc
+    except RuntimeError as exc:
+        print(str(exc), file=sys.stderr)
+        raise SystemExit(1) from exc
