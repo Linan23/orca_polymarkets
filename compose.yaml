@@ -13,14 +13,14 @@ services:
 
   app_api:
     build:
-      context: ..
+      context: .
       dockerfile: docker/python-api.Dockerfile
     working_dir: /workspace
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     ports:
       - "8000:8000"
     volumes:
-      - ..:/workspace
+      - .:/workspace
     environment:
       PYTHONPATH: /workspace
     depends_on:
@@ -28,14 +28,14 @@ services:
 
   data_platform_api:
     build:
-      context: ..
+      context: .
       dockerfile: docker/python-api.Dockerfile
     working_dir: /workspace
     command: uvicorn data_platform.api.server:app --host 0.0.0.0 --port 8001 --reload
     ports:
       - "8001:8001"
     volumes:
-      - ..:/workspace
+      - .:/workspace
     environment:
       PYTHONPATH: /workspace
       DATABASE_URL: postgresql+psycopg://app:password@db:5432/app_db
@@ -45,14 +45,14 @@ services:
 
   react_app:
     build:
-      context: ..
+      context: .
       dockerfile: docker/react.Dockerfile
     working_dir: /workspace/my-app
     command: npm run dev -- --host 0.0.0.0 --port 5173
     ports:
       - "5173:5173"
     volumes:
-      - ..:/workspace
+      - .:/workspace
       - react_node_modules:/workspace/my-app/node_modules
     environment:
       VITE_API_BASE_URL: http://localhost:8001
