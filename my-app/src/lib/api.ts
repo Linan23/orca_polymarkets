@@ -3,6 +3,8 @@ export type WatchlistState = {
   markets: string[];
 };
 
+export type AccountRole = "viewer" | "moderator" | "admin";
+
 export type LeaderboardActiveBoard = "market" | "user";
 export type LeaderboardUserBoardFilter = "all" | "trusted" | "whale" | "potential" | "standard";
 export type LeaderboardUserPlatformFilter = "all" | "polymarket";
@@ -45,6 +47,7 @@ export type AuthAccount = {
   account_id: number;
   email: string;
   display_name: string;
+  role: AccountRole;
   created_at: string | null;
   last_login_at: string | null;
 };

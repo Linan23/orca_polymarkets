@@ -28,6 +28,14 @@ from data_platform.models.base import utc_now
 SESSION_COOKIE_NAME = "orca_session"
 SESSION_DURATION = timedelta(days=30)
 _PASSWORD_HASHER = PasswordHasher()
+ACCOUNT_ROLE_VIEWER = "viewer"
+ACCOUNT_ROLE_MODERATOR = "moderator"
+ACCOUNT_ROLE_ADMIN = "admin"
+ACCOUNT_ROLE_LEVELS = {
+    ACCOUNT_ROLE_VIEWER: 0,
+    ACCOUNT_ROLE_MODERATOR: 1,
+    ACCOUNT_ROLE_ADMIN: 2,
+}
 
 DEFAULT_ACCOUNT_PREFERENCES: dict[str, Any] = {
     "homepage": {
@@ -54,6 +62,20 @@ DEFAULT_ACCOUNT_PREFERENCES: dict[str, Any] = {
 
 class DuplicateEmailError(ValueError):
     """Raised when a sign-up email already exists."""
+
+
+def normalize_account_role(value: str) -> str:
+    """Return a normalized account role."""
+    normalized = value.strip().lower()
+    if normalized not in ACCOUNT_ROLE_LEVELS:
+        allowed = ", ".join(ACCOUNT_ROLE_LEVELS)
+        raise ValueError(f"Unsupported account role '{value}'. Expected one of: {allowed}.")
+    return normalized
+
+
+def role_meets_threshold(role: str, minimum_role: str) -> bool:
+    """Return whether one role satisfies another role's minimum privilege."""
+    return ACCOUNT_ROLE_LEVELS[normalize_account_role(role)] >= ACCOUNT_ROLE_LEVELS[normalize_account_role(minimum_role)]
 
 
 def normalize_email(value: str) -> str:
@@ -159,6 +181,7 @@ def serialize_account_session(session: Session, account: AppAccount) -> dict[str
             "account_id": account.account_id,
             "email": account.email,
             "display_name": account.display_name,
+            "role": account.role,
             "created_at": account.created_at.isoformat() if account.created_at else None,
             "last_login_at": account.last_login_at.isoformat() if account.last_login_at else None,
         },
@@ -178,6 +201,7 @@ def create_account(session: Session, *, email: str, password: str, display_name:
         email=normalized_email,
         password_hash=hash_password(password),
         display_name=normalize_display_name(display_name),
+        role=ACCOUNT_ROLE_VIEWER,
         is_active=True,
         created_at=now,
         updated_at=now,

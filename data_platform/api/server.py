@@ -11,10 +11,15 @@ from typing import Literal
 from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr, Field
+from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
 from data_platform.db.session import session_scope
+from data_platform.models import AppAccount
+from data_platform.models.base import utc_now
 from data_platform.services.account_auth import (
+    ACCOUNT_ROLE_ADMIN,
+    ACCOUNT_ROLE_MODERATOR,
     DuplicateEmailError,
     SESSION_COOKIE_NAME,
     SESSION_DURATION,
@@ -25,7 +30,10 @@ from data_platform.services.account_auth import (
     follow_market,
     follow_user,
     import_watchlist,
+    normalize_account_role,
+    normalize_display_name,
     resolve_account_session,
+    role_meets_threshold,
     serialize_account_session,
     unfollow_market,
     unfollow_user,
@@ -185,6 +193,14 @@ class AccountPreferencesPatchRequest(BaseModel):
     leaderboard: LeaderboardPreferencesPatch | None = None
 
 
+class AdminAccountPatchRequest(BaseModel):
+    """Partial admin patch for one app account."""
+
+    display_name: str | None = Field(default=None, min_length=1, max_length=80)
+    role: Literal["viewer", "moderator", "admin"] | None = None
+    is_active: bool | None = None
+
+
 def _normalize_following_user_ids(values: list[int] | None) -> tuple[int, ...]:
     """Return stable unique positive ids for Following cache keys."""
     seen: set[int] = set()
@@ -263,29 +279,64 @@ def _cache_set(
 def _set_session_cookie(response: Response, token: str) -> None:
     """Attach the persistent auth cookie to a response."""
     max_age = int(SESSION_DURATION.total_seconds())
+    cookie_kwargs: dict[str, Any] = {
+        "max_age": max_age,
+        "httponly": True,
+        "samesite": settings.session_cookie_samesite,
+        "secure": settings.session_cookie_secure,
+        "path": "/",
+    }
+    if settings.session_cookie_domain:
+        cookie_kwargs["domain"] = settings.session_cookie_domain
     response.set_cookie(
         key=SESSION_COOKIE_NAME,
         value=token,
-        max_age=max_age,
-        httponly=True,
-        samesite="lax",
-        secure=False,
-        path="/",
+        **cookie_kwargs,
     )
 
 
 def _clear_session_cookie(response: Response) -> None:
     """Delete the auth cookie from a response."""
-    response.delete_cookie(key=SESSION_COOKIE_NAME, httponly=True, samesite="lax", path="/")
+    cookie_kwargs: dict[str, Any] = {
+        "httponly": True,
+        "samesite": settings.session_cookie_samesite,
+        "secure": settings.session_cookie_secure,
+        "path": "/",
+    }
+    if settings.session_cookie_domain:
+        cookie_kwargs["domain"] = settings.session_cookie_domain
+    response.delete_cookie(key=SESSION_COOKIE_NAME, **cookie_kwargs)
 
 
-def _require_account(session: object, request: Request) -> object:
+def _require_account(session: object, request: Request) -> AppAccount:
     """Resolve the signed-in app account from the auth cookie or raise 401."""
     resolved = resolve_account_session(session, request.cookies.get(SESSION_COOKIE_NAME))
     if resolved is None:
         raise HTTPException(status_code=401, detail="Authentication required.")
     account, _session = resolved
     return account
+
+
+def _require_role(session: object, request: Request, minimum_role: str) -> AppAccount:
+    """Resolve the signed-in account and enforce a minimum role."""
+    account = _require_account(session, request)
+    if not role_meets_threshold(account.role, minimum_role):
+        raise HTTPException(status_code=403, detail="Insufficient permissions.")
+    return account
+
+
+def _serialize_admin_account(account: AppAccount) -> dict[str, object]:
+    """Return the admin-facing account metadata payload."""
+    return {
+        "account_id": account.account_id,
+        "email": account.email,
+        "display_name": account.display_name,
+        "role": account.role,
+        "is_active": account.is_active,
+        "created_at": account.created_at.isoformat() if account.created_at else None,
+        "updated_at": account.updated_at.isoformat() if account.updated_at else None,
+        "last_login_at": account.last_login_at.isoformat() if account.last_login_at else None,
+    }
 
 
 @app.get("/")
@@ -452,6 +503,71 @@ async def post_import_local_watchlist(payload: LocalWatchlistImportRequest, requ
             )
     except HTTPException:
         raise
+    except (OSError, SQLAlchemyError) as exc:
+        raise _service_error(exc) from exc
+
+
+@app.get("/api/admin/session")
+async def get_admin_session(request: Request) -> dict[str, object]:
+    """Return the signed-in session only when the account has moderator access."""
+    try:
+        with session_scope() as session:
+            account = _require_role(session, request, ACCOUNT_ROLE_MODERATOR)
+            return {"session": serialize_account_session(session, account)}
+    except HTTPException:
+        raise
+    except (OSError, SQLAlchemyError) as exc:
+        raise _service_error(exc) from exc
+
+
+@app.get("/api/admin/accounts")
+async def get_admin_accounts(request: Request) -> dict[str, object]:
+    """Return app-account metadata for moderator/admin account management UIs."""
+    try:
+        with session_scope() as session:
+            _require_role(session, request, ACCOUNT_ROLE_MODERATOR)
+            accounts = session.execute(
+                select(AppAccount).order_by(AppAccount.created_at.desc(), AppAccount.account_id.desc())
+            ).scalars().all()
+            return {"items": [_serialize_admin_account(account) for account in accounts]}
+    except HTTPException:
+        raise
+    except (OSError, SQLAlchemyError) as exc:
+        raise _service_error(exc) from exc
+
+
+@app.patch("/api/admin/accounts/{account_id}")
+async def patch_admin_account(
+    account_id: int,
+    payload: AdminAccountPatchRequest,
+    request: Request,
+) -> dict[str, object]:
+    """Update account role, activation state, or display name with admin privileges."""
+    try:
+        with session_scope() as session:
+            caller = _require_role(session, request, ACCOUNT_ROLE_ADMIN)
+            account = session.get(AppAccount, account_id)
+            if account is None:
+                raise HTTPException(status_code=404, detail=f"Account {account_id} not found.")
+            if account.account_id == caller.account_id:
+                if payload.is_active is False:
+                    raise HTTPException(status_code=400, detail="You cannot deactivate your own admin account.")
+                if payload.role is not None and not role_meets_threshold(payload.role, ACCOUNT_ROLE_ADMIN):
+                    raise HTTPException(status_code=400, detail="You cannot demote your own admin account.")
+
+            if payload.display_name is not None:
+                account.display_name = normalize_display_name(payload.display_name)
+            if payload.role is not None:
+                account.role = normalize_account_role(payload.role)
+            if payload.is_active is not None:
+                account.is_active = payload.is_active
+            if payload.model_dump(exclude_none=True):
+                account.updated_at = utc_now()
+            return {"account": _serialize_admin_account(account)}
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except (OSError, SQLAlchemyError) as exc:
         raise _service_error(exc) from exc
 
