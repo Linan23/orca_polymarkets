@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from alembic.config import Config
+from alembic.script import ScriptDirectory
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
@@ -26,7 +28,6 @@ from data_platform.services.dashboard_builder import build_dashboard_snapshot
 from data_platform.services.whale_scoring import build_whale_score_snapshot
 
 
-BASELINE_REVISION = "20260325_1100"
 REQUIRED_TABLES = {
     "app.app_account",
     "app.app_account_preferences",
@@ -99,6 +100,13 @@ class CheckResult:
     details: dict[str, Any]
 
 
+def _expected_alembic_revisions() -> tuple[str, ...]:
+    """Return the Alembic head revisions declared by this checkout."""
+    config = Config(str(REPO_ROOT / "alembic.ini"))
+    script_directory = ScriptDirectory.from_config(config)
+    return tuple(sorted(script_directory.get_heads()))
+
+
 def _count_table(session: Any, table_name: str) -> int:
     """Return the row count for a fully qualified table name."""
     schema_name, short_name = table_name.split(".", 1)
@@ -113,12 +121,15 @@ def _run_database_checks(require_sample_data: bool) -> list[CheckResult]:
         session.execute(text("SELECT 1"))
         results.append(CheckResult("database_connection", True, {"query": "SELECT 1"}))
 
-        revision = session.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
+        expected_revisions = _expected_alembic_revisions()
+        revisions = tuple(
+            session.execute(text("SELECT version_num FROM alembic_version ORDER BY version_num")).scalars().all()
+        )
         results.append(
             CheckResult(
                 "alembic_revision",
-                revision == BASELINE_REVISION,
-                {"expected": BASELINE_REVISION, "found": revision},
+                revisions == expected_revisions,
+                {"expected": list(expected_revisions), "found": list(revisions)},
             )
         )
 
