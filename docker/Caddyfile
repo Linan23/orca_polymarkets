@@ -1,0 +1,18 @@
+{$SITE_ADDRESS:http://localhost} {
+    encode zstd gzip
+
+    @api path /api/* /health /openapi.json /docs /docs/* /redoc /redoc/*
+    reverse_proxy @api api:8000
+
+    root * /srv
+    try_files {path} /index.html
+    file_server
+
+    header {
+        X-Content-Type-Options nosniff
+        X-Frame-Options SAMEORIGIN
+        Referrer-Policy strict-origin-when-cross-origin
+        Permissions-Policy "interest-cohort=()"
+        -Server
+    }
+}
