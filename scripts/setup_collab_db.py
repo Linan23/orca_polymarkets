@@ -220,6 +220,11 @@ def parse_args() -> argparse.Namespace:
         help="Skip smoke validation entirely.",
     )
     parser.add_argument(
+        "--skip-compose-up",
+        action="store_true",
+        help="Skip docker compose up; use when database is already running.",
+    )
+    parser.add_argument(
         "--database-url",
         default=DEFAULT_DATABASE_URL,
         help="SQLAlchemy URL used by app/Alembic.",
@@ -288,8 +293,11 @@ def main() -> int:
 
     python_bin = resolve_python(repo_root)
 
-    print("Starting Docker PostgreSQL...")
-    run(["docker", "compose", "-f", args.compose_file, "up", "-d", "db"])
+    if not args.skip_compose_up:
+        print("Starting Docker PostgreSQL...")
+        run(["docker", "compose", "-f", args.compose_file, "up", "-d", "db"])
+    else:
+        print("Skipping docker compose up (assuming database is already running)...")
 
     print("Waiting for Docker DB...")
     wait_for_db(args.psql_url, timeout_seconds=60)
