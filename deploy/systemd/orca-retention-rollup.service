@@ -5,6 +5,7 @@ Wants=network-online.target docker.service
 
 [Service]
 Type=oneshot
+User=lynchej
 WorkingDirectory=%h/orca_polymarkets
 EnvironmentFile=/etc/orca.env
 ExecStart=%h/orca_polymarkets/scripts/run_retention_rollup_vm.sh
