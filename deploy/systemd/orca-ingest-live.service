@@ -1,0 +1,17 @@
+[Unit]
+Description=Orca near-live ingest service
+After=network-online.target docker.service
+Wants=network-online.target docker.service
+
+[Service]
+Type=simple
+WorkingDirectory=%h/orca_polymarkets
+EnvironmentFile=/etc/orca.env
+ExecStart=%h/orca_polymarkets/scripts/run_ingest_live_vm.sh
+Restart=always
+RestartSec=15
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

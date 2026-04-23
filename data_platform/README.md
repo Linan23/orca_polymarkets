@@ -27,6 +27,43 @@ Important:
 - `bootstrap_db.py` remains available as a compatibility helper for quick local bootstraps.
 - Migration instructions live in [`migrations/README.md`](migrations/README.md).
 
+## Historical-Preserving Lifecycle
+
+The database no longer assumes periodic delete/reload behavior.
+
+Current design:
+
+- canonical current-state tables keep the latest mutable entity rows
+- history tables capture material changes for mutable entities
+- append-only domains are mirrored into partition-shadow tables
+- compatibility views provide a safe read layer while legacy tables are still present
+- older high-frequency snapshots are rolled into aggregate tables
+
+Primary lifecycle objects:
+
+- history tables:
+  - `analytics.user_account_history`
+  - `analytics.market_event_history`
+  - `analytics.market_contract_history`
+  - `analytics.market_tag_map_history`
+- rollup tables:
+  - `analytics.orderbook_snapshot_hourly`
+  - `analytics.orderbook_snapshot_daily`
+  - `analytics.position_snapshot_daily`
+- compatibility views:
+  - `analytics.scrape_run_all`
+  - `raw.api_payload_all`
+  - `analytics.transaction_fact_all`
+  - `analytics.orderbook_snapshot_all`
+  - `analytics.position_snapshot_all`
+  - `analytics.whale_score_snapshot_all`
+
+Validate rollout state with:
+
+```bash
+.venv/bin/python data_platform/tests/history_partition_check.py
+```
+
 ## Current Local Defaults
 
 The default local development database is the Docker PostgreSQL service:
@@ -259,6 +296,37 @@ Compatibility option:
 ```bash
 .venv/bin/python bootstrap_db.py
 ```
+
+`bootstrap_db.py` now applies Alembic migrations instead of relying on raw `metadata.create_all()`, because the lifecycle rollout includes partition parents and compatibility views.
+
+## Near-Live Runtime Split
+
+The runtime is now split into three jobs instead of one all-purpose crawler:
+
+1. `data_platform/jobs/run_live_ingest.py`
+   - fast market ingest
+   - default cadence: every 2 minutes
+   - Polymarket and Kalshi market/trade/orderbook collection
+   - wallet positions only when wallets are configured
+2. `data_platform/jobs/run_analytics_refresh.py`
+   - whale score rebuild
+   - dashboard rebuild
+   - default cadence: every 15 minutes
+3. `data_platform/jobs/run_retention_maintenance.py`
+   - partition creation
+   - shadow-table backfill
+   - snapshot rollups
+   - optional backup snapshot export
+
+Useful local commands:
+
+```bash
+.venv/bin/python data_platform/jobs/run_live_ingest.py --window-start 00:00 --window-end 23:59 --max-cycles 1
+.venv/bin/python data_platform/jobs/run_analytics_refresh.py --max-cycles 1
+.venv/bin/python data_platform/jobs/run_retention_maintenance.py --skip-snapshot
+```
+
+VM wrapper scripts are included in `scripts/` and example `systemd` units live in `deploy/systemd/`.
 
 What the baseline migration creates:
 
@@ -887,6 +955,28 @@ For this phase, the stable local workflow is:
 5. Run one or more scrapers with `--write-to-db` or use `data_platform/jobs/run_ingest_cycle.py`
 6. Build `analytics.whale_score_snapshot` with `build_whale_scores.py`
 7. Build the dashboard snapshot with `build_dashboard_snapshot.py`
+
+For broad Polymarket market/trader population from public flow, prefer:
+
+```bash
+.venv/bin/python data_platform/jobs/run_ingest_cycle.py \
+  --enable-polymarket-public-crawl \
+  --public-crawl-market-limit 25 \
+  --public-crawl-closed-market-limit 10 \
+  --public-crawl-closed-within-days 7 \
+  --public-crawl-global-pages 2 \
+  --public-crawl-max-pages-per-market 3 \
+  --public-crawl-max-total-trade-pages 20 \
+  --skip-positions
+```
+
+That path populates:
+- `analytics.market_event`
+- `analytics.market_contract`
+- `analytics.transaction_fact`
+- `analytics.user_account`
+
+without needing a fixed wallet list.
 
 ## Validation Commands
 

@@ -24,6 +24,7 @@ from data_platform.models import (
     WhaleScoreSnapshot,
 )
 from data_platform.services.whale_scoring import load_resolved_market_outcomes, load_resolved_user_performance
+from data_platform.settings import get_settings
 
 
 DEFAULT_LIMIT = 50
@@ -42,6 +43,44 @@ def _potential_whale_clause() -> Any:
     )
 VALID_TIMEFRAMES = {"7d": 7, "30d": 30, "90d": 90, "all": None}
 USER_ACTIVITY_RECENT_TRADE_LIMIT = 15
+settings = get_settings()
+
+
+def _latest_successful_scrape_time(session: Session) -> datetime | None:
+    """Return the latest successful scrape completion time."""
+    row = session.scalars(
+        select(ScrapeRun)
+        .where(ScrapeRun.status == "success")
+        .order_by(desc(ScrapeRun.finished_at), desc(ScrapeRun.started_at), desc(ScrapeRun.scrape_run_id))
+        .limit(1)
+    ).first()
+    if row is None:
+        return None
+    return row.finished_at or row.started_at
+
+
+def _freshness_metadata(
+    *,
+    observed_at: datetime | None,
+    threshold_minutes: int,
+    freshness_source: str,
+    last_successful_ingest_at: datetime | None = None,
+) -> dict[str, Any]:
+    """Return additive freshness metadata for API payloads."""
+    if observed_at is None:
+        return {
+            "is_stale": True,
+            "stale_as_of": None,
+            "freshness_source": freshness_source,
+            "last_successful_ingest_at": last_successful_ingest_at.isoformat() if last_successful_ingest_at else None,
+        }
+    stale_as_of = observed_at + timedelta(minutes=threshold_minutes)
+    return {
+        "is_stale": datetime.now(timezone.utc) > stale_as_of,
+        "stale_as_of": stale_as_of.isoformat(),
+        "freshness_source": freshness_source,
+        "last_successful_ingest_at": last_successful_ingest_at.isoformat() if last_successful_ingest_at else None,
+    }
 
 
 def timeframe_start(timeframe: str) -> datetime | None:
@@ -306,7 +345,8 @@ def latest_scrape_run(session: Session) -> dict[str, Any] | None:
     row = session.scalars(select(ScrapeRun).order_by(desc(ScrapeRun.started_at)).limit(1)).first()
     if row is None:
         return None
-    return {
+    observed_at = row.finished_at or row.started_at
+    payload = {
         "scrape_run_id": row.scrape_run_id,
         "job_name": row.job_name,
         "endpoint_name": row.endpoint_name,
@@ -317,6 +357,15 @@ def latest_scrape_run(session: Session) -> dict[str, Any] | None:
         "error_count": row.error_count,
         "error_summary": row.error_summary,
     }
+    payload.update(
+        _freshness_metadata(
+            observed_at=observed_at,
+            threshold_minutes=settings.trade_feed_stale_minutes,
+            freshness_source="analytics.scrape_run.finished_at",
+            last_successful_ingest_at=_latest_successful_scrape_time(session),
+        )
+    )
+    return payload
 
 
 def list_markets(session: Session, limit: int = DEFAULT_LIMIT) -> list[dict[str, Any]]:
@@ -461,7 +510,7 @@ def latest_dashboard_snapshot(session: Session) -> dict[str, Any] | None:
     market_count = session.scalar(
         select(func.count(DashboardMarket.market_id)).where(DashboardMarket.dashboard_id == dashboard.dashboard_id)
     )
-    return {
+    payload = {
         "dashboard_id": dashboard.dashboard_id,
         "dashboard_date": dashboard.dashboard_date.isoformat(),
         "generated_at": dashboard.generated_at.isoformat(),
@@ -469,6 +518,15 @@ def latest_dashboard_snapshot(session: Session) -> dict[str, Any] | None:
         "scope_label": dashboard.scope_label,
         "market_count": int(market_count or 0),
     }
+    payload.update(
+        _freshness_metadata(
+            observed_at=dashboard.generated_at,
+            threshold_minutes=settings.analytics_stale_minutes,
+            freshness_source="analytics.dashboard.generated_at",
+            last_successful_ingest_at=_latest_successful_scrape_time(session),
+        )
+    )
+    return payload
 
 
 def latest_dashboard_markets(session: Session, limit: int = DEFAULT_LIMIT) -> dict[str, Any] | None:
@@ -476,6 +534,7 @@ def latest_dashboard_markets(session: Session, limit: int = DEFAULT_LIMIT) -> di
     dashboard = session.scalars(select(Dashboard).order_by(desc(Dashboard.generated_at)).limit(1)).first()
     if dashboard is None:
         return None
+    last_successful_ingest_at = _latest_successful_scrape_time(session)
     rows = session.execute(
         select(DashboardMarket, MarketContract)
         .join(MarketContract, MarketContract.market_contract_id == DashboardMarket.market_contract_id)
@@ -488,8 +547,9 @@ def latest_dashboard_markets(session: Session, limit: int = DEFAULT_LIMIT) -> di
         )
         .limit(limit)
     ).all()
-    items = [
-        {
+    items = []
+    for market, contract in rows:
+        item = {
             "market_id": market.market_id,
             "market_contract_id": market.market_contract_id,
             "market_slug": market.market_slug,
@@ -504,14 +564,30 @@ def latest_dashboard_markets(session: Session, limit: int = DEFAULT_LIMIT) -> di
             "whale_market_focus": market.whale_market_focus,
             "read_time": market.read_time.isoformat() if market.read_time else None,
         }
-        for market, contract in rows
-    ]
-    return {
+        item.update(
+            _freshness_metadata(
+                observed_at=market.read_time,
+                threshold_minutes=settings.market_stale_minutes,
+                freshness_source="analytics.dashboard_market.read_time",
+                last_successful_ingest_at=last_successful_ingest_at,
+            )
+        )
+        items.append(item)
+    payload = {
         "dashboard_id": dashboard.dashboard_id,
         "generated_at": dashboard.generated_at.isoformat(),
         "count": len(items),
         "items": items,
     }
+    payload.update(
+        _freshness_metadata(
+            observed_at=dashboard.generated_at,
+            threshold_minutes=settings.analytics_stale_minutes,
+            freshness_source="analytics.dashboard.generated_at",
+            last_successful_ingest_at=last_successful_ingest_at,
+        )
+    )
+    return payload
 
 
 def home_summary(session: Session) -> dict[str, Any]:
@@ -602,7 +678,8 @@ def home_summary(session: Session) -> dict[str, Any]:
             }
         )
 
-    return {
+    latest_ingestion = latest_scrape_run(session)
+    payload = {
         "scoring_version": scoring_version,
         "whales_detected": whales_detected,
         "trusted_whales": trusted_whales,
@@ -611,9 +688,19 @@ def home_summary(session: Session) -> dict[str, Any]:
         "profitability_users": profitability_summary["profitability_users"],
         "top_trusted_whale": top_trusted_whale,
         "most_whale_concentrated_market": most_whale_concentrated_market,
-        "latest_ingestion": latest_scrape_run(session),
+        "latest_ingestion": latest_ingestion,
         "platform_coverage": platform_coverage,
     }
+    latest_dashboard = session.scalars(select(Dashboard).order_by(desc(Dashboard.generated_at)).limit(1)).first()
+    payload.update(
+        _freshness_metadata(
+            observed_at=latest_dashboard.generated_at if latest_dashboard is not None else None,
+            threshold_minutes=settings.analytics_stale_minutes,
+            freshness_source="analytics.dashboard.generated_at",
+            last_successful_ingest_at=_latest_successful_scrape_time(session),
+        )
+    )
+    return payload
 
 
 def top_profitable_resolved_users(
@@ -2119,6 +2206,14 @@ def latest_market_profile(session: Session, market_slug: str) -> dict[str, Any] 
                 profile=profile,
             )
             payload["whale_market_focus"] = _normalize_whale_market_focus(session, payload["whale_market_focus"])
+            payload.update(
+                _freshness_metadata(
+                    observed_at=profile.snapshot_time if profile and profile.snapshot_time else market.read_time,
+                    threshold_minutes=settings.market_stale_minutes,
+                    freshness_source="analytics.market_profile.snapshot_time",
+                    last_successful_ingest_at=_latest_successful_scrape_time(session),
+                )
+            )
             return payload
 
     historical_row = session.execute(
@@ -2149,6 +2244,14 @@ def latest_market_profile(session: Session, market_slug: str) -> dict[str, Any] 
             profile=profile,
         )
         payload["whale_market_focus"] = _normalize_whale_market_focus(session, payload["whale_market_focus"])
+        payload.update(
+            _freshness_metadata(
+                observed_at=profile.snapshot_time if profile and profile.snapshot_time else market.read_time,
+                threshold_minutes=settings.market_stale_minutes,
+                freshness_source="analytics.market_profile.snapshot_time",
+                last_successful_ingest_at=_latest_successful_scrape_time(session),
+            )
+        )
         return payload
 
     contract = session.scalars(
@@ -2175,6 +2278,18 @@ def latest_market_profile(session: Session, market_slug: str) -> dict[str, Any] 
         orderbook_depth=int(latest_orderbook.depth_levels) if latest_orderbook is not None else None,
     )
     payload["whale_market_focus"] = _normalize_whale_market_focus(session, payload["whale_market_focus"])
+    payload.update(
+        _freshness_metadata(
+            observed_at=latest_orderbook.snapshot_time if latest_orderbook is not None else contract.updated_at,
+            threshold_minutes=settings.market_stale_minutes,
+            freshness_source=(
+                "analytics.orderbook_snapshot.snapshot_time"
+                if latest_orderbook is not None
+                else "analytics.market_contract.updated_at"
+            ),
+            last_successful_ingest_at=_latest_successful_scrape_time(session),
+        )
+    )
     return payload
 
 

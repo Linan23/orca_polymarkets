@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from data_platform.ingest.store import (
     UNKNOWN_USER_EXTERNAL_REF,
     ensure_event_tag_map,
+    sync_event_tag_maps,
     finalize_scrape_run,
     insert_orderbook_snapshot,
     insert_position_snapshot,
@@ -227,11 +228,12 @@ def ingest_discovery_cycle(
             open_interest=event_payload.get("openInterest"),
             raw_payload_id=payload_row.payload_id,
         )
+        tag_rows = []
         for tag_payload in tags:
             if not isinstance(tag_payload, dict):
                 continue
-            tag_row = upsert_market_tag(session, platform_name="polymarket", tag_payload=tag_payload)
-            ensure_event_tag_map(session, event=event_row, tag=tag_row)
+            tag_rows.append(upsert_market_tag(session, platform_name="polymarket", tag_payload=tag_payload))
+        sync_event_tag_maps(session, event=event_row, tags=tag_rows)
 
         markets = event_payload.get("markets") if isinstance(event_payload.get("markets"), list) else []
         for market_payload in markets:

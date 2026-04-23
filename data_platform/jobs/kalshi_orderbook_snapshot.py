@@ -75,7 +75,12 @@ def _load_client(environment_name: str) -> KalshiHttpClient:
         raise RuntimeError(f"Missing {key_id_env} for Kalshi orderbook job.")
     if not key_file:
         raise RuntimeError(f"Missing {key_file_env} for Kalshi orderbook job.")
-    with open(key_file, "rb") as private_key_file:
+    key_path = Path(key_file).expanduser()
+    if not key_path.is_absolute():
+        key_path = (KALSHI_DIR / key_path).resolve()
+    if not key_path.exists():
+        key_path = (KALSHI_DIR / Path(key_file).name).resolve()
+    with open(key_path, "rb") as private_key_file:
         private_key = serialization.load_pem_private_key(private_key_file.read(), password=None)
     return KalshiHttpClient(key_id=key_id, private_key=private_key, environment=environment)
 

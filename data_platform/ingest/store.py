@@ -8,9 +8,21 @@ from datetime import datetime, timezone
 from string import hexdigits
 from typing import Any
 
-from sqlalchemy import Select, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from data_platform.ingest.lifecycle import (
+    close_market_tag_map_history,
+    ensure_market_tag_map_history,
+    mirror_api_payload_part,
+    mirror_orderbook_snapshot_part,
+    mirror_position_snapshot_part,
+    mirror_scrape_run_part,
+    mirror_transaction_fact_part,
+    sync_market_contract_history,
+    sync_market_event_history,
+    sync_user_account_history,
+)
 from data_platform.models import (
     ApiPayload,
     MarketContract,
@@ -106,6 +118,7 @@ def start_scrape_run(
     )
     session.add(row)
     session.flush()
+    mirror_scrape_run_part(session, row)
     return row
 
 
@@ -125,6 +138,7 @@ def finalize_scrape_run(
     scrape_run.error_summary = error_summary
     scrape_run.finished_at = datetime.now(timezone.utc)
     session.flush()
+    mirror_scrape_run_part(session, scrape_run)
 
 
 def store_api_payload(
@@ -150,6 +164,7 @@ def store_api_payload(
     )
     session.add(row)
     session.flush()
+    mirror_api_payload_part(session, row)
     return row
 
 
@@ -199,6 +214,7 @@ def upsert_user_account(
         )
         session.add(row)
         session.flush()
+        sync_user_account_history(session, row, as_of=now)
         return row
 
     row.wallet_address = canonical_wallet_address or row.wallet_address
@@ -207,6 +223,7 @@ def upsert_user_account(
     row.last_seen_at = now
     row.updated_at = now
     session.flush()
+    sync_user_account_history(session, row, as_of=now)
     return row
 
 
@@ -250,36 +267,34 @@ def upsert_market_event(
         )
     )
     now = datetime.now(timezone.utc)
-    values = {
-        "title": title,
-        "slug": slug,
-        "description": description,
-        "category": category,
-        "resolution_source": resolution_source,
-        "start_time": start_time,
-        "end_time": end_time,
-        "closed_time": closed_time,
-        "status": _status_from_flags(is_active=is_active, is_closed=is_closed, is_archived=is_archived),
-        "is_active": is_active,
-        "is_closed": is_closed,
-        "is_archived": is_archived,
-        "liquidity": liquidity,
-        "volume": volume,
-        "open_interest": open_interest,
-        "raw_payload_id": raw_payload_id,
-        "last_seen_at": now,
-        "updated_at": now,
-    }
     if row is None:
         row = MarketEvent(
             platform_id=platform.platform_id,
             external_event_ref=external_event_ref,
+            title=title,
+            slug=slug,
+            description=description,
+            category=category,
+            resolution_source=resolution_source,
+            start_time=start_time,
+            end_time=end_time,
+            closed_time=closed_time,
+            status=_status_from_flags(is_active=is_active, is_closed=is_closed, is_archived=is_archived),
+            is_active=is_active,
+            is_closed=is_closed,
+            is_archived=is_archived,
+            liquidity=liquidity,
+            volume=volume,
+            open_interest=open_interest,
+            raw_payload_id=raw_payload_id,
             first_seen_at=now,
+            last_seen_at=now,
             created_at=now,
-            **values,
+            updated_at=now,
         )
         session.add(row)
         session.flush()
+        sync_market_event_history(session, row, as_of=now, source_raw_payload_id=raw_payload_id)
         return row
 
     merged_is_closed = row.is_closed or is_closed
@@ -308,6 +323,7 @@ def upsert_market_event(
     row.last_seen_at = now
     row.updated_at = now
     session.flush()
+    sync_market_event_history(session, row, as_of=now, source_raw_payload_id=raw_payload_id)
     return row
 
 
@@ -347,42 +363,39 @@ def upsert_market_contract(
         )
     )
     now = datetime.now(timezone.utc)
-    values = {
-        "event_id": event.event_id,
-        "market_url": market_url,
-        "market_slug": market_slug,
-        "question": question,
-        "condition_ref": condition_ref,
-        "outcome_a_label": outcome_a_label,
-        "outcome_b_label": outcome_b_label,
-        "tick_size": tick_size,
-        "min_order_size": min_order_size,
-        "is_active": is_active,
-        "is_closed": is_closed,
-        "accepting_orders": accepting_orders,
-        "liquidity": liquidity,
-        "volume": volume,
-        "last_trade_price": last_trade_price,
-        "best_bid": best_bid,
-        "best_ask": best_ask,
-        "spread": spread,
-        "start_time": start_time,
-        "end_time": end_time,
-        "raw_payload_id": raw_payload_id,
-        "last_seen_at": now,
-        "updated_at": now,
-    }
     if row is None:
         row = MarketContract(
             event_id=event.event_id,
             platform_id=platform.platform_id,
             external_market_ref=external_market_ref,
+            market_url=market_url,
+            market_slug=market_slug,
+            question=question,
+            condition_ref=condition_ref,
+            outcome_a_label=outcome_a_label,
+            outcome_b_label=outcome_b_label,
+            tick_size=tick_size,
+            min_order_size=min_order_size,
+            is_active=is_active,
+            is_closed=is_closed,
+            accepting_orders=accepting_orders,
+            liquidity=liquidity,
+            volume=volume,
+            last_trade_price=last_trade_price,
+            best_bid=best_bid,
+            best_ask=best_ask,
+            spread=spread,
+            start_time=start_time,
+            end_time=end_time,
+            raw_payload_id=raw_payload_id,
             first_seen_at=now,
+            last_seen_at=now,
             created_at=now,
-            **{k: v for k, v in values.items() if k != "event_id"},
+            updated_at=now,
         )
         session.add(row)
         session.flush()
+        sync_market_contract_history(session, row, as_of=now, source_raw_payload_id=raw_payload_id)
         return row
 
     merged_is_closed = row.is_closed or is_closed
@@ -411,6 +424,7 @@ def upsert_market_contract(
     row.last_seen_at = now
     row.updated_at = now
     session.flush()
+    sync_market_contract_history(session, row, as_of=now, source_raw_payload_id=raw_payload_id)
     return row
 
 
@@ -451,6 +465,27 @@ def ensure_event_tag_map(session: Session, *, event: MarketEvent, tag: MarketTag
     if existing is None:
         session.add(MarketTagMap(event_id=event.event_id, tag_id=tag.tag_id))
         session.flush()
+    ensure_market_tag_map_history(session, event_id=event.event_id, tag=tag, as_of=datetime.now(timezone.utc))
+
+
+def sync_event_tag_maps(session: Session, *, event: MarketEvent, tags: list[MarketTag]) -> None:
+    """Synchronize event-tag links and capture tag-map history."""
+    now = datetime.now(timezone.utc)
+    desired_tag_ids = {tag.tag_id for tag in tags}
+    existing_rows = session.scalars(select(MarketTagMap).where(MarketTagMap.event_id == event.event_id)).all()
+    existing_tag_ids = {row.tag_id for row in existing_rows}
+
+    for row in existing_rows:
+        if row.tag_id in desired_tag_ids:
+            continue
+        session.delete(row)
+        close_market_tag_map_history(session, event_id=event.event_id, tag_id=row.tag_id, as_of=now)
+
+    for tag in tags:
+        if tag.tag_id not in existing_tag_ids:
+            session.add(MarketTagMap(event_id=event.event_id, tag_id=tag.tag_id))
+            session.flush()
+        ensure_market_tag_map_history(session, event_id=event.event_id, tag=tag, as_of=now)
 
 
 def insert_position_snapshot(
@@ -492,6 +527,7 @@ def insert_position_snapshot(
     )
     session.add(row)
     session.flush()
+    mirror_position_snapshot_part(session, row)
     return row
 
 
@@ -525,6 +561,7 @@ def insert_transaction_fact(
         )
     )
     if existing is not None:
+        mirror_transaction_fact_part(session, existing)
         return existing
 
     row = TransactionFact(
@@ -549,6 +586,7 @@ def insert_transaction_fact(
     )
     session.add(row)
     session.flush()
+    mirror_transaction_fact_part(session, row)
     return row
 
 
@@ -584,4 +622,5 @@ def insert_orderbook_snapshot(
     )
     session.add(row)
     session.flush()
+    mirror_orderbook_snapshot_part(session, row)
     return row

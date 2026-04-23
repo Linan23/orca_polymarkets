@@ -14,6 +14,20 @@ Optional deeper check with a live dashboard rebuild:
 .venv/bin/python data_platform/tests/smoke_validate.py --require-sample-data --build-dashboard
 ```
 
+Historical lifecycle validation:
+
+```bash
+.venv/bin/python data_platform/tests/history_partition_check.py
+```
+
+That lifecycle check verifies:
+- history tables exist and stay aligned with current-state tables
+- partition-shadow tables exist and are populated
+- compatibility views return the same counts as the current legacy tables
+- partition children exist for the shadow parents
+
+`smoke_validate.py` now includes that lifecycle validation as part of the full smoke run.
+
 Week 4/5 readiness gate (strict mode):
 
 ```bash
@@ -67,6 +81,9 @@ That market-level check verifies:
 - the market snapshot export is non-empty
 - both outcome classes are present
 - multiple pre-close horizons are represented
+- sparse-snapshot coverage columns are present
+- cold-start metadata columns now cover question/title/description/category/tag signals plus smoothed prior columns
+- derived residual whale-signal columns are present and bounded
 
 Market-level baseline validation:
 
@@ -91,6 +108,22 @@ That LightGBM check verifies:
 - the LightGBM trainer produces metrics
 - the LightGBM model does not underperform the majority-class dummy baseline
 - the Random Forest vs LightGBM comparison runs on the same grouped split
+- rolling ROC-AUC and log-loss diagnostics are present for the transition gate
+
+LightGBM transition validation:
+
+```bash
+.venv/bin/python data_platform/tests/market_lightgbm_transition_check.py --require-data
+```
+
+That transition check verifies:
+- grouped train end-time buckets stay older than grouped test end-time buckets
+- LightGBM is declared as the primary model family
+- Random Forest remains benchmark-only
+- rolling transition-gate metrics are present
+- regime-aware transition slices are present for trade-covered and cold-start rows
+- the cold-start regime uses the dedicated `cold_start` feature path with broader metadata and smoothed historical priors
+- the whale-signal report runs and states whether whale lift is demonstrated in the trade-covered regime
 
 Market feature-set comparison validation:
 
@@ -114,3 +147,21 @@ That LightGBM comparison check verifies:
 - the current market dataset exists
 - both LightGBM comparison models produce metrics
 - the comparison uses a grouped time split
+- split diagnostics include price saturation and rolling metrics
+
+Residual whale-signal validation:
+
+```bash
+.venv/bin/python data_platform/tests/market_whale_signal_check.py --require-data
+```
+
+That whale-signal check verifies:
+- the residual whale-signal report runs end-to-end
+- fixed feature sets are present in the report
+- rolling metrics are emitted for the residual models
+- sparse-row coverage segments are reported explicitly
+- horizon-banded whale analysis is present
+- regime-aware whale analysis is present for trade-covered and cold-start rows
+- price saturation is reported explicitly
+- whale lift is gated on the trade-covered regime
+- when whale lift is not demonstrated, the interpretation says so explicitly

@@ -26,6 +26,11 @@ DEFAULT_CONTAINER = "orcaDB"
 DEFAULT_DB_USER = "app"
 DEFAULT_DB_NAME = "app_db"
 SNAPSHOT_DATA_TABLES = (
+    "app.app_account",
+    "app.app_session",
+    "app.app_watchlist_user",
+    "app.app_watchlist_market",
+    "app.app_account_preferences",
     "analytics.scrape_run",
     "analytics.market_event",
     "analytics.market_contract",
@@ -143,7 +148,7 @@ def reset_analytics_raw(psql_url: str) -> None:
                   FOR r IN
                     SELECT schemaname, tablename
                     FROM pg_tables
-                    WHERE schemaname IN ('analytics', 'raw')
+                    WHERE schemaname IN ('app', 'analytics', 'raw')
                     ORDER BY schemaname, tablename
                   LOOP
                     EXECUTE format(

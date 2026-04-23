@@ -1,0 +1,17 @@
+[Unit]
+Description=Orca analytics refresh service
+After=network-online.target orca-ingest-live.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/orca_polymarkets
+EnvironmentFile=/etc/orca.env
+ExecStart=%h/orca_polymarkets/scripts/run_analytics_refresh_vm.sh
+Restart=always
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

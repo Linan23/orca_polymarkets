@@ -34,6 +34,22 @@ from data_platform.ingest.kalshi import ingest_scrape_record
 from clients import KalshiHttpClient, Environment
 
 
+def resolve_key_file_path(key_file: str) -> Path:
+    """Resolve a Kalshi private-key path against repo-local locations when needed."""
+    candidate = Path(key_file).expanduser()
+    if candidate.is_absolute() and candidate.exists():
+        return candidate
+    local_candidates = (
+        ROOT_DIR / candidate,
+        ROOT_DIR / "kalshi-scraper" / candidate.name,
+        Path.cwd() / candidate,
+    )
+    for option in local_candidates:
+        if option.exists():
+            return option
+    return candidate
+
+
 def parse_query_params(items: list[str]) -> dict[str, str]:
     """Convert repeated CLI query params from ``key=value`` strings to a dictionary.
 
@@ -264,14 +280,15 @@ def load_private_key(key_file: str) -> rsa.RSAPrivateKey:
         FileNotFoundError: If ``key_file`` does not exist.
         Exception: If key parsing fails or file content is invalid.
     """
+    resolved_key_file = resolve_key_file_path(key_file)
     try:
-        with open(key_file, "rb") as private_key_file:
+        with open(resolved_key_file, "rb") as private_key_file:
             return serialization.load_pem_private_key(
                 private_key_file.read(),
                 password=None,
             )
     except FileNotFoundError as exc:
-        raise FileNotFoundError(f"Private key file not found at {key_file}") from exc
+        raise FileNotFoundError(f"Private key file not found at {resolved_key_file}") from exc
     except Exception as exc:
         raise Exception(f"Error loading private key: {str(exc)}") from exc
 

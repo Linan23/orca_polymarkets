@@ -15,6 +15,85 @@ Database setup, operation, reset, and maintenance instructions are documented in
 
 - [`data_platform/README.md`](data_platform/README.md)
 
+## Database Lifecycle
+
+The database now follows a historical-preserving lifecycle:
+
+- current mutable entities stay in the canonical tables for fast reads
+- material changes are copied into append-only history tables
+- append-only operational domains are dual-written into partition-shadow tables
+- compatibility views expose combined legacy-plus-shadow reads during rollout
+- old high-frequency snapshots are rolled into summary tables instead of forcing delete/reload cycles
+
+Current lifecycle objects include:
+
+- history: `analytics.user_account_history`, `analytics.market_event_history`, `analytics.market_contract_history`, `analytics.market_tag_map_history`
+- rollups: `analytics.orderbook_snapshot_hourly`, `analytics.orderbook_snapshot_daily`, `analytics.position_snapshot_daily`
+- shadow tables: `analytics.scrape_run_part`, `raw.api_payload_part`, `analytics.transaction_fact_part`, `analytics.orderbook_snapshot_part`, `analytics.position_snapshot_part`, `analytics.whale_score_snapshot_part`
+- compatibility views: `analytics.scrape_run_all`, `raw.api_payload_all`, `analytics.transaction_fact_all`, `analytics.orderbook_snapshot_all`, `analytics.position_snapshot_all`, `analytics.whale_score_snapshot_all`
+
+Use this rollout model:
+
+1. implement and validate locally
+2. push code and migrations to GitHub
+3. pull on the VM
+4. run Alembic migrations
+5. restart services
+
+Do not use snapshot restore for ordinary VM refreshes. Snapshots remain backup/bootstrap artifacts only.
+
+## Local Bootstrap
+
+For macOS and Ubuntu collaborators, use the repo bootstrap as the primary setup path:
+
+```bash
+./scripts/bootstrap.sh
+```
+
+If you were given a snapshot outside the default locations:
+
+```bash
+./scripts/bootstrap.sh --snapshot path/to/shared_data_snapshot.sql
+```
+
+If you want a migrated but empty Docker database:
+
+```bash
+./scripts/bootstrap.sh --empty-db
+```
+
+What `bootstrap.sh` does:
+
+- validates `docker`, `docker compose`, `python3.12`, `node`, and `npm`
+- creates `.venv` and installs the Python dependencies used across the repo
+- installs frontend dependencies in `my-app/`
+- copies `.env.example` and `kalshi-scraper/.env.example` only when local `.env` files are missing
+- starts Docker PostgreSQL, applies Alembic migrations, imports the bundled snapshot only when the DB is empty, and runs verification
+- tracks dependency and snapshot hashes in a local bootstrap state file so reruns can skip unchanged installs and refresh the local DB when the tracked snapshot changes
+
+If no bundled snapshot is present, pass `--snapshot PATH` or `--empty-db`.
+
+Common collaborator commands from the repo root:
+
+```bash
+# Full setup
+./scripts/bootstrap.sh
+
+# Setup variants
+./scripts/bootstrap.sh --empty-db
+./scripts/bootstrap.sh --snapshot path/to/shared_data_snapshot.sql
+./scripts/bootstrap.sh --reset-db
+./scripts/bootstrap.sh --help
+
+# DB-only helper
+.venv/bin/python scripts/setup_collab_db.py
+.venv/bin/python scripts/setup_collab_db.py --help
+
+# Start local services after setup
+.venv/bin/python -m uvicorn data_platform.api.server:app --reload --host 127.0.0.1 --port 8000
+npm --prefix my-app run dev
+```
+
 From the repository root, use the Docker database as the default local database:
 
 ```bash
@@ -30,7 +109,7 @@ export DATABASE_URL="postgresql+psycopg://postgres:postgres@localhost:5432/whali
 export PSQL_URL="postgresql://postgres:postgres@localhost:5432/whaling"
 ```
 
-One-command collaborator DB setup (macOS, Ubuntu/Linux, Windows):
+Lower-level DB-only setup helper (macOS, Ubuntu/Linux, Windows):
 
 ```bash
 .venv/bin/python scripts/setup_collab_db.py --snapshot path/to/shared_data_snapshot.sql
@@ -80,6 +159,12 @@ Create the schemas and tables:
 .venv/bin/alembic -c alembic.ini upgrade head
 ```
 
+Validate the historical lifecycle objects:
+
+```bash
+.venv/bin/python data_platform/tests/history_partition_check.py
+```
+
 Compatibility option:
 
 ```bash
@@ -89,7 +174,13 @@ Compatibility option:
 Run the internal read-only API:
 
 ```bash
-.venv/bin/python -m uvicorn main:app --reload
+.venv/bin/python -m uvicorn data_platform.api.server:app --reload --host 127.0.0.1 --port 8000
+```
+
+Run the frontend dev server:
+
+```bash
+npm --prefix my-app run dev
 ```
 
 Build a derived dashboard snapshot from the normalized tables:
@@ -102,6 +193,27 @@ Build the preliminary whale score snapshot first when you want the dashboard to 
 
 ```bash
 .venv/bin/python build_whale_scores.py
+```
+
+Run the near-live service split locally:
+
+```bash
+# fast ingest loop, 2-minute cadence
+.venv/bin/python data_platform/jobs/run_live_ingest.py
+
+# slower analytics refresh, 15-minute cadence
+.venv/bin/python data_platform/jobs/run_analytics_refresh.py
+
+# nightly rollup/backfill/backup maintenance
+.venv/bin/python data_platform/jobs/run_retention_maintenance.py --skip-snapshot
+```
+
+One-shot validation modes:
+
+```bash
+.venv/bin/python data_platform/jobs/run_live_ingest.py --window-start 00:00 --window-end 23:59 --max-cycles 1
+.venv/bin/python data_platform/jobs/run_analytics_refresh.py --max-cycles 1
+.venv/bin/python data_platform/jobs/run_retention_maintenance.py --skip-snapshot
 ```
 
 Export the first ML-ready dataset:
@@ -139,13 +251,19 @@ That export defines the main project-aligned ML target:
 - target = whether that side eventually wins
 - role = build the point-in-time market dataset needed for later time-based outcome modeling
 
-Train the grouped time-aware market baseline:
+Train the canonical grouped market model with LightGBM plus rolling diagnostics:
+
+```bash
+.venv/bin/python data_platform/jobs/train_market_model.py --task outcome --evaluation-mode rolling
+```
+
+Compatibility baseline trainer:
 
 ```bash
 .venv/bin/python data_platform/jobs/train_market_ml_baseline.py
 ```
 
-Train the grouped time-aware LightGBM market model:
+Compatibility LightGBM trainer:
 
 ```bash
 .venv/bin/python data_platform/jobs/train_market_lightgbm.py
@@ -163,6 +281,12 @@ Compare Random Forest and LightGBM on the same grouped market split:
 .venv/bin/python data_platform/jobs/compare_market_model_families.py
 ```
 
+Analyze residual whale signal beyond price:
+
+```bash
+.venv/bin/python data_platform/jobs/analyze_market_whale_signal.py
+```
+
 Compare LightGBM price-only vs price-plus-whale market models:
 
 ```bash
@@ -177,11 +301,14 @@ Current market ML dataset behavior:
 - dataset version = `ml_market_snapshot_v3`
 - whale participation features are computed from trade and resolved-market history available on or before each observation cutoff
 - historical current exposure is approximated from open shares valued at average buy price
+- `price_baseline` uses the cutoff-time side price with an average-price fallback
+- `resolution_edge` is the residual whale-signal target used to test lift beyond price
 
 Current scoring behavior:
 - raw whale ranking uses trade size, breadth, activity, and current exposure
 - profitability is added only when a Polymarket market is closed and its final outcome can be inferred conservatively from normalized market data
 - trusted whales remain rare until the database contains resolved trade history, not just open-market trades
+- LightGBM is the primary market model family; Random Forest remains a benchmark and rollback reference
 
 Week 6 whale methodology (`week6_v3`):
 - scoring is per platform, not cross-platform
@@ -231,6 +358,46 @@ Run one automated ingest cycle:
 ```
 
 When `--enable-dune` is used, the runner reads `DUNE_API_KEY` and `DUNE_QUERY_ID` from the repo-level `.env` file.
+
+Run a broad Polymarket market/trader crawl without wallet-specific positions:
+
+```bash
+.venv/bin/python data_platform/jobs/run_ingest_cycle.py \
+  --enable-polymarket-public-crawl \
+  --public-crawl-market-limit 25 \
+  --public-crawl-closed-market-limit 10 \
+  --public-crawl-closed-within-days 7 \
+  --public-crawl-global-pages 2 \
+  --public-crawl-max-pages-per-market 3 \
+  --public-crawl-max-total-trade-pages 20 \
+  --skip-positions
+```
+
+Run the automated crawler on a schedule with a daily active window:
+
+```bash
+.venv/bin/python data_platform/jobs/run_ingest_cycle.py \
+  --polymarket-wallet 0x92a54267b56800430b2be9af0f768d18134f9631 \
+  --loop \
+  --interval-hours 1 \
+  --window-start 09:00 \
+  --window-end 17:00 \
+  --timezone America/New_York \
+  --jitter-seconds 30
+```
+
+Useful runner flags:
+- `--loop`
+- `--max-cycles`
+- `--interval-hours`, `--interval-minutes`, or `--interval-seconds`
+- `--window-start`, `--window-end`
+- `--timezone`
+- `--jitter-seconds`
+- `--summary-log-file`
+- `--enable-polymarket-public-crawl`
+- `--public-crawl-market-limit`, `--public-crawl-closed-market-limit`, `--public-crawl-global-pages`, `--public-crawl-max-pages-per-market`
+- `--public-crawl-closed-within-hours` or `--public-crawl-closed-within-days`
+- `--public-crawl-max-total-trade-pages`
 
 Backfill resolved Polymarket trades for deterministically resolved closed markets:
 

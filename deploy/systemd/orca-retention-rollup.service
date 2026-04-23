@@ -1,0 +1,12 @@
+[Unit]
+Description=Orca nightly retention and backup maintenance
+After=network-online.target docker.service
+Wants=network-online.target docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/orca_polymarkets
+EnvironmentFile=/etc/orca.env
+ExecStart=%h/orca_polymarkets/scripts/run_retention_rollup_vm.sh
+StandardOutput=journal
+StandardError=journal

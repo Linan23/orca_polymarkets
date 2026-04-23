@@ -1,0 +1,10 @@
+[Unit]
+Description=Nightly Orca maintenance timer
+
+[Timer]
+OnCalendar=*-*-* 02:15:00
+Persistent=true
+Unit=orca-retention-rollup.service
+
+[Install]
+WantedBy=timers.target

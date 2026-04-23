@@ -26,6 +26,7 @@ from data_platform.db.bootstrap import create_database_objects
 from data_platform.db.session import session_scope
 from data_platform.services.dashboard_builder import build_dashboard_snapshot
 from data_platform.services.whale_scoring import build_whale_score_snapshot
+from data_platform.tests.history_partition_check import run_checks as run_history_partition_checks
 
 
 REQUIRED_TABLES = {
@@ -835,6 +836,15 @@ def _run_optional_checks(run_bootstrap: bool, build_dashboard: bool) -> list[Che
                     },
                 )
             )
+
+    results.extend(
+        CheckResult(
+            f"history_partition:{item.name}",
+            item.ok,
+            item.details,
+        )
+        for item in run_history_partition_checks("")
+    )
 
     return results
 

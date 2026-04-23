@@ -23,6 +23,16 @@ def _env_bool(name: str, default: bool) -> bool:
     return default
 
 
+def _env_int(name: str, default: int) -> int:
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return default
+    try:
+        return int(raw_value.strip())
+    except ValueError:
+        return default
+
+
 @dataclass(frozen=True)
 class Settings:
     """Runtime settings loaded from environment variables."""
@@ -37,6 +47,11 @@ class Settings:
     polymarket_active_window_end: str
     kalshi_active_window_start: str
     kalshi_active_window_end: str
+    market_stale_minutes: int
+    orderbook_stale_minutes: int
+    trade_feed_stale_minutes: int
+    positions_stale_minutes: int
+    analytics_stale_minutes: int
 
 
 @lru_cache(maxsize=1)
@@ -53,4 +68,9 @@ def get_settings() -> Settings:
         polymarket_active_window_end=os.getenv("POLYMARKET_ACTIVE_WINDOW_END", ""),
         kalshi_active_window_start=os.getenv("KALSHI_ACTIVE_WINDOW_START", ""),
         kalshi_active_window_end=os.getenv("KALSHI_ACTIVE_WINDOW_END", ""),
+        market_stale_minutes=_env_int("MARKET_STALE_MINUTES", 30),
+        orderbook_stale_minutes=_env_int("ORDERBOOK_STALE_MINUTES", 10),
+        trade_feed_stale_minutes=_env_int("TRADE_FEED_STALE_MINUTES", 10),
+        positions_stale_minutes=_env_int("POSITIONS_STALE_MINUTES", 30),
+        analytics_stale_minutes=_env_int("ANALYTICS_STALE_MINUTES", 30),
     )

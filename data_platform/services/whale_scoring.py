@@ -12,6 +12,7 @@ from sqlalchemy import desc, select, text
 from sqlalchemy.orm import Session
 
 from data_platform.ingest.store import UNKNOWN_USER_EXTERNAL_REF
+from data_platform.ingest.lifecycle import mirror_whale_score_snapshot_part
 from data_platform.models import WhaleScoreSnapshot
 
 
@@ -603,25 +604,25 @@ def build_whale_score_snapshot(session: Session, *, scoring_version: str = SCORI
             ),
         }
         for item in scored_results:
-            session.add(
-                WhaleScoreSnapshot(
-                    user_id=item.metric.user_id,
-                    platform_id=item.metric.platform_id,
-                    snapshot_time=snapshot_time,
-                    raw_volume_score=item.raw_volume_score,
-                    consistency_score=item.consistency_score,
-                    profitability_score=item.profitability_score,
-                    trust_score=item.trust_score,
-                    insider_penalty=item.insider_penalty,
-                    is_whale=item.is_whale,
-                    is_trusted_whale=item.is_trusted_whale,
-                    sample_trade_count=item.metric.sample_trade_count,
-                    scoring_version=scoring_version,
-                )
+            row = WhaleScoreSnapshot(
+                user_id=item.metric.user_id,
+                platform_id=item.metric.platform_id,
+                snapshot_time=snapshot_time,
+                raw_volume_score=item.raw_volume_score,
+                consistency_score=item.consistency_score,
+                profitability_score=item.profitability_score,
+                trust_score=item.trust_score,
+                insider_penalty=item.insider_penalty,
+                is_whale=item.is_whale,
+                is_trusted_whale=item.is_trusted_whale,
+                sample_trade_count=item.metric.sample_trade_count,
+                scoring_version=scoring_version,
             )
+            session.add(row)
+            session.flush()
+            mirror_whale_score_snapshot_part(session, row)
             rows_written += 1
 
-    session.flush()
     return {
         "snapshot_time": snapshot_time.isoformat(),
         "scoring_version": scoring_version,
