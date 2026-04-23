@@ -6,9 +6,9 @@ Wants=network-online.target docker.service
 [Service]
 Type=simple
 User=lynchej
-WorkingDirectory=%h/orca_polymarkets
+WorkingDirectory=/home/lynchej/orca_polymarkets
 EnvironmentFile=/etc/orca.env
-ExecStart=%h/orca_polymarkets/scripts/run_ingest_live_vm.sh
+ExecStart=/bin/bash /home/lynchej/orca_polymarkets/scripts/run_ingest_live_vm.sh
 Restart=always
 RestartSec=15
 StandardOutput=journal
