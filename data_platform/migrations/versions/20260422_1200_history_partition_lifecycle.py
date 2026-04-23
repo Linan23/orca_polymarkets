@@ -47,6 +47,28 @@ def _create_month_partition(schema: str, table_name: str, month_start: datetime)
     )
 
 
+def _table_exists(schema: str, table_name: str) -> bool:
+    inspector = sa.inspect(op.get_bind())
+    return table_name in inspector.get_table_names(schema=schema)
+
+
+def _index_exists(schema: str, table_name: str, index_name: str) -> bool:
+    inspector = sa.inspect(op.get_bind())
+    return any(index.get("name") == index_name for index in inspector.get_indexes(table_name, schema=schema))
+
+
+def _create_table_if_missing(table_name: str, *columns: sa.Column, schema: str, **kwargs: object) -> None:
+    if _table_exists(schema, table_name):
+        return
+    op.create_table(table_name, *columns, schema=schema, **kwargs)
+
+
+def _create_index_if_missing(index_name: str, table_name: str, columns: list[str], *, schema: str, **kwargs: object) -> None:
+    if _index_exists(schema, table_name, index_name):
+        return
+    op.create_index(index_name, table_name, columns, schema=schema, **kwargs)
+
+
 def _create_compatibility_view(schema: str, view_name: str, legacy_table: str, shadow_table: str, pk: str, columns: list[str]) -> None:
     column_list = ", ".join(columns)
     op.execute(
@@ -67,7 +89,7 @@ def _create_compatibility_view(schema: str, view_name: str, legacy_table: str, s
 
 
 def upgrade() -> None:
-    op.create_table(
+    _create_table_if_missing(
         "user_account_history",
         sa.Column("user_account_history_id", sa.Integer(), primary_key=True),
         sa.Column("user_id", sa.Integer(), sa.ForeignKey("analytics.user_account.user_id"), nullable=False),
@@ -88,13 +110,13 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
         schema="analytics",
     )
-    op.create_index(
+    _create_index_if_missing(
         "ix_user_account_history_user_valid_from",
         "user_account_history",
         ["user_id", "valid_from"],
         schema="analytics",
     )
-    op.create_index(
+    _create_index_if_missing(
         "ix_user_account_history_current_unique",
         "user_account_history",
         ["user_id"],
@@ -103,7 +125,7 @@ def upgrade() -> None:
         postgresql_where=sa.text("is_current"),
     )
 
-    op.create_table(
+    _create_table_if_missing(
         "market_event_history",
         sa.Column("market_event_history_id", sa.Integer(), primary_key=True),
         sa.Column("event_id", sa.Integer(), sa.ForeignKey("analytics.market_event.event_id"), nullable=False),
@@ -133,8 +155,8 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
         schema="analytics",
     )
-    op.create_index("ix_market_event_history_event_valid_from", "market_event_history", ["event_id", "valid_from"], schema="analytics")
-    op.create_index(
+    _create_index_if_missing("ix_market_event_history_event_valid_from", "market_event_history", ["event_id", "valid_from"], schema="analytics")
+    _create_index_if_missing(
         "ix_market_event_history_current_unique",
         "market_event_history",
         ["event_id"],
@@ -143,7 +165,7 @@ def upgrade() -> None:
         postgresql_where=sa.text("is_current"),
     )
 
-    op.create_table(
+    _create_table_if_missing(
         "market_contract_history",
         sa.Column("market_contract_history_id", sa.Integer(), primary_key=True),
         sa.Column("market_contract_id", sa.Integer(), sa.ForeignKey("analytics.market_contract.market_contract_id"), nullable=False),
@@ -178,13 +200,13 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
         schema="analytics",
     )
-    op.create_index(
+    _create_index_if_missing(
         "ix_market_contract_history_market_valid_from",
         "market_contract_history",
         ["market_contract_id", "valid_from"],
         schema="analytics",
     )
-    op.create_index(
+    _create_index_if_missing(
         "ix_market_contract_history_current_unique",
         "market_contract_history",
         ["market_contract_id"],
@@ -193,7 +215,7 @@ def upgrade() -> None:
         postgresql_where=sa.text("is_current"),
     )
 
-    op.create_table(
+    _create_table_if_missing(
         "market_tag_map_history",
         sa.Column("market_tag_map_history_id", sa.Integer(), primary_key=True),
         sa.Column("event_id", sa.Integer(), sa.ForeignKey("analytics.market_event.event_id"), nullable=False),
@@ -209,13 +231,13 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
         schema="analytics",
     )
-    op.create_index(
+    _create_index_if_missing(
         "ix_market_tag_map_history_event_valid_from",
         "market_tag_map_history",
         ["event_id", "valid_from"],
         schema="analytics",
     )
-    op.create_index(
+    _create_index_if_missing(
         "ix_market_tag_map_history_current_unique",
         "market_tag_map_history",
         ["event_id", "tag_id"],
@@ -224,7 +246,7 @@ def upgrade() -> None:
         postgresql_where=sa.text("is_current"),
     )
 
-    op.create_table(
+    _create_table_if_missing(
         "orderbook_snapshot_hourly",
         sa.Column("orderbook_snapshot_hourly_id", sa.Integer(), primary_key=True),
         sa.Column("market_contract_id", sa.Integer(), sa.ForeignKey("analytics.market_contract.market_contract_id"), nullable=False),
@@ -244,7 +266,7 @@ def upgrade() -> None:
         sa.UniqueConstraint("market_contract_id", "platform_id", "bucket_start", name="uq_orderbook_snapshot_hourly_bucket"),
         schema="analytics",
     )
-    op.create_table(
+    _create_table_if_missing(
         "orderbook_snapshot_daily",
         sa.Column("orderbook_snapshot_daily_id", sa.Integer(), primary_key=True),
         sa.Column("market_contract_id", sa.Integer(), sa.ForeignKey("analytics.market_contract.market_contract_id"), nullable=False),
@@ -264,7 +286,7 @@ def upgrade() -> None:
         sa.UniqueConstraint("market_contract_id", "platform_id", "bucket_date", name="uq_orderbook_snapshot_daily_bucket"),
         schema="analytics",
     )
-    op.create_table(
+    _create_table_if_missing(
         "position_snapshot_daily",
         sa.Column("position_snapshot_daily_id", sa.Integer(), primary_key=True),
         sa.Column("user_id", sa.Integer(), sa.ForeignKey("analytics.user_account.user_id"), nullable=False),
@@ -286,7 +308,7 @@ def upgrade() -> None:
         schema="analytics",
     )
 
-    op.create_table(
+    _create_table_if_missing(
         "scrape_run_part",
         sa.Column("scrape_run_id", sa.Integer(), primary_key=True, autoincrement=False),
         sa.Column("platform_id", sa.Integer(), sa.ForeignKey("analytics.platform.platform_id"), nullable=False),
@@ -305,9 +327,9 @@ def upgrade() -> None:
         schema="analytics",
         postgresql_partition_by="RANGE (started_at)",
     )
-    op.create_index("ix_scrape_run_part_started_at", "scrape_run_part", ["started_at"], schema="analytics")
+    _create_index_if_missing("ix_scrape_run_part_started_at", "scrape_run_part", ["started_at"], schema="analytics")
 
-    op.create_table(
+    _create_table_if_missing(
         "api_payload_part",
         sa.Column("payload_id", sa.Integer(), primary_key=True, autoincrement=False),
         sa.Column("scrape_run_id", sa.Integer(), nullable=False),
@@ -321,10 +343,10 @@ def upgrade() -> None:
         schema="raw",
         postgresql_partition_by="RANGE (collected_at)",
     )
-    op.create_index("ix_raw_api_payload_part_platform_entity_time", "api_payload_part", ["platform_id", "entity_type", "collected_at"], schema="raw")
-    op.create_index("ix_raw_api_payload_part_entity_external", "api_payload_part", ["entity_type", "entity_external_id"], schema="raw")
+    _create_index_if_missing("ix_raw_api_payload_part_platform_entity_time", "api_payload_part", ["platform_id", "entity_type", "collected_at"], schema="raw")
+    _create_index_if_missing("ix_raw_api_payload_part_entity_external", "api_payload_part", ["entity_type", "entity_external_id"], schema="raw")
 
-    op.create_table(
+    _create_table_if_missing(
         "transaction_fact_part",
         sa.Column("transaction_id", sa.Integer(), primary_key=True, autoincrement=False),
         sa.Column("user_id", sa.Integer(), sa.ForeignKey("analytics.user_account.user_id"), nullable=False),
@@ -349,15 +371,15 @@ def upgrade() -> None:
         schema="analytics",
         postgresql_partition_by="RANGE (transaction_time)",
     )
-    op.create_index("ix_transaction_fact_part_user_time", "transaction_fact_part", ["user_id", "transaction_time"], schema="analytics")
-    op.create_index(
+    _create_index_if_missing("ix_transaction_fact_part_user_time", "transaction_fact_part", ["user_id", "transaction_time"], schema="analytics")
+    _create_index_if_missing(
         "ix_transaction_fact_part_user_market_time",
         "transaction_fact_part",
         ["user_id", "market_contract_id", "transaction_time"],
         schema="analytics",
     )
 
-    op.create_table(
+    _create_table_if_missing(
         "orderbook_snapshot_part",
         sa.Column("orderbook_snapshot_id", sa.Integer(), primary_key=True, autoincrement=False),
         sa.Column("market_contract_id", sa.Integer(), sa.ForeignKey("analytics.market_contract.market_contract_id"), nullable=False),
@@ -375,9 +397,9 @@ def upgrade() -> None:
         schema="analytics",
         postgresql_partition_by="RANGE (snapshot_time)",
     )
-    op.create_index("ix_orderbook_snapshot_part_market_time", "orderbook_snapshot_part", ["market_contract_id", "snapshot_time"], schema="analytics")
+    _create_index_if_missing("ix_orderbook_snapshot_part_market_time", "orderbook_snapshot_part", ["market_contract_id", "snapshot_time"], schema="analytics")
 
-    op.create_table(
+    _create_table_if_missing(
         "position_snapshot_part",
         sa.Column("position_snapshot_id", sa.Integer(), primary_key=True, autoincrement=False),
         sa.Column("user_id", sa.Integer(), sa.ForeignKey("analytics.user_account.user_id"), nullable=False),
@@ -399,14 +421,14 @@ def upgrade() -> None:
         schema="analytics",
         postgresql_partition_by="RANGE (snapshot_time)",
     )
-    op.create_index(
+    _create_index_if_missing(
         "ix_position_snapshot_part_user_market_time",
         "position_snapshot_part",
         ["user_id", "market_contract_id", "snapshot_time"],
         schema="analytics",
     )
 
-    op.create_table(
+    _create_table_if_missing(
         "whale_score_snapshot_part",
         sa.Column("whale_score_snapshot_id", sa.Integer(), primary_key=True, autoincrement=False),
         sa.Column("user_id", sa.Integer(), sa.ForeignKey("analytics.user_account.user_id"), nullable=False),
@@ -425,7 +447,7 @@ def upgrade() -> None:
         schema="analytics",
         postgresql_partition_by="RANGE (snapshot_time)",
     )
-    op.create_index(
+    _create_index_if_missing(
         "ix_whale_score_snapshot_part_batch_user",
         "whale_score_snapshot_part",
         ["snapshot_time", "scoring_version", "user_id"],
