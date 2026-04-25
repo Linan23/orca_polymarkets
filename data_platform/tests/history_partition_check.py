@@ -99,11 +99,33 @@ def run_checks(database_url: str, *, allow_empty_position_snapshots: bool = Fals
                     )
                 ).scalar_one()
             )
+            details = {"current_count": current_count, "history_current_count": current_history_count, "key": key_name}
+            ok = current_count == current_history_count
+            if not ok and current_table == "analytics.market_event":
+                orphan_current_count = int(
+                    session.execute(
+                        text(
+                            """
+                            SELECT COUNT(*)
+                            FROM analytics.market_event me
+                            LEFT JOIN analytics.market_event_history meh
+                              ON meh.event_id = me.event_id
+                             AND meh.is_current
+                            LEFT JOIN analytics.market_contract mc
+                              ON mc.event_id = me.event_id
+                            WHERE meh.event_id IS NULL
+                              AND mc.market_contract_id IS NULL
+                            """
+                        )
+                    ).scalar_one()
+                )
+                details["orphan_current_without_history_count"] = orphan_current_count
+                ok = current_count == current_history_count + orphan_current_count
             results.append(
                 CheckResult(
                     f"history_current_alignment:{history_table}",
-                    current_count == current_history_count,
-                    {"current_count": current_count, "history_current_count": current_history_count, "key": key_name},
+                    ok,
+                    details,
                 )
             )
 
