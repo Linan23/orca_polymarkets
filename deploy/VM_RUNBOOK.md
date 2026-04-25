@@ -1,6 +1,19 @@
 # VM Runbook
 
-This runbook is for the live VM deployment at `/home/lynchej/orca_polymarkets`.
+This runbook is intentionally generic. Replace the values below for your VM before using it:
+
+```bash
+export VM_USER="your-vm-user"
+export VM_HOST="your-vm-host"
+export VM_REPO_DIR="/home/$VM_USER/orca_polymarkets"
+```
+
+Then connect with:
+
+```bash
+ssh "$VM_USER@$VM_HOST"
+cd "$VM_REPO_DIR"
+```
 
 ## Service roles
 
@@ -18,7 +31,7 @@ This runbook is for the live VM deployment at `/home/lynchej/orca_polymarkets`.
 ## Normal deploy
 
 ```bash
-cd /home/lynchej/orca_polymarkets
+cd "$VM_REPO_DIR"
 git pull origin main
 source .venv/bin/activate
 python -m alembic -c alembic.ini upgrade head
@@ -37,7 +50,7 @@ sudo systemctl status orca-ingest-live.service orca-analytics-refresh.service or
 Use the staged live-safe prune path on the VM. Do not run the fully destructive prune during active service hours.
 
 ```bash
-cd /home/lynchej/orca_polymarkets
+cd "$VM_REPO_DIR"
 source .venv/bin/activate
 .venv/bin/python data_platform/jobs/prune_market_scope.py \
   --platform polymarket \
@@ -65,7 +78,7 @@ Then rebuild derived outputs:
 Manual run:
 
 ```bash
-cd /home/lynchej/orca_polymarkets
+cd "$VM_REPO_DIR"
 source .venv/bin/activate
 .venv/bin/python data_platform/jobs/run_retention_maintenance.py --skip-snapshot
 ```
@@ -96,8 +109,8 @@ If you want a smaller cleanup run:
 sudo journalctl -u orca-ingest-live.service -f
 sudo journalctl -u orca-analytics-refresh.service -f
 sudo journalctl -u orca-retention-rollup.service -f
-tail -f /home/lynchej/orca_polymarkets/data_platform/runtime/ingest_live_runs.jsonl
-tail -f /home/lynchej/orca_polymarkets/data_platform/runtime/maintenance_runs.jsonl
+tail -f "$VM_REPO_DIR/data_platform/runtime/ingest_live_runs.jsonl"
+tail -f "$VM_REPO_DIR/data_platform/runtime/maintenance_runs.jsonl"
 ```
 
 ## Notes

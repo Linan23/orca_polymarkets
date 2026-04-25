@@ -5,10 +5,10 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=lynchej
-WorkingDirectory=/home/lynchej/orca_polymarkets
+User=YOUR_VM_USER
+WorkingDirectory=/home/YOUR_VM_USER/orca_polymarkets
 EnvironmentFile=/etc/orca.env
-ExecStart=/bin/bash /home/lynchej/orca_polymarkets/scripts/run_analytics_refresh_vm.sh
+ExecStart=/bin/bash /home/YOUR_VM_USER/orca_polymarkets/scripts/run_analytics_refresh_vm.sh
 Restart=always
 RestartSec=30
 StandardOutput=journal
