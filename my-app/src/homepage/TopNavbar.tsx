@@ -4,6 +4,9 @@ import { useAuth } from "../auth/AuthContext";
 export default function TopNavbar() {
   const { account, isAuthenticated, logout } = useAuth();
 
+  const getLinkClass = ({ isActive }: { isActive: boolean }) =>
+    isActive ? "topbar-link active" : "topbar-link";
+
   return (
     <header className="topbar">
       <div className="topbar-inner">
@@ -14,32 +17,20 @@ export default function TopNavbar() {
           </Link>
 
           <nav className="topbar-nav">
-            <NavLink
-              to="/"
-              end
-              className={({ isActive }) =>
-                isActive ? "topbar-link active" : "topbar-link"
-              }
-            >
+            <NavLink to="/" end className={getLinkClass}>
               Homepage
             </NavLink>
 
-            <NavLink
-              to="/following"
-              className={({ isActive }) =>
-                isActive ? "topbar-link active" : "topbar-link"
-              }
-            >
+            <NavLink to="/following" className={getLinkClass}>
               Following
             </NavLink>
 
-            <NavLink
-              to="/leaderboard"
-              className={({ isActive }) =>
-                isActive ? "topbar-link active" : "topbar-link"
-              }
-            >
+            <NavLink to="/leaderboard" className={getLinkClass}>
               Leaderboard
+            </NavLink>
+
+            <NavLink to="/definitions" className={getLinkClass}>
+              Definitions
             </NavLink>
           </nav>
         </div>
@@ -50,7 +41,12 @@ export default function TopNavbar() {
               <span className="topbar-account-label">Signed in</span>
               <strong>{account.display_name}</strong>
             </div>
-            <button type="button" className="topbar-signout" onClick={() => void logout()}>
+
+            <button
+              type="button"
+              className="topbar-signout"
+              onClick={() => void logout()}
+            >
               Sign Out
             </button>
           </div>

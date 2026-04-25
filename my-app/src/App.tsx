@@ -6,12 +6,14 @@ import MarketProfile from "./pages/MarketProfile";
 import UserProfile from "./pages/UserProfile";
 import FollowingPage from "./pages/FollowingPage";
 import LeaderboardPage from "./pages/LeaderboardPage";
+import DefinitionsPage from "./pages/DefinitionsPage";
 
 export default function App() {
   return (
     <Routes>
       <Route path="/" element={<HomePage />} />
       <Route path="/analytics" element={<Navigate to="/" replace />} />
+
       <Route
         path="/following"
         element={
@@ -20,7 +22,9 @@ export default function App() {
           </RequireAuth>
         }
       />
+
       <Route path="/leaderboard" element={<LeaderboardPage />} />
+      <Route path="/definitions" element={<DefinitionsPage />} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/markets/:marketId" element={<MarketProfile />} />
       <Route path="/users/:userId" element={<UserProfile />} />

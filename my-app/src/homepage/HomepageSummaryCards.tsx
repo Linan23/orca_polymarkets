@@ -108,46 +108,95 @@ export default function HomepageSummaryCards() {
             )}
           </article>
 
-          <article className="summary-card">
-            <p className="summary-card-label">Latest Ingestion</p>
-            {data.latest_ingestion ? (
-              <>
-                <div className="summary-card-value summary-card-value-small">{data.latest_ingestion.status}</div>
-                <p className="summary-card-subtext">
-                  {data.latest_ingestion.job_name} · {data.latest_ingestion.endpoint_name}
-                </p>
-                <div className="summary-stat-list">
-                  <div>
-                    <span>Records</span>
-                    <strong>{formatCompact(data.latest_ingestion.records_written)}</strong>
-                  </div>
-                  <div>
-                    <span>Errors</span>
-                    <strong>{data.latest_ingestion.error_count}</strong>
-                  </div>
-                </div>
-              </>
-            ) : (
-              <p className="summary-card-subtext">No scrape run has been recorded yet.</p>
-            )}
-          </article>
 
-          <article className="summary-card summary-card-wide">
-            <p className="summary-card-label">Platform Coverage</p>
-            <div className="summary-platform-list">
-              {data.platform_coverage.map((platform) => (
-                <div key={platform.platform_name} className="summary-platform-row">
-                  <div className="summary-platform-name">{platform.platform_name}</div>
-                  <div className="summary-platform-metrics">
-                    <span>Users {formatCompact(platform.user_count)}</span>
-                    <span>Markets {formatCompact(platform.market_count)}</span>
-                    <span>Trades {formatCompact(platform.transaction_count)}</span>
-                    <span>Books {formatCompact(platform.orderbook_snapshot_count)}</span>
-                  </div>
-                </div>
-              ))}
+<article className="summary-card summary-card-wide">
+  <p className="summary-card-label">Platform Coverage</p>
+
+  <div className="coverage-pie-grid">
+    {[
+      {
+        title: "Users",
+        total: data.platform_coverage.reduce(
+          (sum, platform) => sum + platform.user_count,
+          0
+        ),
+        getValue: (platform: (typeof data.platform_coverage)[number]) =>
+          platform.user_count,
+      },
+      {
+        title: "Markets",
+        total: data.platform_coverage.reduce(
+          (sum, platform) => sum + platform.market_count,
+          0
+        ),
+        getValue: (platform: (typeof data.platform_coverage)[number]) =>
+          platform.market_count,
+      },
+    ].map((chart) => {
+      let offset = 0;
+
+      return (
+        <div className="coverage-pie-card" key={chart.title}>
+          <div className="coverage-pie-header">
+            <h3>{chart.title}</h3>
+            <strong>{formatCompact(chart.total)}</strong>
+          </div>
+
+          <div className="coverage-pie-content">
+            <div
+              className="coverage-donut"
+              style={{
+                background: `conic-gradient(${data.platform_coverage
+                  .map((platform, index) => {
+                    const value = chart.getValue(platform);
+                    const start = offset;
+                    const end = offset + (value / chart.total) * 100;
+                    offset = end;
+
+                    const color = index === 0 ? "#6f7cff" : "#42d3ff";
+
+                    return `${color} ${start}% ${end}%`;
+                  })
+                  .join(", ")})`,
+              }}
+            >
+              <div className="coverage-donut-hole">
+                <span>Total</span>
+                <strong>{formatCompact(chart.total)}</strong>
+              </div>
             </div>
-          </article>
+
+            <div className="coverage-pie-legend">
+              {data.platform_coverage.map((platform, index) => {
+                const value = chart.getValue(platform);
+                const percent =
+                  chart.total > 0 ? Math.round((value / chart.total) * 100) : 0;
+
+                return (
+                  <div className="coverage-legend-row" key={platform.platform_name}>
+                    <span
+                      className="coverage-legend-dot"
+                      style={{
+                        background: index === 0 ? "#6f7cff" : "#42d3ff",
+                      }}
+                    />
+
+                    <div>
+                      <strong>{platform.platform_name}</strong>
+                      <p>
+                        {formatCompact(value)} · {percent}%
+                      </p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      );
+    })}
+  </div>
+</article>
         </div>
       )}
     </section>
