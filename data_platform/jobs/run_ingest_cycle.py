@@ -36,6 +36,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from data_platform.settings import get_settings
+from data_platform.services.market_scope import add_focus_domain_argument, canonicalize_focus_domains
 
 DEFAULT_KALSHI_ENVIRONMENT = "prod"
 DEFAULT_INTERVAL_SECONDS = 900.0
@@ -64,6 +65,7 @@ def parse_args() -> argparse.Namespace:
         default="",
         help="Optional database URL override. When omitted, uses DATABASE_URL from the environment.",
     )
+    add_focus_domain_argument(parser)
     parser.add_argument(
         "--polymarket-wallet",
         action="append",
@@ -235,6 +237,10 @@ def parse_args() -> argparse.Namespace:
         parser.error("--max-cycles must be >= 0.")
     if args.enable_dune and not args.dune_query_id.strip():
         parser.error("--dune-query-id must not be empty when the Dune step is enabled.")
+    try:
+        args.focus_domains = canonicalize_focus_domains(args.focus_domain)
+    except ValueError as exc:
+        parser.error(str(exc))
     args.summary_log_path = Path(args.summary_log_file) if args.summary_log_file.strip() else None
 
     env_wallets = [wallet.strip() for wallet in os.getenv("POLYMARKET_WALLETS", "").split(",") if wallet.strip()]
@@ -339,6 +345,7 @@ def pipeline_commands(args: argparse.Namespace) -> list[tuple[str, list[str]]]:
     """Build the ordered pipeline command list for one cycle."""
     commands: list[tuple[str, list[str]]] = []
     py = sys.executable
+    focus_domain_flags = sum((["--focus-domain", domain] for domain in args.focus_domains), [])
     runtime_dir = RUNTIME_DIR
     discovery_output = runtime_dir / "discovered_events.jsonl"
     polymarket_trades_output = runtime_dir / "polymarket_trades.jsonl"
@@ -366,6 +373,7 @@ def pipeline_commands(args: argparse.Namespace) -> list[tuple[str, list[str]]]:
                     str(args.discovery_limit),
                     "--output-file",
                     str(discovery_output),
+                    *focus_domain_flags,
                 ],
             )
         )
@@ -400,6 +408,7 @@ def pipeline_commands(args: argparse.Namespace) -> list[tuple[str, list[str]]]:
                     str(args.public_crawl_max_pages_per_market),
                     "--max-total-trade-pages",
                     str(args.public_crawl_max_total_trade_pages),
+                    *focus_domain_flags,
                 ],
             )
         )
@@ -417,6 +426,7 @@ def pipeline_commands(args: argparse.Namespace) -> list[tuple[str, list[str]]]:
                     "1",
                     "--output-file",
                     str(polymarket_trades_output),
+                    *focus_domain_flags,
                 ],
             )
         )
@@ -434,6 +444,7 @@ def pipeline_commands(args: argparse.Namespace) -> list[tuple[str, list[str]]]:
                     "1",
                     "--output-file",
                     str(polymarket_orderbook_output),
+                    *focus_domain_flags,
                 ],
             )
         )
@@ -475,6 +486,7 @@ def pipeline_commands(args: argparse.Namespace) -> list[tuple[str, list[str]]]:
                     str(args.kalshi_trades_limit),
                     "--output-file",
                     str(kalshi_trades_output),
+                    *focus_domain_flags,
                 ],
             )
         )
@@ -494,6 +506,7 @@ def pipeline_commands(args: argparse.Namespace) -> list[tuple[str, list[str]]]:
                     "1",
                     "--output-file",
                     str(kalshi_orderbook_output),
+                    *focus_domain_flags,
                 ],
             )
         )

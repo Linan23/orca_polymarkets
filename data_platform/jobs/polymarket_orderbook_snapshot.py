@@ -28,7 +28,13 @@ if str(ROOT_DIR) not in sys.path:
 from data_platform.db.session import session_scope
 from data_platform.ingest.polymarket import ingest_orderbook_batch
 from data_platform.ingest.store import parse_datetime
-from data_platform.models import ApiPayload, MarketContract, MarketEvent, Platform
+from data_platform.models import ApiPayload, MarketContract, MarketEvent, MarketTag, MarketTagMap, Platform
+from data_platform.services.market_scope import (
+    add_focus_domain_argument,
+    build_market_scope_texts,
+    canonicalize_focus_domains,
+    matches_focus_domains,
+)
 
 CLOB_BOOK_URL = "https://clob.polymarket.com/book"
 ZERO = Decimal("0")
@@ -39,6 +45,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Capture Polymarket order-book snapshots into PostgreSQL.")
     parser.add_argument("--database-url", default="", help="Optional database URL override.")
     parser.add_argument("--market-limit", type=int, default=10, help="Number of top Polymarket markets to sample.")
+    add_focus_domain_argument(parser)
     parser.add_argument(
         "--output-file",
         default="polymarket_data/orderbook_snapshots.jsonl",
@@ -62,6 +69,10 @@ def parse_args() -> argparse.Namespace:
         parser.error("--timeout-seconds must be > 0.")
     if args.max_retries < 0:
         parser.error("--max-retries must be >= 0.")
+    try:
+        args.focus_domains = canonicalize_focus_domains(args.focus_domain)
+    except ValueError as exc:
+        parser.error(str(exc))
 
     return args
 
@@ -128,23 +139,51 @@ def _resolve_market_tokens(session: Session, market: MarketContract) -> list[str
 
 
 
-def _load_target_markets(session: Session, market_limit: int) -> list[tuple[MarketContract, list[str]]]:
+def _load_event_tags(session: Session, event_ids: set[int]) -> dict[int, list[str]]:
+    if not event_ids:
+        return {}
+    rows = session.execute(
+        select(MarketTagMap.event_id, MarketTag.tag_label, MarketTag.tag_slug)
+        .join(MarketTag, MarketTag.tag_id == MarketTagMap.tag_id)
+        .where(MarketTagMap.event_id.in_(event_ids))
+    ).all()
+    grouped: dict[int, list[str]] = {}
+    for event_id, tag_label, tag_slug in rows:
+        grouped.setdefault(int(event_id), []).extend(
+            [value for value in (tag_label, tag_slug) if isinstance(value, str) and value.strip()]
+        )
+    return grouped
+
+
+def _load_target_markets(session: Session, market_limit: int, *, focus_domains: list[str]) -> list[tuple[MarketContract, list[str]]]:
     """Return top Polymarket markets that have resolvable CLOB token ids."""
-    rows = session.scalars(
-        select(MarketContract)
+    rows = session.execute(
+        select(MarketContract, MarketEvent)
         .join(Platform, Platform.platform_id == MarketContract.platform_id)
+        .join(MarketEvent, MarketEvent.event_id == MarketContract.event_id)
         .where(Platform.platform_name == "polymarket")
         .where(MarketContract.is_active.is_(True))
         .where(MarketContract.is_closed.is_(False))
         .where(MarketContract.volume.is_not(None))
         .order_by(desc(MarketContract.volume), desc(MarketContract.updated_at))
-        .limit(market_limit * 5)
+        .limit(market_limit * 12)
     ).all()
 
+    event_tags = _load_event_tags(session, {event.event_id for _, event in rows})
     selected: list[tuple[MarketContract, list[str]]] = []
     seen_market_ids: set[int] = set()
-    for market in rows:
+    for market, event in rows:
         if market.market_contract_id in seen_market_ids:
+            continue
+        if focus_domains and not matches_focus_domains(
+            build_market_scope_texts(
+                platform_name="polymarket",
+                event=event,
+                market=market,
+                tags=event_tags.get(event.event_id, []),
+            ),
+            focus_domains,
+        ):
             continue
         token_ids = _resolve_market_tokens(session, market)
         if not token_ids:
@@ -294,7 +333,7 @@ def append_jsonl(path: Path, record: dict[str, Any]) -> None:
 def run_once(args: argparse.Namespace) -> dict[str, Any]:
     """Run one order-book snapshot cycle."""
     with session_scope(args.database_url or None) as session:
-        target_markets = _load_target_markets(session, args.market_limit)
+        target_markets = _load_target_markets(session, args.market_limit, focus_domains=args.focus_domains)
         if not target_markets:
             summary = {
                 "scraped_at": datetime.now(timezone.utc).isoformat(),

@@ -24,6 +24,11 @@ from data_platform.ingest.store import (
     upsert_market_tag,
     upsert_user_account,
 )
+from data_platform.services.market_scope import (
+    canonicalize_focus_domains,
+    polymarket_event_payload_matches_focus_domains,
+    polymarket_trade_payload_matches_focus_domains,
+)
 
 
 def _parse_outcomes(raw_value: Any) -> tuple[str | None, str | None]:
@@ -57,10 +62,21 @@ def ingest_trades_record(
     record: dict[str, Any],
     request_url: str,
     raw_output_path: str | None = None,
+    focus_domains: list[str] | None = None,
 ) -> dict[str, int]:
     """Persist one Polymarket trades batch into the database."""
+    focus_domains = canonicalize_focus_domains(focus_domains)
     scraped_at = parse_datetime(record.get("scraped_at_iso"))
     batch_time = scraped_at or parse_datetime(record.get("scraped_at_unix")) or datetime.now(timezone.utc)
+    all_trades = record.get("trades") if isinstance(record.get("trades"), list) else []
+    trades = [
+        trade
+        for trade in all_trades
+        if isinstance(trade, dict) and polymarket_trade_payload_matches_focus_domains(trade, focus_domains)
+    ]
+    filtered_record = dict(record)
+    filtered_record["count"] = len(trades)
+    filtered_record["trades"] = trades
     scrape_run = start_scrape_run(
         session,
         platform_name="polymarket",
@@ -76,11 +92,10 @@ def ingest_trades_record(
         platform_name="polymarket",
         entity_type="trades",
         entity_external_id=None,
-        payload=record,
+        payload=filtered_record,
         collected_at=scraped_at,
     )
 
-    trades = record.get("trades") if isinstance(record.get("trades"), list) else []
     records_written = 0
     error_count = 0
 
@@ -176,7 +191,11 @@ def ingest_trades_record(
         error_count=error_count,
         error_summary=f"Skipped {error_count} malformed trade rows." if error_count else None,
     )
-    return {"records_written": records_written, "error_count": error_count}
+    return {
+        "records_written": records_written,
+        "error_count": error_count,
+        "skipped_out_of_scope": max(len(all_trades) - len(trades), 0),
+    }
 
 
 def ingest_discovery_cycle(
@@ -185,8 +204,10 @@ def ingest_discovery_cycle(
     cycle: dict[str, Any],
     request_url: str,
     raw_output_path: str | None = None,
+    focus_domains: list[str] | None = None,
 ) -> dict[str, int]:
     """Persist one Polymarket discovery cycle into the database."""
+    focus_domains = canonicalize_focus_domains(focus_domains)
     scrape_run = start_scrape_run(
         session,
         platform_name="polymarket",
@@ -196,7 +217,13 @@ def ingest_discovery_cycle(
         raw_output_path=raw_output_path,
     )
     records_written = 0
-    for event_payload in cycle.get("results", []):
+    total_results = cycle.get("results", [])
+    filtered_results = [
+        event_payload
+        for event_payload in total_results
+        if isinstance(event_payload, dict) and polymarket_event_payload_matches_focus_domains(event_payload, focus_domains)
+    ]
+    for event_payload in filtered_results:
         if not isinstance(event_payload, dict):
             continue
         payload_row = store_api_payload(
@@ -287,7 +314,11 @@ def ingest_discovery_cycle(
         error_count=len(errors),
         error_summary="; ".join(item.get("error", "") for item in errors[:5]) if errors else None,
     )
-    return {"records_written": records_written, "error_count": len(errors)}
+    return {
+        "records_written": records_written,
+        "error_count": len(errors),
+        "skipped_out_of_scope": max(len(total_results) - len(filtered_results), 0),
+    }
 
 
 def ingest_positions_record(

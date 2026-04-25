@@ -26,11 +26,17 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from data_platform.jobs.run_ingest_cycle import is_within_window, next_window_start, parse_clock_time
+from data_platform.services.market_scope import (
+    DEFAULT_FOCUS_DOMAINS,
+    add_focus_domain_argument,
+    canonicalize_focus_domains,
+)
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the near-live ingest service loop.")
     parser.add_argument("--database-url", default=os.getenv("DATABASE_URL", ""))
+    add_focus_domain_argument(parser)
     parser.add_argument("--timezone", default=os.getenv("LIVE_INGEST_TIMEZONE", "America/New_York"))
     parser.add_argument("--window-start", default=os.getenv("LIVE_INGEST_WINDOW_START", "09:00"))
     parser.add_argument("--window-end", default=os.getenv("LIVE_INGEST_WINDOW_END", "17:00"))
@@ -41,7 +47,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--polymarket-wallet", action="append", default=[])
     parser.add_argument("--summary-log-file", default=str(RUNTIME_DIR / "ingest_live_runs.jsonl"))
     parser.add_argument("--max-cycles", type=int, default=0)
-    return parser.parse_args()
+    args = parser.parse_args()
+    try:
+        args.focus_domains = canonicalize_focus_domains(args.focus_domain) or list(DEFAULT_FOCUS_DOMAINS)
+    except ValueError as exc:
+        parser.error(str(exc))
+    return args
 
 
 def main() -> int:
@@ -69,6 +80,7 @@ def main() -> int:
         enable_discovery = cycle == 1 or cycle % max(args.discovery_every_cycles, 1) == 0
         enable_positions = bool(args.polymarket_wallet) and (cycle == 1 or cycle % max(args.positions_every_cycles, 1) == 0)
         started = time.monotonic()
+        focus_domain_flags = sum((["--focus-domain", domain] for domain in args.focus_domains), [])
         cmd = [
             py,
             "data_platform/jobs/run_ingest_cycle.py",
@@ -108,6 +120,7 @@ def main() -> int:
             str(args.jitter_seconds),
             "--summary-log-file",
             args.summary_log_file,
+            *focus_domain_flags,
         ]
         if args.database_url:
             cmd.extend(["--database-url", args.database_url])

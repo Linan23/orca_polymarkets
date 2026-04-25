@@ -27,6 +27,11 @@ if str(ROOT_DIR) not in sys.path:
 
 from data_platform.db.session import session_scope
 from data_platform.ingest.polymarket import ingest_discovery_cycle
+from data_platform.services.market_scope import (
+    add_focus_domain_argument,
+    canonicalize_focus_domains,
+    polymarket_event_payload_matches_focus_domains,
+)
 
 EVENTS_LIST_URL = "https://gamma-api.polymarket.com/events"
 EVENT_BY_ID_URL = "https://gamma-api.polymarket.com/events/{event_id}"
@@ -80,6 +85,7 @@ def parse_args() -> argparse.Namespace:
         default="any",
         help="How multiple --tag filters are applied: any match or require all matches.",
     )
+    add_focus_domain_argument(parser)
     parser.add_argument(
         "--fetch-full-details",
         action="store_true",
@@ -166,6 +172,10 @@ def parse_args() -> argparse.Namespace:
         parser.error("--timeout-seconds must be > 0.")
     if args.max_retries < 0:
         parser.error("--max-retries must be >= 0.")
+    try:
+        args.focus_domains = canonicalize_focus_domains(args.focus_domain)
+    except ValueError as exc:
+        parser.error(str(exc))
 
     return args
 
@@ -319,11 +329,16 @@ def filter_events_with_tags(
     query_text: str,
     tags: list[str],
     tag_mode: str,
+    focus_domains: list[str],
 ) -> list[dict[str, Any]]:
     """Apply local substring and tag filtering on discovered events."""
     filtered: list[dict[str, Any]] = []
     for event in events:
-        if event_matches_text(event, query_text) and event_matches_tags(event, tags, tag_mode):
+        if (
+            event_matches_text(event, query_text)
+            and event_matches_tags(event, tags, tag_mode)
+            and polymarket_event_payload_matches_focus_domains(event, focus_domains)
+        ):
             filtered.append(event)
     return filtered
 
@@ -339,6 +354,7 @@ def fetch_cycle(client: httpx.Client, args: argparse.Namespace) -> dict[str, Any
         query_text=args.query_text,
         tags=args.tag,
         tag_mode=args.tag_mode,
+        focus_domains=args.focus_domains,
     )
     errors: list[dict[str, str]] = []
 
@@ -360,6 +376,8 @@ def fetch_cycle(client: httpx.Client, args: argparse.Namespace) -> dict[str, Any
             detail = request_with_backoff(client, EVENT_BY_ID_URL.format(event_id=event_id), args)
             if not isinstance(detail, dict):
                 raise ValueError("Unexpected response shape from /events/{id}: expected an object.")
+            if not polymarket_event_payload_matches_focus_domains(detail, args.focus_domains):
+                continue
             detailed_results.append(detail)
         except Exception as exc:  # pragma: no cover - broad by design for per-item isolation
             errors.append({"event_id": str(event_id), "error": str(exc)})
@@ -394,6 +412,7 @@ def persist_cycle_to_database(args: argparse.Namespace, cycle: dict[str, Any]) -
             cycle=cycle,
             request_url=request_url,
             raw_output_path=args.output_file,
+            focus_domains=args.focus_domains,
         )
 
 
@@ -403,6 +422,7 @@ def main() -> None:
     print(
         "Starting Polymarket discovery scraper: "
         f"limit={args.limit}, active={args.active}, closed={args.closed}, "
+        f"focus_domains={args.focus_domains or ['all']}, "
         f"fetch_full_details={args.fetch_full_details}, "
         f"interval={args.interval_seconds_effective}s, "
         f"window={args.window_start or 'always'}-{args.window_end or 'always'} {args.timezone}, "

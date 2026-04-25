@@ -115,7 +115,7 @@ def _count_table(session: Any, table_name: str) -> int:
     return int(session.execute(query).scalar_one())
 
 
-def _run_database_checks(require_sample_data: bool) -> list[CheckResult]:
+def _run_database_checks(require_sample_data: bool, *, allow_empty_position_snapshots: bool = False) -> list[CheckResult]:
     """Run database-level validation checks."""
     results: list[CheckResult] = []
     with session_scope() as session:
@@ -173,12 +173,19 @@ def _run_database_checks(require_sample_data: bool) -> list[CheckResult]:
         )
 
         counts = {table_name: _count_table(session, table_name) for table_name in CORE_TABLES}
-        enough_data = all(counts[table_name] > 0 for table_name in CORE_TABLES)
+        required_tables = set(CORE_TABLES)
+        if allow_empty_position_snapshots:
+            required_tables.discard("analytics.position_snapshot")
+        enough_data = all(counts[table_name] > 0 for table_name in required_tables)
         results.append(
             CheckResult(
                 "sample_data",
                 (not require_sample_data) or enough_data,
-                {"required": require_sample_data, "counts": counts},
+                {
+                    "required": require_sample_data,
+                    "allow_empty_position_snapshots": allow_empty_position_snapshots,
+                    "counts": counts,
+                },
             )
         )
 
@@ -814,7 +821,12 @@ def _run_api_checks() -> list[CheckResult]:
     return results
 
 
-def _run_optional_checks(run_bootstrap: bool, build_dashboard: bool) -> list[CheckResult]:
+def _run_optional_checks(
+    run_bootstrap: bool,
+    build_dashboard: bool,
+    *,
+    allow_empty_position_snapshots: bool = False,
+) -> list[CheckResult]:
     """Run optional mutating checks."""
     results: list[CheckResult] = []
 
@@ -843,7 +855,10 @@ def _run_optional_checks(run_bootstrap: bool, build_dashboard: bool) -> list[Che
             item.ok,
             item.details,
         )
-        for item in run_history_partition_checks("")
+        for item in run_history_partition_checks(
+            "",
+            allow_empty_position_snapshots=allow_empty_position_snapshots,
+        )
     )
 
     return results
@@ -881,6 +896,11 @@ def parse_args() -> argparse.Namespace:
         help="Run the dashboard builder as part of validation.",
     )
     parser.add_argument(
+        "--allow-empty-position-snapshots",
+        action="store_true",
+        help="Allow zero position snapshot rows for scoped crawls without tracked wallet positions.",
+    )
+    parser.add_argument(
         "--json",
         action="store_true",
         help="Emit machine-readable JSON instead of plain text.",
@@ -892,9 +912,20 @@ def main() -> None:
     """Run the smoke validator and exit non-zero on failure."""
     args = parse_args()
     results = []
-    results.extend(_run_database_checks(require_sample_data=args.require_sample_data))
+    results.extend(
+        _run_database_checks(
+            require_sample_data=args.require_sample_data,
+            allow_empty_position_snapshots=args.allow_empty_position_snapshots,
+        )
+    )
     results.extend(_run_api_checks())
-    results.extend(_run_optional_checks(run_bootstrap=args.run_bootstrap, build_dashboard=args.build_dashboard))
+    results.extend(
+        _run_optional_checks(
+            run_bootstrap=args.run_bootstrap,
+            build_dashboard=args.build_dashboard,
+            allow_empty_position_snapshots=args.allow_empty_position_snapshots,
+        )
+    )
 
     failed = [result for result in results if not result.ok]
     if args.json:
