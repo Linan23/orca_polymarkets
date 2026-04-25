@@ -330,6 +330,8 @@ Useful local commands:
 ```
 
 VM wrapper scripts are included in `scripts/`, example `systemd` units live in `deploy/systemd/`, and the deployment runbook is in `deploy/VM_RUNBOOK.md`.
+The runbook and example service files use placeholder values such as `YOUR_VM_USER`; replace them with the collaborator's actual VM username and repo path before enabling services.
+For snapshot-enabled maintenance on Linux VMs, install the PostgreSQL client package so `pg_dump` is available on `PATH`.
 
 What the baseline migration creates:
 
