@@ -208,6 +208,12 @@ Run the near-live service split locally:
 .venv/bin/python data_platform/jobs/run_retention_maintenance.py --skip-snapshot
 ```
 
+Near-live ingest scope defaults to the focused categories used by the live VM deployment:
+- `politics` / geopolitics
+- `crypto`
+- `technology`
+- `video-games`
+
 One-shot validation modes:
 
 ```bash

@@ -19,7 +19,9 @@ if str(ROOT_DIR) not in sys.path:
 from data_platform.db.session import session_scope
 from data_platform.services.storage_lifecycle import (
     backfill_all_partition_shadows,
+    cleanup_orphan_market_events,
     ensure_default_partitions,
+    garbage_collect_unreferenced_raw_payloads,
     partition_coverage,
     rollup_old_orderbook_snapshots,
     rollup_old_position_snapshots,
@@ -32,8 +34,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--database-url", default=os.getenv("DATABASE_URL", "") or get_settings().database_url)
     parser.add_argument("--rollup-days", type=int, default=30)
     parser.add_argument("--partition-batch-size", type=int, default=5000)
+    parser.add_argument("--orphan-event-batch-size", type=int, default=1000)
+    parser.add_argument("--orphan-event-max-batches", type=int, default=10)
+    parser.add_argument("--raw-payload-gc-batch-size", type=int, default=1000)
+    parser.add_argument("--raw-payload-gc-max-batches", type=int, default=10)
     parser.add_argument("--snapshot-label", default="nightly")
     parser.add_argument("--skip-snapshot", action="store_true")
+    parser.add_argument("--skip-orphan-event-cleanup", action="store_true")
+    parser.add_argument("--skip-raw-payload-gc", action="store_true")
     parser.add_argument("--summary-log-file", default=str(RUNTIME_DIR / "maintenance_runs.jsonl"))
     return parser.parse_args()
 
@@ -53,6 +61,24 @@ def main() -> int:
         backfill_counts = backfill_all_partition_shadows(session, batch_size=args.partition_batch_size)
         orderbook_rollup = rollup_old_orderbook_snapshots(session, older_than_days=args.rollup_days)
         position_rollup = rollup_old_position_snapshots(session, older_than_days=args.rollup_days)
+        orphan_event_cleanup = (
+            {"skipped": True}
+            if args.skip_orphan_event_cleanup
+            else cleanup_orphan_market_events(
+                session,
+                batch_size=args.orphan_event_batch_size,
+                max_batches=args.orphan_event_max_batches,
+            )
+        )
+        raw_payload_gc = (
+            {"skipped": True}
+            if args.skip_raw_payload_gc
+            else garbage_collect_unreferenced_raw_payloads(
+                session,
+                batch_size=args.raw_payload_gc_batch_size,
+                max_batches=args.raw_payload_gc_max_batches,
+            )
+        )
         coverage = partition_coverage(session)
 
     snapshot_result: dict[str, object] | None = None
@@ -82,6 +108,8 @@ def main() -> int:
                     "backfill_counts": backfill_counts,
                     "orderbook_rollup": orderbook_rollup,
                     "position_rollup": position_rollup,
+                    "orphan_event_cleanup": orphan_event_cleanup,
+                    "raw_payload_gc": raw_payload_gc,
                     "coverage": coverage,
                     "snapshot": snapshot_result,
                 },
@@ -97,6 +125,8 @@ def main() -> int:
             "backfill_counts": backfill_counts,
             "orderbook_rollup": orderbook_rollup,
             "position_rollup": position_rollup,
+            "orphan_event_cleanup": orphan_event_cleanup,
+            "raw_payload_gc": raw_payload_gc,
             "coverage": coverage,
             "snapshot": snapshot_result,
         },

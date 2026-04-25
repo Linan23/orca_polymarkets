@@ -308,6 +308,7 @@ The runtime is now split into three jobs instead of one all-purpose crawler:
    - default cadence: every 2 minutes
    - Polymarket and Kalshi market/trade/orderbook collection
    - wallet positions only when wallets are configured
+   - default focus domains: `politics`, `crypto`, `technology`, `video-games`
 2. `data_platform/jobs/run_analytics_refresh.py`
    - whale score rebuild
    - dashboard rebuild
@@ -316,6 +317,8 @@ The runtime is now split into three jobs instead of one all-purpose crawler:
    - partition creation
    - shadow-table backfill
    - snapshot rollups
+   - batched orphan `market_event` cleanup
+   - batched unreferenced `raw.api_payload` garbage collection
    - optional backup snapshot export
 
 Useful local commands:
@@ -326,7 +329,7 @@ Useful local commands:
 .venv/bin/python data_platform/jobs/run_retention_maintenance.py --skip-snapshot
 ```
 
-VM wrapper scripts are included in `scripts/` and example `systemd` units live in `deploy/systemd/`.
+VM wrapper scripts are included in `scripts/`, example `systemd` units live in `deploy/systemd/`, and the deployment runbook is in `deploy/VM_RUNBOOK.md`.
 
 What the baseline migration creates:
 

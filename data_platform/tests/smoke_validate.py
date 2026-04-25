@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -908,14 +909,19 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _wallet_positions_expected() -> bool:
+    return any(wallet.strip() for wallet in os.getenv("POLYMARKET_WALLETS", "").split(","))
+
+
 def main() -> None:
     """Run the smoke validator and exit non-zero on failure."""
     args = parse_args()
+    allow_empty_position_snapshots = args.allow_empty_position_snapshots or not _wallet_positions_expected()
     results = []
     results.extend(
         _run_database_checks(
             require_sample_data=args.require_sample_data,
-            allow_empty_position_snapshots=args.allow_empty_position_snapshots,
+            allow_empty_position_snapshots=allow_empty_position_snapshots,
         )
     )
     results.extend(_run_api_checks())
@@ -923,7 +929,7 @@ def main() -> None:
         _run_optional_checks(
             run_bootstrap=args.run_bootstrap,
             build_dashboard=args.build_dashboard,
-            allow_empty_position_snapshots=args.allow_empty_position_snapshots,
+            allow_empty_position_snapshots=allow_empty_position_snapshots,
         )
     )
 

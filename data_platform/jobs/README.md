@@ -94,6 +94,7 @@ Defaults:
 - Polymarket public crawl every cycle
 - Polymarket positions every 5 cycles when wallets are configured
 - Kalshi trades/orderbooks every cycle
+- default focus domains: `politics`, `crypto`, `technology`, `video-games`
 - no whale/dashboard rebuild in this loop
 
 One-shot validation:
@@ -124,7 +125,9 @@ What it does:
 1. create current and next-month partitions
 2. backfill partition-shadow tables
 3. roll up old orderbook and position snapshots
-4. optionally write a full snapshot backup artifact
+4. delete orphan `analytics.market_event` rows in batches
+5. garbage-collect unreferenced `raw.api_payload` and `raw.api_payload_part` rows in batches
+6. optionally write a full snapshot backup artifact
 
 One-shot shadow backfill:
 
@@ -137,11 +140,16 @@ VM wrapper scripts:
 - `scripts/run_analytics_refresh_vm.sh`
 - `scripts/run_retention_rollup_vm.sh`
 
+`scripts/run_ingest_live_vm.sh` injects the focused crawl domains for the VM deployment unless you explicitly pass your own `--focus-domain` flags.
+
 Example `systemd` units:
 - `deploy/systemd/orca-ingest-live.service`
 - `deploy/systemd/orca-analytics-refresh.service`
 - `deploy/systemd/orca-retention-rollup.service`
 - `deploy/systemd/orca-backup-snapshot.timer`
+
+Operational runbook:
+- `deploy/VM_RUNBOOK.md`
 
 You can also set wallets with:
 
