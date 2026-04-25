@@ -129,6 +129,7 @@ class MarketContract(Base):
     __tablename__ = "market_contract"
     __table_args__ = (
         Index("ix_market_contract_market_slug", "market_slug"),
+        Index("ix_market_contract_event_id", "event_id"),
         UniqueConstraint("platform_id", "external_market_ref", name="uq_market_contract_platform_external"),
         {"schema": "analytics"},
     )
@@ -336,6 +337,7 @@ class TransactionFact(Base):
     __table_args__ = (
         Index("ix_transaction_fact_user_time", "user_id", "transaction_time"),
         Index("ix_transaction_fact_user_market_time", "user_id", "market_contract_id", "transaction_time"),
+        Index("ix_transaction_fact_event_id", "event_id"),
         UniqueConstraint("platform_id", "source_transaction_id", name="uq_transaction_platform_source"),
         {"schema": "analytics"},
     )
@@ -366,6 +368,7 @@ class PositionSnapshot(Base):
     __tablename__ = "position_snapshot"
     __table_args__ = (
         Index("ix_position_snapshot_user_market_time", "user_id", "market_contract_id", "snapshot_time"),
+        Index("ix_position_snapshot_event_id", "event_id"),
         {"schema": "analytics"},
     )
 
@@ -469,6 +472,7 @@ class PositionSnapshotDaily(Base):
             "bucket_date",
             name="uq_position_snapshot_daily_bucket",
         ),
+        Index("ix_position_snapshot_daily_event_id", "event_id"),
         {"schema": "analytics"},
     )
 
@@ -537,6 +541,7 @@ class TransactionFactPart(Base):
     __table_args__ = (
         Index("ix_transaction_fact_part_user_time", "user_id", "transaction_time"),
         Index("ix_transaction_fact_part_user_market_time", "user_id", "market_contract_id", "transaction_time"),
+        Index("ix_transaction_fact_part_event_id", "event_id"),
         {"schema": "analytics", "postgresql_partition_by": "RANGE (transaction_time)"},
     )
 
@@ -588,6 +593,7 @@ class PositionSnapshotPart(Base):
     __tablename__ = "position_snapshot_part"
     __table_args__ = (
         Index("ix_position_snapshot_part_user_market_time", "user_id", "market_contract_id", "snapshot_time"),
+        Index("ix_position_snapshot_part_event_id", "event_id"),
         {"schema": "analytics", "postgresql_partition_by": "RANGE (snapshot_time)"},
     )
 
