@@ -69,6 +69,14 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--sample-size", type=int, default=12, help="How many kept/removed examples to include in the summary.")
     parser.add_argument("--apply", action="store_true", help="Actually delete out-of-scope rows. Dry-run by default.")
+    parser.add_argument(
+        "--preserve-current-events",
+        action="store_true",
+        help=(
+            "Keep current analytics.market_event rows for removed scopes, while still deleting market-linked facts, "
+            "tag maps, histories, and unlinking event raw payload references."
+        ),
+    )
     args = parser.parse_args()
     try:
         args.focus_domains = canonicalize_focus_domains(args.focus_domain) or list(DEFAULT_FOCUS_DOMAINS)
@@ -202,7 +210,13 @@ def _execute_delete(session: Session, sql: str, params: dict[str, Any] | None = 
     return int(result.rowcount or 0)
 
 
-def apply_prune(session: Session, *, summary: dict[str, Any], platform_ids: list[int]) -> dict[str, int]:
+def apply_prune(
+    session: Session,
+    *,
+    summary: dict[str, Any],
+    platform_ids: list[int],
+    preserve_current_events: bool = False,
+) -> dict[str, int]:
     delete_market_ids: list[int] = list(summary["delete_market_ids"])
     delete_event_ids: list[int] = list(summary["delete_event_ids"])
     if not delete_market_ids and not delete_event_ids:
@@ -352,11 +366,25 @@ def apply_prune(session: Session, *, summary: dict[str, Any], platform_ids: list
             "DELETE FROM analytics.market_event_history WHERE event_id = ANY(:event_ids)",
             delete_params,
         )
-        counts["analytics.market_event"] = _execute_delete(
-            session,
-            "DELETE FROM analytics.market_event WHERE event_id = ANY(:event_ids)",
-            delete_params,
-        )
+        if preserve_current_events:
+            counts["analytics.market_event_unlinked"] = _execute_delete(
+                session,
+                """
+                UPDATE analytics.market_event
+                   SET raw_payload_id = NULL,
+                       updated_at = CURRENT_TIMESTAMP
+                 WHERE event_id = ANY(:event_ids)
+                   AND raw_payload_id IS NOT NULL
+                """,
+                delete_params,
+            )
+            counts["analytics.market_event"] = 0
+        else:
+            counts["analytics.market_event"] = _execute_delete(
+                session,
+                "DELETE FROM analytics.market_event WHERE event_id = ANY(:event_ids)",
+                delete_params,
+            )
 
     counts["analytics.market_tag"] = _execute_delete(
         session,
@@ -422,9 +450,15 @@ def main() -> int:
         )
         platform_map = _platform_ids(session, args.platforms)
         if args.apply:
-            deleted_counts = apply_prune(session, summary=summary, platform_ids=list(platform_map.values()))
+            deleted_counts = apply_prune(
+                session,
+                summary=summary,
+                platform_ids=list(platform_map.values()),
+                preserve_current_events=args.preserve_current_events,
+            )
             summary["deleted_counts"] = deleted_counts
             summary["after_counts"] = {table_name: _table_count(session, table_name) for table_name in CORE_TABLES}
+            summary["preserve_current_events"] = args.preserve_current_events
         summary["mode"] = "apply" if args.apply else "dry-run"
     print(json.dumps(summary, sort_keys=True, default=str))
     return 0
