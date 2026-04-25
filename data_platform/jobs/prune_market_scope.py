@@ -77,6 +77,11 @@ def parse_args() -> argparse.Namespace:
             "tag maps, histories, and unlinking event raw payload references."
         ),
     )
+    parser.add_argument(
+        "--skip-raw-payload-prune",
+        action="store_true",
+        help="Skip deleting raw.api_payload and raw.api_payload_part rows during the prune run.",
+    )
     args = parser.parse_args()
     try:
         args.focus_domains = canonicalize_focus_domains(args.focus_domain) or list(DEFAULT_FOCUS_DOMAINS)
@@ -216,6 +221,7 @@ def apply_prune(
     summary: dict[str, Any],
     platform_ids: list[int],
     preserve_current_events: bool = False,
+    skip_raw_payload_prune: bool = False,
 ) -> dict[str, int]:
     delete_market_ids: list[int] = list(summary["delete_market_ids"])
     delete_event_ids: list[int] = list(summary["delete_event_ids"])
@@ -396,46 +402,50 @@ def apply_prune(
         """,
         {"platform_ids": platform_ids},
     )
-    counts["raw.api_payload"] = _execute_delete(
-        session,
-        """
-        DELETE FROM raw.api_payload p
-        WHERE p.platform_id = ANY(:platform_ids)
-          AND NOT EXISTS (SELECT 1 FROM analytics.market_event me WHERE me.raw_payload_id = p.payload_id)
-          AND NOT EXISTS (SELECT 1 FROM analytics.market_contract mc WHERE mc.raw_payload_id = p.payload_id)
-          AND NOT EXISTS (SELECT 1 FROM analytics.market_event_history meh WHERE meh.source_raw_payload_id = p.payload_id)
-          AND NOT EXISTS (SELECT 1 FROM analytics.market_contract_history mch WHERE mch.source_raw_payload_id = p.payload_id)
-          AND NOT EXISTS (SELECT 1 FROM analytics.user_account_history uah WHERE uah.source_raw_payload_id = p.payload_id)
-          AND NOT EXISTS (SELECT 1 FROM analytics.market_tag_map_history mtmh WHERE mtmh.source_raw_payload_id = p.payload_id)
-          AND NOT EXISTS (SELECT 1 FROM analytics.transaction_fact tf WHERE tf.raw_payload_id = p.payload_id)
-          AND NOT EXISTS (SELECT 1 FROM analytics.transaction_fact_part tfp WHERE tfp.raw_payload_id = p.payload_id)
-          AND NOT EXISTS (SELECT 1 FROM analytics.orderbook_snapshot ob WHERE ob.raw_payload_id = p.payload_id)
-          AND NOT EXISTS (SELECT 1 FROM analytics.orderbook_snapshot_part obp WHERE obp.raw_payload_id = p.payload_id)
-          AND NOT EXISTS (SELECT 1 FROM analytics.position_snapshot ps WHERE ps.raw_payload_id = p.payload_id)
-          AND NOT EXISTS (SELECT 1 FROM analytics.position_snapshot_part psp WHERE psp.raw_payload_id = p.payload_id)
-        """,
-        {"platform_ids": platform_ids},
-    )
-    counts["raw.api_payload_part"] = _execute_delete(
-        session,
-        """
-        DELETE FROM raw.api_payload_part p
-        WHERE p.platform_id = ANY(:platform_ids)
-          AND NOT EXISTS (SELECT 1 FROM analytics.market_event me WHERE me.raw_payload_id = p.payload_id)
-          AND NOT EXISTS (SELECT 1 FROM analytics.market_contract mc WHERE mc.raw_payload_id = p.payload_id)
-          AND NOT EXISTS (SELECT 1 FROM analytics.market_event_history meh WHERE meh.source_raw_payload_id = p.payload_id)
-          AND NOT EXISTS (SELECT 1 FROM analytics.market_contract_history mch WHERE mch.source_raw_payload_id = p.payload_id)
-          AND NOT EXISTS (SELECT 1 FROM analytics.user_account_history uah WHERE uah.source_raw_payload_id = p.payload_id)
-          AND NOT EXISTS (SELECT 1 FROM analytics.market_tag_map_history mtmh WHERE mtmh.source_raw_payload_id = p.payload_id)
-          AND NOT EXISTS (SELECT 1 FROM analytics.transaction_fact tf WHERE tf.raw_payload_id = p.payload_id)
-          AND NOT EXISTS (SELECT 1 FROM analytics.transaction_fact_part tfp WHERE tfp.raw_payload_id = p.payload_id)
-          AND NOT EXISTS (SELECT 1 FROM analytics.orderbook_snapshot ob WHERE ob.raw_payload_id = p.payload_id)
-          AND NOT EXISTS (SELECT 1 FROM analytics.orderbook_snapshot_part obp WHERE obp.raw_payload_id = p.payload_id)
-          AND NOT EXISTS (SELECT 1 FROM analytics.position_snapshot ps WHERE ps.raw_payload_id = p.payload_id)
-          AND NOT EXISTS (SELECT 1 FROM analytics.position_snapshot_part psp WHERE psp.raw_payload_id = p.payload_id)
-        """,
-        {"platform_ids": platform_ids},
-    )
+    if skip_raw_payload_prune:
+        counts["raw.api_payload"] = 0
+        counts["raw.api_payload_part"] = 0
+    else:
+        counts["raw.api_payload"] = _execute_delete(
+            session,
+            """
+            DELETE FROM raw.api_payload p
+            WHERE p.platform_id = ANY(:platform_ids)
+              AND NOT EXISTS (SELECT 1 FROM analytics.market_event me WHERE me.raw_payload_id = p.payload_id)
+              AND NOT EXISTS (SELECT 1 FROM analytics.market_contract mc WHERE mc.raw_payload_id = p.payload_id)
+              AND NOT EXISTS (SELECT 1 FROM analytics.market_event_history meh WHERE meh.source_raw_payload_id = p.payload_id)
+              AND NOT EXISTS (SELECT 1 FROM analytics.market_contract_history mch WHERE mch.source_raw_payload_id = p.payload_id)
+              AND NOT EXISTS (SELECT 1 FROM analytics.user_account_history uah WHERE uah.source_raw_payload_id = p.payload_id)
+              AND NOT EXISTS (SELECT 1 FROM analytics.market_tag_map_history mtmh WHERE mtmh.source_raw_payload_id = p.payload_id)
+              AND NOT EXISTS (SELECT 1 FROM analytics.transaction_fact tf WHERE tf.raw_payload_id = p.payload_id)
+              AND NOT EXISTS (SELECT 1 FROM analytics.transaction_fact_part tfp WHERE tfp.raw_payload_id = p.payload_id)
+              AND NOT EXISTS (SELECT 1 FROM analytics.orderbook_snapshot ob WHERE ob.raw_payload_id = p.payload_id)
+              AND NOT EXISTS (SELECT 1 FROM analytics.orderbook_snapshot_part obp WHERE obp.raw_payload_id = p.payload_id)
+              AND NOT EXISTS (SELECT 1 FROM analytics.position_snapshot ps WHERE ps.raw_payload_id = p.payload_id)
+              AND NOT EXISTS (SELECT 1 FROM analytics.position_snapshot_part psp WHERE psp.raw_payload_id = p.payload_id)
+            """,
+            {"platform_ids": platform_ids},
+        )
+        counts["raw.api_payload_part"] = _execute_delete(
+            session,
+            """
+            DELETE FROM raw.api_payload_part p
+            WHERE p.platform_id = ANY(:platform_ids)
+              AND NOT EXISTS (SELECT 1 FROM analytics.market_event me WHERE me.raw_payload_id = p.payload_id)
+              AND NOT EXISTS (SELECT 1 FROM analytics.market_contract mc WHERE mc.raw_payload_id = p.payload_id)
+              AND NOT EXISTS (SELECT 1 FROM analytics.market_event_history meh WHERE meh.source_raw_payload_id = p.payload_id)
+              AND NOT EXISTS (SELECT 1 FROM analytics.market_contract_history mch WHERE mch.source_raw_payload_id = p.payload_id)
+              AND NOT EXISTS (SELECT 1 FROM analytics.user_account_history uah WHERE uah.source_raw_payload_id = p.payload_id)
+              AND NOT EXISTS (SELECT 1 FROM analytics.market_tag_map_history mtmh WHERE mtmh.source_raw_payload_id = p.payload_id)
+              AND NOT EXISTS (SELECT 1 FROM analytics.transaction_fact tf WHERE tf.raw_payload_id = p.payload_id)
+              AND NOT EXISTS (SELECT 1 FROM analytics.transaction_fact_part tfp WHERE tfp.raw_payload_id = p.payload_id)
+              AND NOT EXISTS (SELECT 1 FROM analytics.orderbook_snapshot ob WHERE ob.raw_payload_id = p.payload_id)
+              AND NOT EXISTS (SELECT 1 FROM analytics.orderbook_snapshot_part obp WHERE obp.raw_payload_id = p.payload_id)
+              AND NOT EXISTS (SELECT 1 FROM analytics.position_snapshot ps WHERE ps.raw_payload_id = p.payload_id)
+              AND NOT EXISTS (SELECT 1 FROM analytics.position_snapshot_part psp WHERE psp.raw_payload_id = p.payload_id)
+            """,
+            {"platform_ids": platform_ids},
+        )
     return counts
 
 
@@ -455,10 +465,12 @@ def main() -> int:
                 summary=summary,
                 platform_ids=list(platform_map.values()),
                 preserve_current_events=args.preserve_current_events,
+                skip_raw_payload_prune=args.skip_raw_payload_prune,
             )
             summary["deleted_counts"] = deleted_counts
             summary["after_counts"] = {table_name: _table_count(session, table_name) for table_name in CORE_TABLES}
             summary["preserve_current_events"] = args.preserve_current_events
+            summary["skip_raw_payload_prune"] = args.skip_raw_payload_prune
         summary["mode"] = "apply" if args.apply else "dry-run"
     print(json.dumps(summary, sort_keys=True, default=str))
     return 0
