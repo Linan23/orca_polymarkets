@@ -338,6 +338,7 @@ class TransactionFact(Base):
         Index("ix_transaction_fact_user_time", "user_id", "transaction_time"),
         Index("ix_transaction_fact_user_market_time", "user_id", "market_contract_id", "transaction_time"),
         Index("ix_transaction_fact_event_id", "event_id"),
+        Index("ix_transaction_fact_market_contract_id", "market_contract_id"),
         UniqueConstraint("platform_id", "source_transaction_id", name="uq_transaction_platform_source"),
         {"schema": "analytics"},
     )
@@ -369,6 +370,7 @@ class PositionSnapshot(Base):
     __table_args__ = (
         Index("ix_position_snapshot_user_market_time", "user_id", "market_contract_id", "snapshot_time"),
         Index("ix_position_snapshot_event_id", "event_id"),
+        Index("ix_position_snapshot_market_contract_id", "market_contract_id"),
         {"schema": "analytics"},
     )
 
@@ -473,6 +475,7 @@ class PositionSnapshotDaily(Base):
             name="uq_position_snapshot_daily_bucket",
         ),
         Index("ix_position_snapshot_daily_event_id", "event_id"),
+        Index("ix_position_snapshot_daily_market_contract_id", "market_contract_id"),
         {"schema": "analytics"},
     )
 
@@ -542,6 +545,7 @@ class TransactionFactPart(Base):
         Index("ix_transaction_fact_part_user_time", "user_id", "transaction_time"),
         Index("ix_transaction_fact_part_user_market_time", "user_id", "market_contract_id", "transaction_time"),
         Index("ix_transaction_fact_part_event_id", "event_id"),
+        Index("ix_transaction_fact_part_market_contract_id", "market_contract_id"),
         {"schema": "analytics", "postgresql_partition_by": "RANGE (transaction_time)"},
     )
 
@@ -594,6 +598,7 @@ class PositionSnapshotPart(Base):
     __table_args__ = (
         Index("ix_position_snapshot_part_user_market_time", "user_id", "market_contract_id", "snapshot_time"),
         Index("ix_position_snapshot_part_event_id", "event_id"),
+        Index("ix_position_snapshot_part_market_contract_id", "market_contract_id"),
         {"schema": "analytics", "postgresql_partition_by": "RANGE (snapshot_time)"},
     )
 
