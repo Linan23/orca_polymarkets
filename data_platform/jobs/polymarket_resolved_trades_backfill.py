@@ -80,6 +80,17 @@ def parse_args() -> argparse.Namespace:
         default=0,
         help="Closed-event offset used when --refresh-closed-events is enabled.",
     )
+    parser.add_argument(
+        "--closed-event-order",
+        default="closedTime",
+        help="Gamma field used to sort closed-event refresh pages.",
+    )
+    parser.add_argument(
+        "--closed-event-ascending",
+        default="false",
+        choices=("true", "false"),
+        help="Gamma sort direction for closed-event refresh pages.",
+    )
     parser.add_argument("--timeout-seconds", type=float, default=20.0)
     parser.add_argument("--max-retries", type=int, default=5)
     parser.add_argument("--backoff-base-seconds", type=float, default=1.0)
@@ -170,6 +181,8 @@ def refresh_closed_events(session: Session, client: httpx.Client, args: argparse
         "active": "false",
         "limit": args.closed_event_limit,
         "offset": args.closed_event_offset,
+        "order": getattr(args, "closed_event_order", "closedTime"),
+        "ascending": getattr(args, "closed_event_ascending", "false"),
     }
     payload = request_json(client, url=POLYMARKET_EVENTS_URL, args=args, params=params)
     events = [item for item in payload if isinstance(item, dict)] if isinstance(payload, list) else []
@@ -213,7 +226,7 @@ def load_target_markets(session: Session, market_limit: int, *, only_uncovered: 
             | (MarketContract.last_trade_price <= RESOLUTION_PRICE_LOW)
         )
         .order_by(
-            desc(MarketEvent.closed_time),
+            desc(MarketEvent.closed_time).nulls_last(),
             desc(MarketContract.volume),
             desc(MarketContract.market_contract_id),
         )

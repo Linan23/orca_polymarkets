@@ -62,6 +62,7 @@ Current whale feature semantics:
 - trusted whale entry/exit and holding features are reconstructed from matched buy/sell lots
 - recent trusted whale entry/exit pressure is captured over 1h, 6h, 12h, and 24h pre-cutoff windows
 - movement models can optionally apply train-fold whale feature selection using target correlation, which keeps price/context features fixed and rejects weak whale columns before each split is evaluated
+- residual movement experiments fit price-only movement first, then test whether selected whale features explain the remaining 12h/24h movement residual
 - historical current exposure is approximated from open shares valued at average buy price
 - resolved outcomes prefer Polymarket Gamma `outcomePrices`, with price thresholds only as fallback
 
@@ -149,6 +150,12 @@ Try the selected-whale tuning profile:
 
 ```bash
 .venv/bin/python data_platform/jobs/tune_market_movement_models.py --profiles rf_shallow_selected_whale --regime trade_covered
+```
+
+Analyze residual whale movement signal with selector threshold/cap sweeps:
+
+```bash
+.venv/bin/python data_platform/jobs/analyze_market_movement_residuals.py --regime trade_covered
 ```
 
 Train the grouped time-aware market baseline:
@@ -255,6 +262,12 @@ Validate the whale feature ablation report:
 .venv/bin/python data_platform/tests/market_whale_feature_ablation_check.py --require-data
 ```
 
+Validate the residual whale movement report:
+
+```bash
+.venv/bin/python data_platform/tests/market_movement_residual_check.py --require-data
+```
+
 Validate the market feature-set comparison:
 
 ```bash
@@ -286,7 +299,9 @@ Outputs land under `data_platform/runtime/ml/`:
 - `market_movement_feature_set_comparison.json`
 - `market_movement_tuning_report.json`
 - `market_whale_feature_ablation_report.json`
+- `market_movement_residual_report.json`
 - `week10_11_market_movement_report.md`
+- `week10_11_market_movement_residual_report.md`
 
 ## Why This Is The Right First Step
 
@@ -301,6 +316,7 @@ This starter now gives you:
 - a residual whale-signal report that measures lift beyond price, broken out by horizon band and by trade-covered vs cold-start regime
 - a movement tuning report that compares compact estimator profiles for 12h/24h targets and only accepts whale lift on rolling RMSE
 - a whale feature ablation report that separates sparse, recent, timing, weighted-pressure, notional, and behavior feature groups
+- a residual whale movement report that tests whether selected whale features explain what price-only movement models miss
 
 The next ML step after this should be feature refinement on the same grouped split and residual whale-signal task, not uncontrolled model sprawl.
 

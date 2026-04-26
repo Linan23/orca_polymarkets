@@ -53,6 +53,8 @@ DEFAULT_MOVEMENT_FEATURE_SET_COMPARISON_PATH = Path("data_platform/runtime/ml/ma
 DEFAULT_MOVEMENT_TUNING_REPORT_PATH = Path("data_platform/runtime/ml/market_movement_tuning_report.json")
 DEFAULT_WEEK10_11_MOVEMENT_REPORT_PATH = Path("data_platform/runtime/ml/week10_11_market_movement_report.md")
 DEFAULT_WHALE_FEATURE_ABLATION_REPORT_PATH = Path("data_platform/runtime/ml/market_whale_feature_ablation_report.json")
+DEFAULT_MOVEMENT_RESIDUAL_REPORT_PATH = Path("data_platform/runtime/ml/market_movement_residual_report.json")
+DEFAULT_WEEK10_11_RESIDUAL_REPORT_PATH = Path("data_platform/runtime/ml/week10_11_market_movement_residual_report.md")
 ROLLING_MIN_TRAIN_FRACTION = 0.5
 ROLLING_TEST_WINDOW_FRACTION = 0.15
 PRICE_SATURATION_THRESHOLD = 0.98
@@ -63,6 +65,25 @@ FEATURE_SELECTION_TRAINING_CORRELATION = "training_correlation"
 FEATURE_SELECTION_MODES = {FEATURE_SELECTION_NONE, FEATURE_SELECTION_TRAINING_CORRELATION}
 FEATURE_SELECTION_MIN_ABS_CORRELATION = 0.015
 FEATURE_SELECTION_MAX_WHALE_FEATURES = 24
+RESIDUAL_SELECTOR_THRESHOLDS = (0.01, 0.02, 0.05)
+RESIDUAL_SELECTOR_MAX_FEATURES = (8, 16, 24)
+RESIDUAL_RANDOM_FOREST_PARAMS = {
+    "n_estimators": 120,
+    "max_depth": 3,
+    "min_samples_leaf": 12,
+    "max_features": "sqrt",
+}
+RESIDUAL_LIGHTGBM_PARAMS = {
+    "n_estimators": 180,
+    "learning_rate": 0.03,
+    "num_leaves": 15,
+    "max_depth": 4,
+    "min_child_samples": 12,
+    "subsample": 0.75,
+    "colsample_bytree": 0.75,
+    "reg_lambda": 5.0,
+    "reg_alpha": 0.25,
+}
 MOVEMENT_TUNING_PROFILES: tuple[dict[str, Any], ...] = (
     {
         "profile": "rf_shallow",
@@ -585,6 +606,7 @@ def _training_correlation_feature_selection(
     train_rows: list[dict[str, Any]],
     feature_columns: tuple[str, ...],
     task: str,
+    target_values: list[float] | None = None,
     min_abs_correlation: float = FEATURE_SELECTION_MIN_ABS_CORRELATION,
     max_selected_whale_features: int = FEATURE_SELECTION_MAX_WHALE_FEATURES,
 ) -> tuple[tuple[str, ...], dict[str, Any]]:
@@ -594,7 +616,9 @@ def _training_correlation_feature_selection(
     candidate_columns = tuple(column for column in feature_columns if column in WHALE_FEATURE_COLUMNS)
     candidate_column_set = set(candidate_columns)
     always_keep_columns = tuple(column for column in feature_columns if column not in candidate_column_set)
-    target_values = _targets(train_rows, task)
+    target_values = target_values if target_values is not None else _targets(train_rows, task)
+    if len(target_values) != len(train_rows):
+        raise RuntimeError("Feature-selection target_values length must match train_rows.")
     candidate_scores: list[dict[str, Any]] = []
     for index, column in enumerate(candidate_columns):
         values = [float(row.get(column, 0.0) or 0.0) for row in train_rows]
@@ -649,6 +673,7 @@ def _training_correlation_feature_selection(
         "dropped_whale_feature_count": len(candidate_columns) - len(selected_candidate_names),
         "min_abs_correlation": min_abs_correlation,
         "max_selected_whale_features": max_selected_whale_features,
+        "selected_whale_feature_names": selected_candidate_list,
         "selected_whale_features": [
             {
                 "feature": str(item["feature"]),
@@ -2252,6 +2277,34 @@ def _metric_delta(right: Any, left: Any) -> float | None:
     return round(float(right) - float(left), 6)
 
 
+def _regression_metrics(y_true: list[float], predictions: list[float]) -> dict[str, float]:
+    """Return compact regression metrics."""
+    from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+
+    return {
+        "mae": round(float(mean_absolute_error(y_true, predictions)), 6),
+        "rmse": round(float(math.sqrt(mean_squared_error(y_true, predictions))), 6),
+        "r2": round(float(r2_score(y_true, predictions)), 6),
+    }
+
+
+def _movement_lift_from_metrics(
+    *,
+    price_only_metrics: dict[str, Any],
+    whale_metrics: dict[str, Any],
+) -> dict[str, Any]:
+    """Return movement lift against price-only metrics."""
+    rmse_delta = _metric_delta(whale_metrics.get("rmse"), price_only_metrics.get("rmse"))
+    whale_lift_demonstrated = rmse_delta is not None and float(rmse_delta) <= -MIN_ROLLING_RMSE_LIFT
+    return {
+        "mae_delta": _metric_delta(whale_metrics.get("mae"), price_only_metrics.get("mae")),
+        "rmse_delta": rmse_delta,
+        "r2_delta": _metric_delta(whale_metrics.get("r2"), price_only_metrics.get("r2")),
+        "whale_lift_demonstrated": whale_lift_demonstrated,
+        "minimum_required_rolling_rmse_delta": round(-MIN_ROLLING_RMSE_LIFT, 6),
+    }
+
+
 def _compact_feature_selection_metrics(metrics: dict[str, Any]) -> dict[str, Any]:
     """Return feature-selection diagnostics small enough for comparison reports."""
     selection = metrics.get("feature_selection") if isinstance(metrics.get("feature_selection"), dict) else {}
@@ -2609,6 +2662,449 @@ def tune_market_movement_models(
         handle.write("\n")
     _write_week10_11_market_movement_markdown(summary, markdown_path)
 
+    return {
+        "report_path": str(report_path),
+        "markdown_path": str(markdown_path),
+        "summary": summary,
+    }
+
+
+def _residual_estimator_params(estimator_type: str) -> dict[str, Any]:
+    """Return the regularized estimator params used for residual experiments."""
+    estimator_type = _normalize_estimator_type(estimator_type)
+    if estimator_type == "random_forest":
+        return dict(RESIDUAL_RANDOM_FOREST_PARAMS)
+    return dict(RESIDUAL_LIGHTGBM_PARAMS)
+
+
+def _predict_estimator(model: Any, features: list[list[float]]) -> list[float]:
+    """Predict with warning filters for estimators that expect named features."""
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message="X does not have valid feature names, but LGBMRegressor was fitted with feature names",
+            category=UserWarning,
+        )
+        return [float(value) for value in model.predict(features)]
+
+
+def _residual_split_report(
+    *,
+    train_rows: list[dict[str, Any]],
+    test_rows: list[dict[str, Any]],
+    task: str,
+    estimator_type: str,
+    random_state: int,
+    min_abs_correlation: float,
+    max_selected_whale_features: int,
+) -> dict[str, Any]:
+    """Fit price-only movement first, then fit whale features against the residual target."""
+    task = _normalize_task(task)
+    estimator_type = _normalize_estimator_type(estimator_type)
+    estimator_params = _residual_estimator_params(estimator_type)
+    y_train = _targets(train_rows, task)
+    y_test = _targets(test_rows, task)
+
+    price_model = _build_estimator(task, estimator_type, random_state, estimator_params=estimator_params)
+    price_model.fit(_feature_matrix(train_rows, PRICE_BASELINE_FEATURE_COLUMNS), y_train)
+    price_train_predictions = _predict_estimator(price_model, _feature_matrix(train_rows, PRICE_BASELINE_FEATURE_COLUMNS))
+    price_test_predictions = _predict_estimator(price_model, _feature_matrix(test_rows, PRICE_BASELINE_FEATURE_COLUMNS))
+    residual_train_targets = [
+        float(target) - float(prediction)
+        for target, prediction in zip(y_train, price_train_predictions, strict=True)
+    ]
+
+    residual_feature_columns, feature_selection = _training_correlation_feature_selection(
+        train_rows=train_rows,
+        feature_columns=WHALE_ONLY_FEATURE_COLUMNS,
+        task=task,
+        target_values=residual_train_targets,
+        min_abs_correlation=min_abs_correlation,
+        max_selected_whale_features=max_selected_whale_features,
+    )
+    residual_model = _build_estimator(task, estimator_type, random_state, estimator_params=estimator_params)
+    residual_model.fit(_feature_matrix(train_rows, residual_feature_columns), residual_train_targets)
+    residual_test_predictions = _predict_estimator(residual_model, _feature_matrix(test_rows, residual_feature_columns))
+    corrected_predictions = [
+        float(price_prediction) + float(residual_prediction)
+        for price_prediction, residual_prediction in zip(price_test_predictions, residual_test_predictions, strict=True)
+    ]
+    price_metrics = _regression_metrics(y_test, price_test_predictions)
+    corrected_metrics = _regression_metrics(y_test, corrected_predictions)
+    return {
+        "train_rows": len(train_rows),
+        "test_rows": len(test_rows),
+        "price_only": price_metrics,
+        "residual_corrected": corrected_metrics,
+        "lift_vs_price_only": _movement_lift_from_metrics(
+            price_only_metrics=price_metrics,
+            whale_metrics=corrected_metrics,
+        ),
+        "feature_selection": feature_selection,
+        "selected_feature_columns": list(residual_feature_columns),
+        "top_residual_features": [
+            {"feature": feature, "importance": round(float(importance), 6)}
+            for feature, importance in _feature_importance_rows(residual_model, residual_feature_columns)[:8]
+        ],
+    }
+
+
+def _average_residual_fold_metrics(folds: list[dict[str, Any]], section: str) -> dict[str, Any]:
+    """Average one metric section across residual rolling folds."""
+    return {
+        key: round(
+            sum(float(fold[section][key]) for fold in folds) / len(folds),
+            6,
+        )
+        for key in ("mae", "rmse", "r2")
+    }
+
+
+def _selection_stability_from_folds(folds: list[dict[str, Any]]) -> dict[str, Any]:
+    """Summarize which whale features repeatedly survive selector sweeps."""
+    fold_count = len(folds)
+    feature_counts: dict[str, int] = {}
+    correlation_totals: dict[str, float] = {}
+    for fold in folds:
+        selection = fold.get("feature_selection", {})
+        selected_names = selection.get("selected_whale_feature_names")
+        if not isinstance(selected_names, list):
+            selected_names = [
+                item.get("feature")
+                for item in selection.get("selected_whale_features", [])
+                if isinstance(item, dict) and item.get("feature")
+            ]
+        correlations_by_feature = {
+            str(item.get("feature")): float(item.get("abs_correlation", 0.0))
+            for item in selection.get("selected_whale_features", [])
+            if isinstance(item, dict) and item.get("feature")
+        }
+        for feature in selected_names:
+            feature_name = str(feature)
+            feature_counts[feature_name] = feature_counts.get(feature_name, 0) + 1
+            correlation_totals[feature_name] = correlation_totals.get(feature_name, 0.0) + correlations_by_feature.get(
+                feature_name,
+                0.0,
+            )
+
+    stable_threshold = max(2, math.ceil(fold_count * 0.5)) if fold_count else 0
+    ranked = sorted(
+        feature_counts,
+        key=lambda feature: (
+            -feature_counts[feature],
+            -(correlation_totals.get(feature, 0.0) / max(feature_counts[feature], 1)),
+            feature,
+        ),
+    )
+    return {
+        "fold_count": fold_count,
+        "stable_threshold": stable_threshold,
+        "distinct_selected_whale_feature_count": len(feature_counts),
+        "stable_whale_feature_count": sum(1 for feature in feature_counts if feature_counts[feature] >= stable_threshold),
+        "top_stable_whale_features": [
+            {
+                "feature": feature,
+                "selected_fold_count": feature_counts[feature],
+                "selection_frequency": round(feature_counts[feature] / fold_count, 6) if fold_count else 0.0,
+                "average_abs_correlation": round(
+                    correlation_totals.get(feature, 0.0) / max(feature_counts[feature], 1),
+                    6,
+                ),
+            }
+            for feature in ranked[:12]
+        ],
+    }
+
+
+def _residual_rolling_report(
+    *,
+    rows: list[dict[str, Any]],
+    task: str,
+    estimator_type: str,
+    random_state: int,
+    min_abs_correlation: float,
+    max_selected_whale_features: int,
+) -> dict[str, Any]:
+    """Run residual correction over grouped rolling folds."""
+    split_definitions, configured_window_size, actual_window_size = _build_rolling_splits(rows)
+    folds: list[dict[str, Any]] = []
+    for split_definition in split_definitions:
+        fold_report = _residual_split_report(
+            train_rows=split_definition["train_rows"],
+            test_rows=split_definition["test_rows"],
+            task=task,
+            estimator_type=estimator_type,
+            random_state=random_state,
+            min_abs_correlation=min_abs_correlation,
+            max_selected_whale_features=max_selected_whale_features,
+        )
+        fold_report.update(
+            {
+                "fold_index": split_definition["fold_index"],
+                "train_condition_count": len(split_definition["train_conditions"]),
+                "test_condition_count": len(split_definition["test_conditions"]),
+                "train_end_time_bucket_count": split_definition["train_bucket_count"],
+                "test_end_time_bucket_count": split_definition["test_bucket_count"],
+                "train_end_time_range": _split_time_range(split_definition["train_rows"]),
+                "test_end_time_range": _split_time_range(split_definition["test_rows"]),
+            }
+        )
+        folds.append(fold_report)
+
+    price_average = _average_residual_fold_metrics(folds, "price_only")
+    corrected_average = _average_residual_fold_metrics(folds, "residual_corrected")
+    return {
+        "split_unit": "market_end_time_bucket",
+        "end_time_bucket_strategy": END_TIME_BUCKETING_STRATEGY,
+        "configured_test_window_size": configured_window_size,
+        "test_window_size": actual_window_size,
+        "fold_count": len(folds),
+        "price_only_average": price_average,
+        "residual_corrected_average": corrected_average,
+        "lift_vs_price_only": _movement_lift_from_metrics(
+            price_only_metrics=price_average,
+            whale_metrics=corrected_average,
+        ),
+        "feature_selection_stability": _selection_stability_from_folds(folds),
+        "folds": folds,
+    }
+
+
+def _residual_config_report(
+    *,
+    rows: list[dict[str, Any]],
+    task: str,
+    estimator_type: str,
+    train_fraction: float,
+    random_state: int,
+    min_abs_correlation: float,
+    max_selected_whale_features: int,
+) -> dict[str, Any]:
+    """Evaluate one selector threshold/cap configuration."""
+    train_rows, test_rows, train_conditions, test_conditions = _grouped_time_split(rows, train_fraction)
+    single_split = _residual_split_report(
+        train_rows=train_rows,
+        test_rows=test_rows,
+        task=task,
+        estimator_type=estimator_type,
+        random_state=random_state,
+        min_abs_correlation=min_abs_correlation,
+        max_selected_whale_features=max_selected_whale_features,
+    )
+    single_split.update(
+        {
+            "train_condition_count": len(train_conditions),
+            "test_condition_count": len(test_conditions),
+            "train_end_time_range": _split_time_range(train_rows),
+            "test_end_time_range": _split_time_range(test_rows),
+        }
+    )
+    rolling = _residual_rolling_report(
+        rows=rows,
+        task=task,
+        estimator_type=estimator_type,
+        random_state=random_state,
+        min_abs_correlation=min_abs_correlation,
+        max_selected_whale_features=max_selected_whale_features,
+    )
+    config_name = f"corr_{min_abs_correlation:g}_max_{max_selected_whale_features}"
+    return {
+        "config": config_name,
+        "min_abs_correlation": min_abs_correlation,
+        "max_selected_whale_features": max_selected_whale_features,
+        "single_split": single_split,
+        "rolling": rolling,
+        "passes_generalization_gate": bool(rolling["lift_vs_price_only"].get("whale_lift_demonstrated")),
+    }
+
+
+def _best_residual_config(configs: list[dict[str, Any]]) -> dict[str, Any]:
+    """Return the best residual config by rolling RMSE delta."""
+    if not configs:
+        return {
+            "available": False,
+            "reason": "No residual configs were evaluated.",
+            "whale_lift_demonstrated": False,
+        }
+    best = min(
+        configs,
+        key=lambda config: (
+            float(config["rolling"]["lift_vs_price_only"].get("rmse_delta"))
+            if config["rolling"]["lift_vs_price_only"].get("rmse_delta") is not None
+            else float("inf")
+        ),
+    )
+    best_delta = best["rolling"]["lift_vs_price_only"].get("rmse_delta")
+    whale_lift_demonstrated = bool(best["rolling"]["lift_vs_price_only"].get("whale_lift_demonstrated"))
+    return {
+        "available": True,
+        "selected_config": best["config"] if whale_lift_demonstrated else None,
+        "best_config": best["config"],
+        "best_rolling_rmse_delta": best_delta,
+        "best_price_only_rolling_rmse": best["rolling"]["price_only_average"].get("rmse"),
+        "best_residual_corrected_rolling_rmse": best["rolling"]["residual_corrected_average"].get("rmse"),
+        "stable_whale_feature_count": best["rolling"]["feature_selection_stability"].get("stable_whale_feature_count"),
+        "whale_lift_demonstrated": whale_lift_demonstrated,
+        "selection_reason": (
+            "Selected because residual whale correction materially improves rolling RMSE over price-only."
+            if whale_lift_demonstrated
+            else "No residual whale correction materially improved rolling RMSE over price-only."
+        ),
+    }
+
+
+def _write_week10_11_residual_markdown(summary: dict[str, Any], markdown_path: Path) -> None:
+    """Write a compact residual experiment table for Week 10-11 reporting."""
+    markdown_path.parent.mkdir(parents=True, exist_ok=True)
+    lines = [
+        "# Week 10-11 Residual Whale Movement Experiment",
+        "",
+        f"Generated: {summary['generated_at']}",
+        f"Dataset: `{summary['dataset_path']}`",
+        f"Regime: `{summary['regime']}`",
+        f"Rows evaluated: {summary['row_count']}",
+        "",
+        "## Decision",
+        "",
+        (
+            "Residual whale correction demonstrates rolling lift on at least one 12h/24h window."
+            if summary["overall_residual_whale_lift_demonstrated"]
+            else "Residual whale correction does not yet demonstrate rolling lift over price-only."
+        ),
+        "",
+        "## Results",
+        "",
+        "| Window | Best config | Price-only RMSE | Residual RMSE | RMSE delta | Stable whale features | Lift shown |",
+        "| --- | --- | ---: | ---: | ---: | ---: | --- |",
+    ]
+    for window_name, window_summary in summary["windows"].items():
+        recommendation = window_summary.get("recommendation", {})
+        lines.append(
+            "| {window} | `{config}` | {price_rmse} | {residual_rmse} | {delta} | {stable_count} | {lift} |".format(
+                window=window_name,
+                config=recommendation.get("best_config"),
+                price_rmse=recommendation.get("best_price_only_rolling_rmse"),
+                residual_rmse=recommendation.get("best_residual_corrected_rolling_rmse"),
+                delta=recommendation.get("best_rolling_rmse_delta"),
+                stable_count=recommendation.get("stable_whale_feature_count"),
+                lift="yes" if recommendation.get("whale_lift_demonstrated") else "no",
+            )
+        )
+    lines.extend(
+        [
+            "",
+            "## Notes",
+            "",
+            "- Price-only is fitted first; the whale model predicts only the remaining movement residual.",
+            "- Selector sweeps are fitted inside each training fold, so test folds do not influence selected whale columns.",
+            f"- Lift requires rolling RMSE delta <= {-MIN_ROLLING_RMSE_LIFT}.",
+            "- Current local data is limited by how many resolved markets have transaction history.",
+            "",
+            f"JSON report: `{summary['report_path']}`",
+        ]
+    )
+    markdown_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def analyze_market_movement_residuals(
+    *,
+    dataset_path: Path | None = None,
+    report_path: Path | None = None,
+    markdown_path: Path | None = None,
+    estimator_type: str = "random_forest",
+    train_fraction: float = 0.75,
+    random_state: int = 42,
+    min_horizon_hours: float | None = None,
+    max_horizon_hours: float | None = None,
+    regime: str = REGIME_TRADE_COVERED,
+    selector_thresholds: tuple[float, ...] | list[float] | None = None,
+    selector_max_features: tuple[int, ...] | list[int] | None = None,
+) -> dict[str, Any]:
+    """Analyze whether whale features can explain movement residuals left by price-only."""
+    _require_ml_dependencies()
+    estimator_type = _normalize_estimator_type(estimator_type)
+    regime = _normalize_regime(regime)
+    dataset_path = dataset_path or DEFAULT_DATASET_PATH
+    report_path = report_path or DEFAULT_MOVEMENT_RESIDUAL_REPORT_PATH
+    markdown_path = markdown_path or DEFAULT_WEEK10_11_RESIDUAL_REPORT_PATH
+    thresholds = tuple(float(value) for value in (selector_thresholds or RESIDUAL_SELECTOR_THRESHOLDS))
+    max_features_values = tuple(int(value) for value in (selector_max_features or RESIDUAL_SELECTOR_MAX_FEATURES))
+    if not thresholds or any(value < 0 for value in thresholds):
+        raise RuntimeError("selector_thresholds must contain non-negative values.")
+    if not max_features_values or any(value <= 0 for value in max_features_values):
+        raise RuntimeError("selector_max_features must contain positive values.")
+
+    filtered_rows = _filter_rows_by_regime(
+        _filter_rows_by_horizon(
+            _load_training_rows(dataset_path),
+            min_horizon_hours=min_horizon_hours,
+            max_horizon_hours=max_horizon_hours,
+        ),
+        regime,
+    )
+    if not filtered_rows:
+        raise RuntimeError(f"No rows were found in {dataset_path} for residual movement analysis.")
+
+    windows: dict[str, Any] = {}
+    for window_hours in (12, 24):
+        task = _movement_task_for_window(window_hours)
+        _require_valid_movement_targets(dataset_path=dataset_path, rows=filtered_rows, task=task)
+        configs = [
+            _residual_config_report(
+                rows=filtered_rows,
+                task=task,
+                estimator_type=estimator_type,
+                train_fraction=train_fraction,
+                random_state=random_state,
+                min_abs_correlation=threshold,
+                max_selected_whale_features=max_features,
+            )
+            for threshold in thresholds
+            for max_features in max_features_values
+        ]
+        windows[f"{window_hours}h"] = {
+            "window_hours": window_hours,
+            "task": task,
+            "target_column": _target_column_for_task(task),
+            "configs": {config["config"]: config for config in configs},
+            "recommendation": _best_residual_config(configs),
+        }
+
+    summary = {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "dataset_path": str(dataset_path),
+        "dataset_version": DATASET_VERSION,
+        "report_path": str(report_path),
+        "markdown_path": str(markdown_path),
+        **_regime_summary_context(regime),
+        "task": "market_movement_residuals",
+        "row_count": len(filtered_rows),
+        "estimator_type": estimator_type,
+        "estimator_params": _residual_estimator_params(estimator_type),
+        "train_fraction": train_fraction,
+        "random_state": random_state,
+        "min_horizon_hours": min_horizon_hours,
+        "max_horizon_hours": max_horizon_hours,
+        "selector_thresholds": list(thresholds),
+        "selector_max_features": list(max_features_values),
+        "minimum_required_rolling_rmse_delta": round(-MIN_ROLLING_RMSE_LIFT, 6),
+        "windows": windows,
+        "overall_residual_whale_lift_demonstrated": any(
+            bool(window_summary.get("recommendation", {}).get("whale_lift_demonstrated"))
+            for window_summary in windows.values()
+        ),
+        "assumptions": [
+            "Price-only movement is fitted first on each training fold.",
+            "The residual model predicts only movement left unexplained by price-only.",
+            "Whale feature selection is fitted inside each training fold using residual-target correlation.",
+            "Selector stability counts whale features that survive across rolling folds.",
+        ],
+    }
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    with report_path.open("w", encoding="utf-8") as handle:
+        json.dump(summary, handle, indent=2, sort_keys=True)
+        handle.write("\n")
+    _write_week10_11_residual_markdown(summary, markdown_path)
     return {
         "report_path": str(report_path),
         "markdown_path": str(markdown_path),

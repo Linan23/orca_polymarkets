@@ -765,10 +765,13 @@ To backfill deterministically resolved closed-market trades into `transaction_fa
 
 ```bash
 .venv/bin/python data_platform/jobs/polymarket_resolved_trades_backfill.py \
+  --refresh-closed-events \
   --market-limit 5 \
   --trade-limit 200 \
   --max-pages-per-market 5
 ```
+
+Closed-event refreshes default to Gamma `closedTime` descending so newer resolved markets are discovered before older archived markets.
 
 To backfill only deterministically resolved conditions that still have no ingested trades:
 
