@@ -63,6 +63,9 @@ Current whale feature semantics:
 - recent trusted whale entry/exit pressure is captured over 1h, 6h, 12h, and 24h pre-cutoff windows
 - movement models can optionally apply train-fold whale feature selection using target correlation, which keeps price/context features fixed and rejects weak whale columns before each split is evaluated
 - residual movement experiments fit price-only movement first, then test whether selected whale features explain the remaining 12h/24h movement residual
+- residual movement recommendations now distinguish raw best residual lift from whale-valid lift that keeps recurring selected whale features
+- residual reports include segment diagnostics for short crypto up/down markets versus other market durations and families
+- residual reports include fold-level RMSE-delta confidence diagnostics as a stability check, not formal statistical proof
 - historical current exposure is approximated from open shares valued at average buy price
 - resolved outcomes prefer Polymarket Gamma `outcomePrices`, with price thresholds only as fallback
 

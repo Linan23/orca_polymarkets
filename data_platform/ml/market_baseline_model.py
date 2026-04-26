@@ -67,6 +67,8 @@ FEATURE_SELECTION_MIN_ABS_CORRELATION = 0.015
 FEATURE_SELECTION_MAX_WHALE_FEATURES = 24
 RESIDUAL_SELECTOR_THRESHOLDS = (0.01, 0.02, 0.05)
 RESIDUAL_SELECTOR_MAX_FEATURES = (8, 16, 24)
+RESIDUAL_NEAR_BEST_RMSE_TOLERANCE = 0.0006
+RESIDUAL_SEGMENT_MIN_ROWS = 20
 RESIDUAL_RANDOM_FOREST_PARAMS = {
     "n_estimators": 120,
     "max_depth": 3,
@@ -2305,6 +2307,54 @@ def _movement_lift_from_metrics(
     }
 
 
+def _regression_error_sums(y_true: list[float], predictions: list[float]) -> dict[str, float | int]:
+    """Return additive regression error components for exact segment aggregation."""
+    return {
+        "row_count": len(y_true),
+        "sum_abs_error": round(
+            sum(abs(float(target) - float(prediction)) for target, prediction in zip(y_true, predictions, strict=True)),
+            12,
+        ),
+        "sum_squared_error": round(
+            sum(
+                (float(target) - float(prediction)) ** 2
+                for target, prediction in zip(y_true, predictions, strict=True)
+            ),
+            12,
+        ),
+        "target_sum": round(sum(float(value) for value in y_true), 12),
+        "target_squared_sum": round(sum(float(value) ** 2 for value in y_true), 12),
+    }
+
+
+def _add_regression_error_sums(
+    accumulator: dict[str, float | int],
+    values: dict[str, Any],
+) -> dict[str, float | int]:
+    """Add regression error components into an accumulator."""
+    for key in ("row_count", "sum_abs_error", "sum_squared_error", "target_sum", "target_squared_sum"):
+        accumulator[key] = accumulator.get(key, 0) + values.get(key, 0)
+    return accumulator
+
+
+def _regression_metrics_from_sums(values: dict[str, Any]) -> dict[str, float]:
+    """Return regression metrics from additive error components."""
+    row_count = int(values.get("row_count", 0) or 0)
+    if row_count <= 0:
+        return {"mae": 0.0, "rmse": 0.0, "r2": 0.0}
+    sum_abs_error = float(values.get("sum_abs_error", 0.0) or 0.0)
+    sum_squared_error = float(values.get("sum_squared_error", 0.0) or 0.0)
+    target_sum = float(values.get("target_sum", 0.0) or 0.0)
+    target_squared_sum = float(values.get("target_squared_sum", 0.0) or 0.0)
+    total_sum_squares = target_squared_sum - ((target_sum * target_sum) / row_count)
+    r2 = 0.0 if total_sum_squares <= 0 else 1 - (sum_squared_error / total_sum_squares)
+    return {
+        "mae": round(sum_abs_error / row_count, 6),
+        "rmse": round(math.sqrt(sum_squared_error / row_count), 6),
+        "r2": round(r2, 6),
+    }
+
+
 def _compact_feature_selection_metrics(metrics: dict[str, Any]) -> dict[str, Any]:
     """Return feature-selection diagnostics small enough for comparison reports."""
     selection = metrics.get("feature_selection") if isinstance(metrics.get("feature_selection"), dict) else {}
@@ -2669,6 +2719,219 @@ def tune_market_movement_models(
     }
 
 
+def _market_duration_bucket(row: dict[str, Any]) -> str:
+    """Return a stable duration bucket for residual segment diagnostics."""
+    duration_hours = float(row.get("market_duration_hours", 0) or 0)
+    if duration_hours <= 0:
+        return "duration_unknown"
+    if duration_hours <= 1:
+        return "duration_le_1h"
+    if duration_hours <= 24:
+        return "duration_1h_to_24h"
+    if duration_hours <= 168:
+        return "duration_1d_to_7d"
+    return "duration_gt_7d"
+
+
+def _safe_segment_name(value: Any) -> str:
+    """Return a compact segment-safe identifier."""
+    raw = str(value or "unknown").strip().lower()
+    safe = "".join(character if character.isalnum() else "_" for character in raw)
+    safe = "_".join(part for part in safe.split("_") if part)
+    return safe[:48] or "unknown"
+
+
+def _market_family_segment(row: dict[str, Any]) -> str:
+    """Return a coarse market family segment for residual diagnostics."""
+    slug = str(row.get("market_slug") or row.get("event_slug") or "").lower()
+    category = str(row.get("event_category") or "").strip()
+    crypto_tokens = ("btc", "eth", "sol", "xrp", "doge", "bnb", "hype", "ada", "link")
+    if "updown" in slug and any(token in slug for token in crypto_tokens):
+        return "crypto_updown"
+    if "updown" in slug:
+        return "other_updown"
+    if slug.startswith(("lol-", "val-", "mlbb-", "cs2-", "dota-")):
+        return "esports"
+    if category:
+        return f"category_{_safe_segment_name(category)}"
+    return "other"
+
+
+def _research_focus_segment(row: dict[str, Any]) -> str:
+    """Return the main Week 10-11 segment lens: short crypto up/down versus others."""
+    duration_hours = float(row.get("market_duration_hours", 0) or 0)
+    market_family = _market_family_segment(row)
+    if market_family == "crypto_updown" and 0 < duration_hours <= 24:
+        return "short_crypto_updown"
+    if market_family == "crypto_updown":
+        return "longer_crypto_updown"
+    if 0 < duration_hours <= 24:
+        return "short_non_crypto"
+    if duration_hours > 24:
+        return "longer_non_crypto"
+    return "duration_unknown"
+
+
+def _residual_segment_groups(rows: list[dict[str, Any]]) -> dict[str, dict[str, list[int]]]:
+    """Return row indices grouped by diagnostic segment dimensions."""
+    groups: dict[str, dict[str, list[int]]] = {
+        "research_focus": {},
+        "duration_bucket": {},
+        "market_family": {},
+    }
+    for index, row in enumerate(rows):
+        labels = {
+            "research_focus": _research_focus_segment(row),
+            "duration_bucket": _market_duration_bucket(row),
+            "market_family": _market_family_segment(row),
+        }
+        for group_name, segment_name in labels.items():
+            groups[group_name].setdefault(segment_name, []).append(index)
+    return groups
+
+
+def _residual_segment_metric(
+    *,
+    rows: list[dict[str, Any]],
+    y_true: list[float],
+    price_predictions: list[float],
+    corrected_predictions: list[float],
+) -> dict[str, Any]:
+    """Return price-only versus residual metrics for one segment."""
+    price_sums = _regression_error_sums(y_true, price_predictions)
+    corrected_sums = _regression_error_sums(y_true, corrected_predictions)
+    price_metrics = _regression_metrics_from_sums(price_sums)
+    corrected_metrics = _regression_metrics_from_sums(corrected_sums)
+    return {
+        "row_count": len(rows),
+        "condition_count": len({str(row[GROUP_KEY_COLUMN]) for row in rows}),
+        "below_min_row_count": len(rows) < RESIDUAL_SEGMENT_MIN_ROWS,
+        "price_only": price_metrics,
+        "residual_corrected": corrected_metrics,
+        "lift_vs_price_only": _movement_lift_from_metrics(
+            price_only_metrics=price_metrics,
+            whale_metrics=corrected_metrics,
+        ),
+        "error_sums": {
+            "price_only": price_sums,
+            "residual_corrected": corrected_sums,
+        },
+    }
+
+
+def _residual_segment_diagnostics(
+    *,
+    rows: list[dict[str, Any]],
+    task: str,
+    price_predictions: list[float],
+    corrected_predictions: list[float],
+) -> dict[str, dict[str, Any]]:
+    """Return residual lift diagnostics for key market segments."""
+    y_true = _targets(rows, task)
+    diagnostics: dict[str, dict[str, Any]] = {}
+    for group_name, segment_indices in _residual_segment_groups(rows).items():
+        group_summary: dict[str, Any] = {}
+        for segment_name, indices in sorted(segment_indices.items()):
+            segment_rows = [rows[index] for index in indices]
+            group_summary[segment_name] = _residual_segment_metric(
+                rows=segment_rows,
+                y_true=[y_true[index] for index in indices],
+                price_predictions=[price_predictions[index] for index in indices],
+                corrected_predictions=[corrected_predictions[index] for index in indices],
+            )
+        diagnostics[group_name] = group_summary
+    return diagnostics
+
+
+def _aggregate_residual_segment_diagnostics(folds: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Aggregate segment diagnostics across rolling folds."""
+    aggregated: dict[str, dict[str, dict[str, Any]]] = {}
+    for fold in folds:
+        for group_name, segments in fold.get("segment_diagnostics", {}).items():
+            group = aggregated.setdefault(str(group_name), {})
+            for segment_name, segment_metrics in segments.items():
+                segment = group.setdefault(
+                    str(segment_name),
+                    {
+                        "row_count": 0,
+                        "condition_count": 0,
+                        "fold_count": 0,
+                        "price_sums": {},
+                        "corrected_sums": {},
+                    },
+                )
+                segment["row_count"] += int(segment_metrics.get("row_count", 0) or 0)
+                segment["condition_count"] += int(segment_metrics.get("condition_count", 0) or 0)
+                segment["fold_count"] += 1
+                error_sums = segment_metrics.get("error_sums", {})
+                _add_regression_error_sums(segment["price_sums"], error_sums.get("price_only", {}))
+                _add_regression_error_sums(segment["corrected_sums"], error_sums.get("residual_corrected", {}))
+
+    summary: dict[str, dict[str, Any]] = {}
+    for group_name, segments in aggregated.items():
+        group_summary: dict[str, Any] = {}
+        for segment_name, segment in sorted(segments.items()):
+            price_metrics = _regression_metrics_from_sums(segment["price_sums"])
+            corrected_metrics = _regression_metrics_from_sums(segment["corrected_sums"])
+            group_summary[segment_name] = {
+                "row_count": int(segment["row_count"]),
+                "condition_count": int(segment["condition_count"]),
+                "fold_count": int(segment["fold_count"]),
+                "below_min_row_count": int(segment["row_count"]) < RESIDUAL_SEGMENT_MIN_ROWS,
+                "price_only": price_metrics,
+                "residual_corrected": corrected_metrics,
+                "lift_vs_price_only": _movement_lift_from_metrics(
+                    price_only_metrics=price_metrics,
+                    whale_metrics=corrected_metrics,
+                ),
+            }
+        summary[group_name] = group_summary
+    return summary
+
+
+def _strip_residual_segment_error_sums(segment_diagnostics: dict[str, Any]) -> dict[str, Any]:
+    """Remove additive error sums after aggregation to keep reports compact."""
+    for segments in segment_diagnostics.values():
+        if not isinstance(segments, dict):
+            continue
+        for segment_metrics in segments.values():
+            if isinstance(segment_metrics, dict):
+                segment_metrics.pop("error_sums", None)
+    return segment_diagnostics
+
+
+def _fold_rmse_delta_summary(folds: list[dict[str, Any]]) -> dict[str, Any]:
+    """Return fold-level RMSE delta diagnostics for the residual correction."""
+    deltas = [
+        float(fold["lift_vs_price_only"]["rmse_delta"])
+        for fold in folds
+        if fold.get("lift_vs_price_only", {}).get("rmse_delta") is not None
+    ]
+    if not deltas:
+        return {"available": False, "fold_count": 0}
+    mean_delta = sum(deltas) / len(deltas)
+    std_delta = (
+        math.sqrt(sum((delta - mean_delta) ** 2 for delta in deltas) / (len(deltas) - 1))
+        if len(deltas) > 1
+        else 0.0
+    )
+    standard_error = std_delta / math.sqrt(len(deltas)) if deltas else 0.0
+    return {
+        "available": True,
+        "fold_count": len(deltas),
+        "mean_rmse_delta": round(mean_delta, 6),
+        "std_rmse_delta": round(std_delta, 6),
+        "standard_error": round(standard_error, 6),
+        "normal_approx_95ci_low": round(mean_delta - 1.96 * standard_error, 6),
+        "normal_approx_95ci_high": round(mean_delta + 1.96 * standard_error, 6),
+        "min_rmse_delta": round(min(deltas), 6),
+        "max_rmse_delta": round(max(deltas), 6),
+        "improving_fold_count": sum(1 for delta in deltas if delta < 0),
+        "passing_fold_count": sum(1 for delta in deltas if delta <= -MIN_ROLLING_RMSE_LIFT),
+        "rmse_deltas": [round(delta, 6) for delta in deltas],
+    }
+
+
 def _residual_estimator_params(estimator_type: str) -> dict[str, Any]:
     """Return the regularized estimator params used for residual experiments."""
     estimator_type = _normalize_estimator_type(estimator_type)
@@ -2731,6 +2994,12 @@ def _residual_split_report(
     ]
     price_metrics = _regression_metrics(y_test, price_test_predictions)
     corrected_metrics = _regression_metrics(y_test, corrected_predictions)
+    segment_diagnostics = _residual_segment_diagnostics(
+        rows=test_rows,
+        task=task,
+        price_predictions=price_test_predictions,
+        corrected_predictions=corrected_predictions,
+    )
     return {
         "train_rows": len(train_rows),
         "test_rows": len(test_rows),
@@ -2741,6 +3010,7 @@ def _residual_split_report(
             whale_metrics=corrected_metrics,
         ),
         "feature_selection": feature_selection,
+        "segment_diagnostics": segment_diagnostics,
         "selected_feature_columns": list(residual_feature_columns),
         "top_residual_features": [
             {"feature": feature, "importance": round(float(importance), 6)}
@@ -2853,6 +3123,9 @@ def _residual_rolling_report(
 
     price_average = _average_residual_fold_metrics(folds, "price_only")
     corrected_average = _average_residual_fold_metrics(folds, "residual_corrected")
+    segment_diagnostics = _aggregate_residual_segment_diagnostics(folds)
+    for fold in folds:
+        _strip_residual_segment_error_sums(fold.get("segment_diagnostics", {}))
     return {
         "split_unit": "market_end_time_bucket",
         "end_time_bucket_strategy": END_TIME_BUCKETING_STRATEGY,
@@ -2865,6 +3138,8 @@ def _residual_rolling_report(
             price_only_metrics=price_average,
             whale_metrics=corrected_average,
         ),
+        "fold_rmse_delta_summary": _fold_rmse_delta_summary(folds),
+        "segment_diagnostics": segment_diagnostics,
         "feature_selection_stability": _selection_stability_from_folds(folds),
         "folds": folds,
     }
@@ -2899,6 +3174,7 @@ def _residual_config_report(
             "test_end_time_range": _split_time_range(test_rows),
         }
     )
+    _strip_residual_segment_error_sums(single_split.get("segment_diagnostics", {}))
     rolling = _residual_rolling_report(
         rows=rows,
         task=task,
@@ -2918,6 +3194,86 @@ def _residual_config_report(
     }
 
 
+def _residual_config_rmse_delta(config: dict[str, Any]) -> float:
+    """Return a config rolling RMSE delta, treating missing values as uncompetitive."""
+    value = config.get("rolling", {}).get("lift_vs_price_only", {}).get("rmse_delta")
+    return float(value) if value is not None else float("inf")
+
+
+def _residual_config_stable_whale_count(config: dict[str, Any]) -> int:
+    """Return how many whale features were stable across rolling folds for one config."""
+    return int(
+        config.get("rolling", {})
+        .get("feature_selection_stability", {})
+        .get("stable_whale_feature_count", 0)
+        or 0
+    )
+
+
+def _residual_config_has_recurring_whale_features(config: dict[str, Any]) -> bool:
+    """Return true when a config has at least one recurring selected whale feature."""
+    return _residual_config_stable_whale_count(config) > 0
+
+
+def _near_best_whale_feature_stability(configs: list[dict[str, Any]], best_delta: float) -> dict[str, Any]:
+    """Summarize recurring whale features among near-best residual configs."""
+    near_best_configs = [
+        config
+        for config in configs
+        if _residual_config_rmse_delta(config) <= best_delta + RESIDUAL_NEAR_BEST_RMSE_TOLERANCE
+        and _residual_config_has_recurring_whale_features(config)
+    ]
+    feature_counts: dict[str, int] = {}
+    selection_frequency_totals: dict[str, float] = {}
+    correlation_totals: dict[str, float] = {}
+    for config in near_best_configs:
+        features = (
+            config.get("rolling", {})
+            .get("feature_selection_stability", {})
+            .get("top_stable_whale_features", [])
+        )
+        for feature_entry in features:
+            feature = str(feature_entry.get("feature") or "")
+            if not feature:
+                continue
+            feature_counts[feature] = feature_counts.get(feature, 0) + 1
+            selection_frequency_totals[feature] = selection_frequency_totals.get(feature, 0.0) + float(
+                feature_entry.get("selection_frequency", 0.0) or 0.0
+            )
+            correlation_totals[feature] = correlation_totals.get(feature, 0.0) + float(
+                feature_entry.get("average_abs_correlation", 0.0) or 0.0
+            )
+
+    ranked_features = sorted(
+        feature_counts,
+        key=lambda feature: (
+            -feature_counts[feature],
+            -(selection_frequency_totals.get(feature, 0.0) / max(feature_counts[feature], 1)),
+            feature,
+        ),
+    )
+    return {
+        "tolerance": RESIDUAL_NEAR_BEST_RMSE_TOLERANCE,
+        "config_count": len(near_best_configs),
+        "configs": [config["config"] for config in near_best_configs],
+        "top_features": [
+            {
+                "feature": feature,
+                "config_count": feature_counts[feature],
+                "average_selection_frequency": round(
+                    selection_frequency_totals.get(feature, 0.0) / max(feature_counts[feature], 1),
+                    6,
+                ),
+                "average_abs_correlation": round(
+                    correlation_totals.get(feature, 0.0) / max(feature_counts[feature], 1),
+                    6,
+                ),
+            }
+            for feature in ranked_features[:12]
+        ],
+    }
+
+
 def _best_residual_config(configs: list[dict[str, Any]]) -> dict[str, Any]:
     """Return the best residual config by rolling RMSE delta."""
     if not configs:
@@ -2926,29 +3282,43 @@ def _best_residual_config(configs: list[dict[str, Any]]) -> dict[str, Any]:
             "reason": "No residual configs were evaluated.",
             "whale_lift_demonstrated": False,
         }
-    best = min(
-        configs,
-        key=lambda config: (
-            float(config["rolling"]["lift_vs_price_only"].get("rmse_delta"))
-            if config["rolling"]["lift_vs_price_only"].get("rmse_delta") is not None
-            else float("inf")
-        ),
-    )
-    best_delta = best["rolling"]["lift_vs_price_only"].get("rmse_delta")
-    whale_lift_demonstrated = bool(best["rolling"]["lift_vs_price_only"].get("whale_lift_demonstrated"))
+    best = min(configs, key=_residual_config_rmse_delta)
+    best_delta = _residual_config_rmse_delta(best)
+    whale_candidates = [
+        config
+        for config in configs
+        if bool(config.get("rolling", {}).get("lift_vs_price_only", {}).get("whale_lift_demonstrated"))
+        and _residual_config_has_recurring_whale_features(config)
+    ]
+    selected = min(whale_candidates, key=_residual_config_rmse_delta) if whale_candidates else None
+    whale_lift_demonstrated = selected is not None
+    selected_rolling = selected.get("rolling", {}) if selected is not None else {}
+    selected_lift = selected_rolling.get("lift_vs_price_only", {}) if selected is not None else {}
+    selected_stability = selected_rolling.get("feature_selection_stability", {}) if selected is not None else {}
     return {
         "available": True,
-        "selected_config": best["config"] if whale_lift_demonstrated else None,
+        "selected_config": selected["config"] if selected is not None else None,
+        "selected_config_requires_recurring_whale_features": True,
+        "selected_rolling_rmse_delta": selected_lift.get("rmse_delta") if selected is not None else None,
+        "selected_price_only_rolling_rmse": (
+            selected_rolling.get("price_only_average", {}).get("rmse") if selected is not None else None
+        ),
+        "selected_residual_corrected_rolling_rmse": (
+            selected_rolling.get("residual_corrected_average", {}).get("rmse") if selected is not None else None
+        ),
+        "selected_stable_whale_feature_count": selected_stability.get("stable_whale_feature_count", 0),
         "best_config": best["config"],
-        "best_rolling_rmse_delta": best_delta,
+        "best_rolling_rmse_delta": best["rolling"]["lift_vs_price_only"].get("rmse_delta"),
         "best_price_only_rolling_rmse": best["rolling"]["price_only_average"].get("rmse"),
         "best_residual_corrected_rolling_rmse": best["rolling"]["residual_corrected_average"].get("rmse"),
-        "stable_whale_feature_count": best["rolling"]["feature_selection_stability"].get("stable_whale_feature_count"),
+        "raw_best_stable_whale_feature_count": _residual_config_stable_whale_count(best),
+        "stable_whale_feature_count": selected_stability.get("stable_whale_feature_count", 0),
+        "near_best_whale_feature_stability": _near_best_whale_feature_stability(configs, best_delta),
         "whale_lift_demonstrated": whale_lift_demonstrated,
         "selection_reason": (
-            "Selected because residual whale correction materially improves rolling RMSE over price-only."
+            "Selected because residual whale correction materially improves rolling RMSE and keeps recurring whale features."
             if whale_lift_demonstrated
-            else "No residual whale correction materially improved rolling RMSE over price-only."
+            else "No residual config both materially improved rolling RMSE and kept recurring whale features."
         ),
     }
 
@@ -2974,22 +3344,126 @@ def _write_week10_11_residual_markdown(summary: dict[str, Any], markdown_path: P
         "",
         "## Results",
         "",
-        "| Window | Best config | Price-only RMSE | Residual RMSE | RMSE delta | Stable whale features | Lift shown |",
-        "| --- | --- | ---: | ---: | ---: | ---: | --- |",
+        "| Window | Selected whale config | Raw best config | Price-only RMSE | Residual RMSE | RMSE delta | Stable whale features | Whale lift shown |",
+        "| --- | --- | --- | ---: | ---: | ---: | ---: | --- |",
     ]
     for window_name, window_summary in summary["windows"].items():
         recommendation = window_summary.get("recommendation", {})
+        selected_config = recommendation.get("selected_config")
+        price_rmse = (
+            recommendation.get("selected_price_only_rolling_rmse")
+            if selected_config
+            else recommendation.get("best_price_only_rolling_rmse")
+        )
+        residual_rmse = (
+            recommendation.get("selected_residual_corrected_rolling_rmse")
+            if selected_config
+            else recommendation.get("best_residual_corrected_rolling_rmse")
+        )
+        delta = (
+            recommendation.get("selected_rolling_rmse_delta")
+            if selected_config
+            else recommendation.get("best_rolling_rmse_delta")
+        )
         lines.append(
-            "| {window} | `{config}` | {price_rmse} | {residual_rmse} | {delta} | {stable_count} | {lift} |".format(
+            "| {window} | {selected_config} | `{raw_best}` | {price_rmse} | {residual_rmse} | {delta} | {stable_count} | {lift} |".format(
                 window=window_name,
-                config=recommendation.get("best_config"),
-                price_rmse=recommendation.get("best_price_only_rolling_rmse"),
-                residual_rmse=recommendation.get("best_residual_corrected_rolling_rmse"),
-                delta=recommendation.get("best_rolling_rmse_delta"),
+                selected_config=f"`{selected_config}`" if selected_config else "none",
+                raw_best=recommendation.get("best_config"),
+                price_rmse=price_rmse,
+                residual_rmse=residual_rmse,
+                delta=delta,
                 stable_count=recommendation.get("stable_whale_feature_count"),
                 lift="yes" if recommendation.get("whale_lift_demonstrated") else "no",
             )
         )
+    lines.extend(
+        [
+            "",
+            "Selected whale config requires both rolling RMSE lift and recurring selected whale features; raw best may be context-only.",
+            "",
+            "## Segment Diagnostics",
+            "",
+            "| Window | Config source | Segment | Rows | Price-only RMSE | Residual RMSE | RMSE delta | Lift shown |",
+            "| --- | --- | --- | ---: | ---: | ---: | ---: | --- |",
+        ]
+    )
+    for window_name, window_summary in summary["windows"].items():
+        recommendation = window_summary.get("recommendation", {})
+        config_name = recommendation.get("selected_config") or recommendation.get("best_config")
+        config_source = "selected whale config" if recommendation.get("selected_config") else "raw best config"
+        config = window_summary.get("configs", {}).get(config_name, {}) if config_name else {}
+        research_segments = (
+            config.get("rolling", {})
+            .get("segment_diagnostics", {})
+            .get("research_focus", {})
+        )
+        for segment_name, segment in research_segments.items():
+            if segment.get("below_min_row_count"):
+                continue
+            lift = segment.get("lift_vs_price_only", {})
+            lines.append(
+                "| {window} | {config_source} | `{segment}` | {rows} | {price_rmse} | {residual_rmse} | {delta} | {lift} |".format(
+                    window=window_name,
+                    config_source=config_source,
+                    segment=segment_name,
+                    rows=segment.get("row_count"),
+                    price_rmse=segment.get("price_only", {}).get("rmse"),
+                    residual_rmse=segment.get("residual_corrected", {}).get("rmse"),
+                    delta=lift.get("rmse_delta"),
+                    lift="yes" if lift.get("whale_lift_demonstrated") else "no",
+                )
+            )
+    lines.extend(
+        [
+            "",
+            "## Fold Diagnostics",
+            "",
+            "| Window | Config | Mean RMSE delta | 95% CI low | 95% CI high | Passing folds |",
+            "| --- | --- | ---: | ---: | ---: | ---: |",
+        ]
+    )
+    for window_name, window_summary in summary["windows"].items():
+        recommendation = window_summary.get("recommendation", {})
+        config_name = recommendation.get("selected_config") or recommendation.get("best_config")
+        config = window_summary.get("configs", {}).get(config_name, {}) if config_name else {}
+        fold_summary = config.get("rolling", {}).get("fold_rmse_delta_summary", {})
+        lines.append(
+            "| {window} | `{config}` | {mean} | {low} | {high} | {passing}/{folds} |".format(
+                window=window_name,
+                config=config_name,
+                mean=fold_summary.get("mean_rmse_delta"),
+                low=fold_summary.get("normal_approx_95ci_low"),
+                high=fold_summary.get("normal_approx_95ci_high"),
+                passing=fold_summary.get("passing_fold_count"),
+                folds=fold_summary.get("fold_count"),
+            )
+        )
+    lines.extend(
+        [
+            "",
+            "## Recurring Whale Features",
+            "",
+            "| Window | Feature | Near-best configs | Avg selection frequency | Avg abs correlation |",
+            "| --- | --- | ---: | ---: | ---: |",
+        ]
+    )
+    for window_name, window_summary in summary["windows"].items():
+        feature_summary = (
+            window_summary.get("recommendation", {})
+            .get("near_best_whale_feature_stability", {})
+            .get("top_features", [])
+        )
+        for feature in feature_summary[:5]:
+            lines.append(
+                "| {window} | `{feature}` | {config_count} | {frequency} | {correlation} |".format(
+                    window=window_name,
+                    feature=feature.get("feature"),
+                    config_count=feature.get("config_count"),
+                    frequency=feature.get("average_selection_frequency"),
+                    correlation=feature.get("average_abs_correlation"),
+                )
+            )
     lines.extend(
         [
             "",
@@ -2998,6 +3472,7 @@ def _write_week10_11_residual_markdown(summary: dict[str, Any], markdown_path: P
             "- Price-only is fitted first; the whale model predicts only the remaining movement residual.",
             "- Selector sweeps are fitted inside each training fold, so test folds do not influence selected whale columns.",
             f"- Lift requires rolling RMSE delta <= {-MIN_ROLLING_RMSE_LIFT}.",
+            "- Fold confidence intervals are normal approximations over rolling folds and should be treated as diagnostics, not formal proof.",
             "- Current local data is limited by how many resolved markets have transaction history.",
             "",
             f"JSON report: `{summary['report_path']}`",
@@ -3097,7 +3572,9 @@ def analyze_market_movement_residuals(
             "Price-only movement is fitted first on each training fold.",
             "The residual model predicts only movement left unexplained by price-only.",
             "Whale feature selection is fitted inside each training fold using residual-target correlation.",
+            "Whale lift requires both rolling RMSE improvement and recurring selected whale features.",
             "Selector stability counts whale features that survive across rolling folds.",
+            "Segment diagnostics separate short crypto up/down markets from longer and non-crypto markets.",
         ],
     }
     report_path.parent.mkdir(parents=True, exist_ok=True)

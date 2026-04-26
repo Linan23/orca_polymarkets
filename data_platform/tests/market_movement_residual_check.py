@@ -51,9 +51,21 @@ def _window_checks(window_name: str, window_summary: dict[str, Any]) -> list[dic
             "feature_selection_stability": rolling.get("feature_selection_stability"),
         },
         {
+            "name": f"{window_name}_segment_diagnostics_present",
+            "ok": bool(rolling.get("segment_diagnostics", {}).get("research_focus")),
+            "segments": rolling.get("segment_diagnostics", {}).get("research_focus"),
+        },
+        {
+            "name": f"{window_name}_fold_delta_summary_present",
+            "ok": rolling.get("fold_rmse_delta_summary", {}).get("available") is True
+            and "normal_approx_95ci_low" in rolling.get("fold_rmse_delta_summary", {}),
+            "fold_rmse_delta_summary": rolling.get("fold_rmse_delta_summary"),
+        },
+        {
             "name": f"{window_name}_recommendation_present",
             "ok": window_summary.get("recommendation", {}).get("available") is True
-            and "whale_lift_demonstrated" in window_summary.get("recommendation", {}),
+            and "whale_lift_demonstrated" in window_summary.get("recommendation", {})
+            and "selected_config_requires_recurring_whale_features" in window_summary.get("recommendation", {}),
             "recommendation": window_summary.get("recommendation"),
         },
     ]

@@ -77,6 +77,31 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _compact_result(result: dict) -> dict:
+    """Return a compact CLI summary while full detail stays in the JSON report."""
+    summary = result["summary"]
+    windows = {}
+    for window_name, window_summary in summary.get("windows", {}).items():
+        recommendation = window_summary.get("recommendation", {})
+        windows[window_name] = {
+            "selected_config": recommendation.get("selected_config"),
+            "selected_rolling_rmse_delta": recommendation.get("selected_rolling_rmse_delta"),
+            "selected_stable_whale_feature_count": recommendation.get("selected_stable_whale_feature_count"),
+            "raw_best_config": recommendation.get("best_config"),
+            "raw_best_rolling_rmse_delta": recommendation.get("best_rolling_rmse_delta"),
+            "raw_best_stable_whale_feature_count": recommendation.get("raw_best_stable_whale_feature_count"),
+            "whale_lift_demonstrated": recommendation.get("whale_lift_demonstrated"),
+        }
+    return {
+        "report_path": result["report_path"],
+        "markdown_path": result["markdown_path"],
+        "row_count": summary.get("row_count"),
+        "regime": summary.get("regime"),
+        "overall_residual_whale_lift_demonstrated": summary.get("overall_residual_whale_lift_demonstrated"),
+        "windows": windows,
+    }
+
+
 def main() -> int:
     """CLI entrypoint."""
     args = parse_args()
@@ -93,7 +118,7 @@ def main() -> int:
         selector_thresholds=_split_float_csv(args.selector_thresholds),
         selector_max_features=_split_int_csv(args.selector_max_features),
     )
-    print(json.dumps(result, sort_keys=True))
+    print(json.dumps(_compact_result(result), sort_keys=True))
     return 0
 
 
