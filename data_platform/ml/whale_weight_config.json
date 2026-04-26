@@ -1,0 +1,8 @@
+{
+  "version": "whale_weights_v1",
+  "trust_score": 0.35,
+  "profitability_score": 0.2,
+  "frequency_score": 0.15,
+  "holding_behavior_score": 0.15,
+  "entry_exit_score": 0.15
+}

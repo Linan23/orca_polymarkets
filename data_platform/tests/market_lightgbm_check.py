@@ -90,6 +90,25 @@ def main() -> int:
             "lightgbm_accuracy": comparison_summary["lightgbm"]["accuracy"],
         }
     )
+    transition_gate = comparison_summary.get("transition_gate") or {}
+    checks.append(
+        {
+            "name": "lightgbm_declared_primary",
+            "ok": comparison_summary.get("primary_model") == "lightgbm",
+            "primary_model": comparison_summary.get("primary_model"),
+        }
+    )
+    checks.append(
+        {
+            "name": "rolling_gate_metrics_present",
+            "ok": transition_gate.get("lightgbm_rolling", {}).get("roc_auc") is not None
+            and transition_gate.get("lightgbm_rolling", {}).get("log_loss") is not None
+            and transition_gate.get("random_forest_rolling", {}).get("roc_auc") is not None
+            and transition_gate.get("random_forest_rolling", {}).get("log_loss") is not None,
+            "lightgbm_rolling": transition_gate.get("lightgbm_rolling"),
+            "random_forest_rolling": transition_gate.get("random_forest_rolling"),
+        }
+    )
 
     ok = all(check["ok"] for check in checks)
     print(json.dumps({"ok": ok, "checks": checks, "lift": comparison_summary["lift"]}, indent=2, sort_keys=True))

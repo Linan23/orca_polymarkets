@@ -40,6 +40,11 @@ def parse_args() -> argparse.Namespace:
         default=",".join(str(value) for value in DEFAULT_HORIZON_HOURS),
         help="Comma-separated hours-before-close horizons, for example 168,24,6,1.",
     )
+    parser.add_argument(
+        "--whale-weight-config-path",
+        default="",
+        help="Optional JSON config path for arbitrary whale score weights.",
+    )
     return parser.parse_args()
 
 
@@ -53,6 +58,7 @@ def main() -> int:
             dataset_path=Path(args.dataset_path),
             metadata_path=Path(args.metadata_path),
             horizon_hours=horizons,
+            whale_weight_config_path=Path(args.whale_weight_config_path) if args.whale_weight_config_path else None,
         )
     print(json.dumps(summary, sort_keys=True))
     return 0
