@@ -61,6 +61,7 @@ Current whale feature semantics:
 - trusted whale weighted-pressure features include raw and normalized variants scaled by notional, liquidity, and trusted-whale counts
 - trusted whale entry/exit and holding features are reconstructed from matched buy/sell lots
 - recent trusted whale entry/exit pressure is captured over 1h, 6h, 12h, and 24h pre-cutoff windows
+- movement models can optionally apply train-fold whale feature selection using target correlation, which keeps price/context features fixed and rejects weak whale columns before each split is evaluated
 - historical current exposure is approximated from open shares valued at average buy price
 - resolved outcomes prefer Polymarket Gamma `outcomePrices`, with price thresholds only as fallback
 
@@ -120,6 +121,12 @@ Train 12h/24h market movement tasks:
 .venv/bin/python data_platform/jobs/train_market_model.py --task movement_24h --evaluation-mode rolling
 ```
 
+Train a movement model with train-fold whale feature selection:
+
+```bash
+.venv/bin/python data_platform/jobs/train_market_model.py --task movement_12h --evaluation-mode rolling --regime trade_covered --feature-selection training_correlation
+```
+
 Compare price-only vs whale-informed 12h/24h movement models:
 
 ```bash
@@ -136,6 +143,12 @@ Include LightGBM in the movement tuning report:
 
 ```bash
 .venv/bin/python data_platform/jobs/tune_market_movement_models.py --profiles rf_shallow,rf_regularized,rf_current,lgbm_regularized
+```
+
+Try the selected-whale tuning profile:
+
+```bash
+.venv/bin/python data_platform/jobs/tune_market_movement_models.py --profiles rf_shallow_selected_whale --regime trade_covered
 ```
 
 Train the grouped time-aware market baseline:

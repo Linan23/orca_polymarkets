@@ -37,6 +37,7 @@ def _window_checks(window_name: str, window_summary: dict[str, Any]) -> list[dic
                 for name in (
                     "price_only",
                     "price_plus_all_whale",
+                    "price_plus_selected_whale",
                     "price_plus_without_recent_whale",
                     "price_plus_recent_whale_only",
                 )
@@ -57,6 +58,19 @@ def _window_checks(window_name: str, window_summary: dict[str, Any]) -> list[dic
             "ok": "price_plus_all_whale" in lifts
             and "minimum_required_rolling_rmse_delta" in lifts.get("price_plus_all_whale", {}),
             "lift_gate": lifts.get("price_plus_all_whale"),
+        },
+        {
+            "name": f"{window_name}_selected_whale_feature_selection_present",
+            "ok": feature_sets.get("price_plus_selected_whale", {})
+            .get("feature_selection", {})
+            .get("mode")
+            == "training_correlation"
+            and feature_sets.get("price_plus_selected_whale", {})
+            .get("feature_selection", {})
+            .get("rolling", {})
+            .get("fold_count", 0)
+            > 0,
+            "feature_selection": feature_sets.get("price_plus_selected_whale", {}).get("feature_selection"),
         },
     ]
 

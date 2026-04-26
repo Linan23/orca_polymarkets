@@ -58,11 +58,28 @@ ROLLING_TEST_WINDOW_FRACTION = 0.15
 PRICE_SATURATION_THRESHOLD = 0.98
 END_TIME_BUCKETING_STRATEGY = "exact_market_end_time"
 MIN_ROLLING_RMSE_LIFT = 0.0001
+FEATURE_SELECTION_NONE = "none"
+FEATURE_SELECTION_TRAINING_CORRELATION = "training_correlation"
+FEATURE_SELECTION_MODES = {FEATURE_SELECTION_NONE, FEATURE_SELECTION_TRAINING_CORRELATION}
+FEATURE_SELECTION_MIN_ABS_CORRELATION = 0.015
+FEATURE_SELECTION_MAX_WHALE_FEATURES = 24
 MOVEMENT_TUNING_PROFILES: tuple[dict[str, Any], ...] = (
     {
         "profile": "rf_shallow",
         "estimator_type": "random_forest",
         "description": "Small random forest with shallow trees to reduce overfit against sparse whale features.",
+        "params": {
+            "n_estimators": 120,
+            "max_depth": 3,
+            "min_samples_leaf": 12,
+            "max_features": "sqrt",
+        },
+    },
+    {
+        "profile": "rf_shallow_selected_whale",
+        "estimator_type": "random_forest",
+        "description": "Shallow random forest with train-fold whale feature selection to reject noisy whale columns.",
+        "feature_selection": FEATURE_SELECTION_TRAINING_CORRELATION,
         "params": {
             "n_estimators": 120,
             "max_depth": 3,
@@ -256,6 +273,14 @@ def _normalize_regime(regime: str | None) -> str:
     normalized = REGIME_ALL if regime is None else str(regime).strip().lower()
     if normalized not in REGIME_METADATA:
         raise RuntimeError(f"Unsupported regime: {regime}")
+    return normalized
+
+
+def _normalize_feature_selection(feature_selection: str | None) -> str:
+    """Normalize and validate the feature-selection mode."""
+    normalized = FEATURE_SELECTION_NONE if feature_selection is None else str(feature_selection).strip().lower()
+    if normalized not in FEATURE_SELECTION_MODES:
+        raise RuntimeError(f"Unsupported feature_selection: {feature_selection}")
     return normalized
 
 
@@ -533,6 +558,142 @@ def _targets(rows: list[dict[str, Any]], task: str) -> list[float]:
     if task == TASK_MARKET_OUTCOME:
         return [int(row[target_column]) for row in rows]
     return [float(row[target_column]) for row in rows]
+
+
+def _safe_abs_pearson(feature_values: list[float], target_values: list[float]) -> float:
+    """Return absolute Pearson correlation, falling back to zero for constant inputs."""
+    if len(feature_values) < 2 or len(feature_values) != len(target_values):
+        return 0.0
+    feature_mean = sum(feature_values) / len(feature_values)
+    target_mean = sum(target_values) / len(target_values)
+    centered_features = [value - feature_mean for value in feature_values]
+    centered_targets = [value - target_mean for value in target_values]
+    feature_variance = sum(value * value for value in centered_features)
+    target_variance = sum(value * value for value in centered_targets)
+    denominator = math.sqrt(feature_variance * target_variance)
+    if denominator <= 0:
+        return 0.0
+    covariance = sum(
+        feature_value * target_value
+        for feature_value, target_value in zip(centered_features, centered_targets, strict=True)
+    )
+    return abs(float(covariance) / denominator)
+
+
+def _training_correlation_feature_selection(
+    *,
+    train_rows: list[dict[str, Any]],
+    feature_columns: tuple[str, ...],
+    task: str,
+    min_abs_correlation: float = FEATURE_SELECTION_MIN_ABS_CORRELATION,
+    max_selected_whale_features: int = FEATURE_SELECTION_MAX_WHALE_FEATURES,
+) -> tuple[tuple[str, ...], dict[str, Any]]:
+    """Select whale columns on the training fold while preserving non-whale baseline columns."""
+    if task not in REGRESSION_TASKS:
+        raise RuntimeError("training_correlation feature selection is supported only for regression tasks.")
+    candidate_columns = tuple(column for column in feature_columns if column in WHALE_FEATURE_COLUMNS)
+    candidate_column_set = set(candidate_columns)
+    always_keep_columns = tuple(column for column in feature_columns if column not in candidate_column_set)
+    target_values = _targets(train_rows, task)
+    candidate_scores: list[dict[str, Any]] = []
+    for index, column in enumerate(candidate_columns):
+        values = [float(row.get(column, 0.0) or 0.0) for row in train_rows]
+        nonzero_count = sum(1 for value in values if abs(value) > 1e-12)
+        unique_count = len({round(value, 10) for value in values})
+        candidate_scores.append(
+            {
+                "feature": column,
+                "original_index": index,
+                "abs_correlation": _safe_abs_pearson(values, target_values),
+                "nonzero_fraction": round(nonzero_count / len(values), 6) if values else 0.0,
+                "unique_count": unique_count,
+                "is_constant": unique_count <= 1,
+            }
+        )
+
+    ranked_candidates = sorted(
+        candidate_scores,
+        key=lambda item: (
+            -float(item["abs_correlation"]),
+            -float(item["nonzero_fraction"]),
+            int(item["original_index"]),
+        ),
+    )
+    selected_candidate_list = [
+        str(item["feature"])
+        for item in ranked_candidates
+        if not bool(item["is_constant"]) and float(item["abs_correlation"]) >= min_abs_correlation
+    ]
+    if max_selected_whale_features > 0:
+        selected_candidate_list = selected_candidate_list[:max_selected_whale_features]
+    selected_candidate_names = set(selected_candidate_list)
+
+    selected_columns = tuple(
+        column
+        for column in feature_columns
+        if column not in candidate_column_set or column in selected_candidate_names
+    )
+    selected_ranked = [
+        item for item in ranked_candidates if str(item["feature"]) in selected_candidate_names
+    ]
+    dropped_ranked = [
+        item for item in ranked_candidates if str(item["feature"]) not in selected_candidate_names
+    ]
+    summary = {
+        "mode": FEATURE_SELECTION_TRAINING_CORRELATION,
+        "requested_feature_count": len(feature_columns),
+        "selected_feature_count": len(selected_columns),
+        "always_kept_feature_count": len(always_keep_columns),
+        "candidate_whale_feature_count": len(candidate_columns),
+        "selected_whale_feature_count": len(selected_candidate_names),
+        "dropped_whale_feature_count": len(candidate_columns) - len(selected_candidate_names),
+        "min_abs_correlation": min_abs_correlation,
+        "max_selected_whale_features": max_selected_whale_features,
+        "selected_whale_features": [
+            {
+                "feature": str(item["feature"]),
+                "abs_correlation": round(float(item["abs_correlation"]), 6),
+                "nonzero_fraction": item["nonzero_fraction"],
+                "unique_count": item["unique_count"],
+            }
+            for item in selected_ranked[:12]
+        ],
+        "dropped_whale_features": [
+            {
+                "feature": str(item["feature"]),
+                "abs_correlation": round(float(item["abs_correlation"]), 6),
+                "nonzero_fraction": item["nonzero_fraction"],
+                "unique_count": item["unique_count"],
+            }
+            for item in dropped_ranked[:12]
+        ],
+    }
+    return selected_columns, summary
+
+
+def _select_features_for_training_fold(
+    *,
+    train_rows: list[dict[str, Any]],
+    feature_columns: tuple[str, ...],
+    task: str,
+    feature_selection: str,
+) -> tuple[tuple[str, ...], dict[str, Any]]:
+    """Resolve feature columns for one train/test fold."""
+    feature_selection = _normalize_feature_selection(feature_selection)
+    if feature_selection == FEATURE_SELECTION_NONE:
+        return feature_columns, {
+            "mode": FEATURE_SELECTION_NONE,
+            "requested_feature_count": len(feature_columns),
+            "selected_feature_count": len(feature_columns),
+            "candidate_whale_feature_count": sum(1 for column in feature_columns if column in WHALE_FEATURE_COLUMNS),
+            "selected_whale_feature_count": sum(1 for column in feature_columns if column in WHALE_FEATURE_COLUMNS),
+            "dropped_whale_feature_count": 0,
+        }
+    return _training_correlation_feature_selection(
+        train_rows=train_rows,
+        feature_columns=feature_columns,
+        task=task,
+    )
 
 
 def _build_baseline_model(task: str) -> Any:
@@ -814,6 +975,35 @@ def _feature_importance_rows(model: Any, feature_columns: tuple[str, ...]) -> li
     return [(feature, float(importance)) for feature, importance in importances]
 
 
+def _rolling_feature_selection_summary(folds: list[dict[str, Any]]) -> dict[str, Any]:
+    """Return compact feature-selection counts across rolling folds."""
+    selections = [
+        fold["feature_selection"]
+        for fold in folds
+        if isinstance(fold.get("feature_selection"), dict)
+    ]
+    if not selections:
+        return {"mode": FEATURE_SELECTION_NONE}
+    selected_counts = [int(selection.get("selected_feature_count", 0)) for selection in selections]
+    selected_whale_counts = [
+        int(selection.get("selected_whale_feature_count", 0)) for selection in selections
+    ]
+    return {
+        "mode": selections[0].get("mode", FEATURE_SELECTION_NONE),
+        "fold_count": len(selections),
+        "requested_feature_count": selections[0].get("requested_feature_count"),
+        "min_selected_feature_count": min(selected_counts),
+        "max_selected_feature_count": max(selected_counts),
+        "average_selected_feature_count": round(sum(selected_counts) / len(selected_counts), 6),
+        "min_selected_whale_feature_count": min(selected_whale_counts),
+        "max_selected_whale_feature_count": max(selected_whale_counts),
+        "average_selected_whale_feature_count": round(
+            sum(selected_whale_counts) / len(selected_whale_counts),
+            6,
+        ),
+    }
+
+
 def _evaluate_split(
     *,
     train_rows: list[dict[str, Any]],
@@ -826,14 +1016,22 @@ def _evaluate_split(
     random_state: int,
     estimator_params: dict[str, Any] | None = None,
     estimator_profile: str = "default",
+    feature_selection: str = FEATURE_SELECTION_NONE,
 ) -> tuple[Any, dict[str, Any], list[tuple[str, float]]]:
     """Fit one model on a fixed grouped split and return metrics plus feature importances."""
     from sklearn.metrics import accuracy_score, f1_score, mean_absolute_error, mean_squared_error, precision_score, r2_score, recall_score
 
     task = _normalize_task(task)
     estimator_type = _normalize_estimator_type(estimator_type)
-    x_train = _feature_matrix(train_rows, feature_columns)
-    x_test = _feature_matrix(test_rows, feature_columns)
+    feature_selection = _normalize_feature_selection(feature_selection)
+    selected_feature_columns, feature_selection_summary = _select_features_for_training_fold(
+        train_rows=train_rows,
+        feature_columns=feature_columns,
+        task=task,
+        feature_selection=feature_selection,
+    )
+    x_train = _feature_matrix(train_rows, selected_feature_columns)
+    x_test = _feature_matrix(test_rows, selected_feature_columns)
     y_train = _targets(train_rows, task)
     y_test = _targets(test_rows, task)
 
@@ -861,7 +1059,7 @@ def _evaluate_split(
         probabilities = model.predict_proba(x_test)[:, 1] if task == TASK_MARKET_OUTCOME else None
     probability_values = [float(value) for value in probabilities] if probabilities is not None else None
 
-    feature_importances = _feature_importance_rows(model, feature_columns)
+    feature_importances = _feature_importance_rows(model, selected_feature_columns)
     slice_metrics = _subset_metrics(
         test_rows,
         task=task,
@@ -874,7 +1072,11 @@ def _evaluate_split(
         "target_column": _target_column_for_task(task),
         "task": task,
         "feature_set": feature_set,
-        "feature_columns": list(feature_columns),
+        "feature_columns": list(selected_feature_columns),
+        "feature_count": len(selected_feature_columns),
+        "requested_feature_columns": list(feature_columns),
+        "requested_feature_count": len(feature_columns),
+        "feature_selection": feature_selection_summary,
         "estimator_type": estimator_type,
         "estimator_profile": estimator_profile,
         "estimator_params": estimator_params or {},
@@ -985,8 +1187,10 @@ def _rolling_evaluation(
     random_state: int,
     estimator_params: dict[str, Any] | None = None,
     estimator_profile: str = "default",
+    feature_selection: str = FEATURE_SELECTION_NONE,
 ) -> dict[str, Any]:
     """Evaluate one model family over grouped rolling windows."""
+    feature_selection = _normalize_feature_selection(feature_selection)
     split_definitions, configured_window_size, actual_window_size = _build_rolling_splits(rows)
     folds: list[dict[str, Any]] = []
     for split_definition in split_definitions:
@@ -1001,6 +1205,7 @@ def _rolling_evaluation(
             random_state=random_state,
             estimator_params=estimator_params,
             estimator_profile=estimator_profile,
+            feature_selection=feature_selection,
         )
         fold_summary: dict[str, Any] = {
             "fold_index": split_definition["fold_index"],
@@ -1016,6 +1221,9 @@ def _rolling_evaluation(
             "price_saturated": fold_metrics["price_saturated"],
             "class_balance": fold_metrics["class_balance"],
             "per_horizon_metrics": fold_metrics["per_horizon_metrics"],
+            "feature_count": fold_metrics.get("feature_count"),
+            "requested_feature_count": fold_metrics.get("requested_feature_count"),
+            "feature_selection": fold_metrics.get("feature_selection"),
         }
         if task == TASK_MARKET_OUTCOME:
             for key in (
@@ -1044,6 +1252,7 @@ def _rolling_evaluation(
         "fold_count": len(folds),
         "estimator_profile": estimator_profile,
         "estimator_params": estimator_params or {},
+        "feature_selection": _rolling_feature_selection_summary(folds),
         "average": _rolling_metric_summary(folds, task=task),
         "folds": folds,
     }
@@ -1065,6 +1274,7 @@ def _assess_market_model(
     regime: str = REGIME_ALL,
     estimator_params: dict[str, Any] | None = None,
     estimator_profile: str = "default",
+    feature_selection: str = FEATURE_SELECTION_NONE,
 ) -> tuple[Any, dict[str, Any], list[tuple[str, float]]]:
     """Run one market-model assessment from a dataset path."""
     _require_ml_dependencies()
@@ -1092,6 +1302,7 @@ def _assess_market_model(
         regime=regime,
         estimator_params=estimator_params,
         estimator_profile=estimator_profile,
+        feature_selection=feature_selection,
     )
 
 
@@ -1112,6 +1323,7 @@ def _assess_market_model_rows(
     regime: str = REGIME_ALL,
     estimator_params: dict[str, Any] | None = None,
     estimator_profile: str = "default",
+    feature_selection: str = FEATURE_SELECTION_NONE,
 ) -> tuple[Any, dict[str, Any], list[tuple[str, float]]]:
     """Run one market-model assessment from an in-memory filtered row slice."""
     _require_ml_dependencies()
@@ -1121,6 +1333,7 @@ def _assess_market_model_rows(
     if task in {TASK_MARKET_MOVEMENT_12H, TASK_MARKET_MOVEMENT_24H}:
         _require_valid_movement_targets(dataset_path=dataset_path, rows=rows, task=task)
     resolved_regime = _normalize_regime(regime)
+    feature_selection = _normalize_feature_selection(feature_selection)
 
     train_rows, test_rows, train_conditions, test_conditions = _grouped_time_split(rows, train_fraction)
     model, metrics, feature_importances = _evaluate_split(
@@ -1134,6 +1347,7 @@ def _assess_market_model_rows(
         random_state=random_state,
         estimator_params=estimator_params,
         estimator_profile=estimator_profile,
+        feature_selection=feature_selection,
     )
     metrics.update(
         {
@@ -1151,6 +1365,7 @@ def _assess_market_model_rows(
             "random_state": random_state,
             "estimator_profile": estimator_profile,
             "estimator_params": estimator_params or {},
+            "feature_selection_mode": feature_selection,
             "min_horizon_hours": min_horizon_hours,
             "max_horizon_hours": max_horizon_hours,
             "split_unit": "market_end_time_bucket",
@@ -1172,6 +1387,7 @@ def _assess_market_model_rows(
             random_state=random_state,
             estimator_params=estimator_params,
             estimator_profile=estimator_profile,
+            feature_selection=feature_selection,
         )
     return model, metrics, feature_importances
 
@@ -1190,6 +1406,7 @@ def _regime_model_analysis(
     min_horizon_hours: float | None = None,
     max_horizon_hours: float | None = None,
     include_rolling_metrics: bool = False,
+    feature_selection: str = FEATURE_SELECTION_NONE,
 ) -> dict[str, dict[str, Any]]:
     """Return compact model summaries for the trade-covered and cold-start regimes."""
     analysis: dict[str, dict[str, Any]] = {}
@@ -1225,6 +1442,7 @@ def _regime_model_analysis(
                 max_horizon_hours=max_horizon_hours,
                 include_rolling_metrics=include_rolling_metrics,
                 regime=regime,
+                feature_selection=feature_selection,
             )
             regime_summary.update(
                 {
@@ -1370,11 +1588,13 @@ def train_market_model(
     min_horizon_hours: float | None = None,
     max_horizon_hours: float | None = None,
     regime: str = REGIME_ALL,
+    feature_selection: str = FEATURE_SELECTION_NONE,
 ) -> dict[str, Any]:
     """Train one market model and optionally attach rolling diagnostics."""
     task = _normalize_task(task)
     estimator_type = _normalize_estimator_type(estimator_type)
     regime = _normalize_regime(regime)
+    feature_selection = _normalize_feature_selection(feature_selection)
     resolved_feature_set, feature_columns = _resolve_feature_columns(task, feature_set, regime)
     model_version = _resolve_model_version(task, estimator_type, resolved_feature_set)
     dataset_path = dataset_path or DEFAULT_DATASET_PATH
@@ -1404,6 +1624,7 @@ def train_market_model(
         max_horizon_hours=max_horizon_hours,
         include_rolling_metrics=include_rolling_metrics,
         regime=regime,
+        feature_selection=feature_selection,
     )
     metrics["evaluation_mode"] = "rolling" if include_rolling_metrics else "single_split"
     if regime == REGIME_ALL:
@@ -1420,6 +1641,7 @@ def train_market_model(
             min_horizon_hours=min_horizon_hours,
             max_horizon_hours=max_horizon_hours,
             include_rolling_metrics=include_rolling_metrics,
+            feature_selection=feature_selection,
         )
     _persist_training_artifacts(
         model=model,
@@ -1557,11 +1779,13 @@ def _evaluate_regression_feature_sets(
     regime: str = REGIME_ALL,
     estimator_params: dict[str, Any] | None = None,
     estimator_profile: str = "default",
+    feature_selection: str = FEATURE_SELECTION_NONE,
 ) -> dict[str, dict[str, Any]]:
     """Evaluate price, whale, and combined feature sets for one regression task."""
     task = _normalize_task(task)
     if task not in REGRESSION_TASKS:
         raise RuntimeError(f"{task} is not a regression feature-set comparison task.")
+    feature_selection = _normalize_feature_selection(feature_selection)
 
     feature_set_summaries: dict[str, dict[str, Any]] = {}
     for feature_set, feature_columns in (
@@ -1585,6 +1809,7 @@ def _evaluate_regression_feature_sets(
             regime=regime,
             estimator_params=estimator_params,
             estimator_profile=estimator_profile,
+            feature_selection=feature_selection,
         )
         feature_set_summaries[feature_set] = metrics
     return feature_set_summaries
@@ -1999,6 +2224,9 @@ def _selected_movement_tuning_profiles(
                 "profile": profile_name,
                 "estimator_type": estimator_type,
                 "description": str(profile.get("description", "")),
+                "feature_selection": _normalize_feature_selection(
+                    profile.get("feature_selection", FEATURE_SELECTION_NONE)
+                ),
                 "params": dict(profile.get("params", {})),
             }
         )
@@ -2022,6 +2250,29 @@ def _metric_delta(right: Any, left: Any) -> float | None:
     if right is None or left is None:
         return None
     return round(float(right) - float(left), 6)
+
+
+def _compact_feature_selection_metrics(metrics: dict[str, Any]) -> dict[str, Any]:
+    """Return feature-selection diagnostics small enough for comparison reports."""
+    selection = metrics.get("feature_selection") if isinstance(metrics.get("feature_selection"), dict) else {}
+    rolling_metrics = metrics.get("rolling_metrics") if isinstance(metrics.get("rolling_metrics"), dict) else {}
+    rolling_selection = (
+        rolling_metrics.get("feature_selection")
+        if isinstance(rolling_metrics.get("feature_selection"), dict)
+        else {}
+    )
+    return {
+        "mode": selection.get("mode", FEATURE_SELECTION_NONE),
+        "requested_feature_count": selection.get("requested_feature_count"),
+        "selected_feature_count": selection.get("selected_feature_count"),
+        "candidate_whale_feature_count": selection.get("candidate_whale_feature_count"),
+        "selected_whale_feature_count": selection.get("selected_whale_feature_count"),
+        "dropped_whale_feature_count": selection.get("dropped_whale_feature_count"),
+        "min_abs_correlation": selection.get("min_abs_correlation"),
+        "max_selected_whale_features": selection.get("max_selected_whale_features"),
+        "selected_whale_features": selection.get("selected_whale_features", [])[:8],
+        "rolling": rolling_selection,
+    }
 
 
 def _compact_movement_tuning_metrics(metrics: dict[str, Any]) -> dict[str, Any]:
@@ -2050,6 +2301,7 @@ def _compact_movement_tuning_metrics(metrics: dict[str, Any]) -> dict[str, Any]:
             "single_minus_rolling_mae": _metric_delta(metrics.get("mae"), rolling_average.get("mae")),
             "single_minus_rolling_rmse": _metric_delta(metrics.get("rmse"), rolling_average.get("rmse")),
         },
+        "feature_selection": _compact_feature_selection_metrics(metrics),
         "top_features": metrics.get("top_features", [])[:8],
     }
 
@@ -2117,6 +2369,7 @@ def _movement_profile_window_report(
         regime=regime,
         estimator_params=dict(profile.get("params", {})),
         estimator_profile=str(profile["profile"]),
+        feature_selection=profile.get("feature_selection", FEATURE_SELECTION_NONE),
     )
     price_only_metrics = feature_set_summaries["price_only"]
     whale_only_metrics = feature_set_summaries["whale_only"]
@@ -2131,6 +2384,7 @@ def _movement_profile_window_report(
         "estimator_type": profile["estimator_type"],
         "description": profile["description"],
         "estimator_params": profile["params"],
+        "feature_selection": profile.get("feature_selection", FEATURE_SELECTION_NONE),
         "window_hours": window_hours,
         "task": task,
         "target_column": _target_column_for_task(task),
@@ -2513,7 +2767,11 @@ def _movement_ablation_feature_sets() -> dict[str, tuple[str, ...]]:
     return {
         "price_only": PRICE_BASELINE_FEATURE_COLUMNS,
         "price_plus_all_whale": PRICE_PLUS_WHALE_FEATURE_COLUMNS,
+        "price_plus_selected_whale": PRICE_PLUS_WHALE_FEATURE_COLUMNS,
         "price_plus_all_whale_with_scored_pressure": _dedupe_columns(
+            PRICE_BASELINE_FEATURE_COLUMNS + WHALE_FEATURE_COLUMNS
+        ),
+        "price_plus_selected_whale_with_scored_pressure": _dedupe_columns(
             PRICE_BASELINE_FEATURE_COLUMNS + WHALE_FEATURE_COLUMNS
         ),
         "price_plus_without_recent_whale": _dedupe_columns(PRICE_BASELINE_FEATURE_COLUMNS + default_non_recent),
@@ -2535,6 +2793,16 @@ def _movement_ablation_feature_sets() -> dict[str, tuple[str, ...]]:
         ),
         "price_plus_timing_only": _dedupe_columns(PRICE_BASELINE_FEATURE_COLUMNS + groups["timing"]),
     }
+
+
+def _movement_ablation_feature_selection(feature_set: str) -> str:
+    """Return feature-selection mode for one movement ablation feature set."""
+    if str(feature_set).strip().lower() in {
+        "price_plus_selected_whale",
+        "price_plus_selected_whale_with_scored_pressure",
+    }:
+        return FEATURE_SELECTION_TRAINING_CORRELATION
+    return FEATURE_SELECTION_NONE
 
 
 def _movement_ablation_window_report(
@@ -2568,6 +2836,7 @@ def _movement_ablation_window_report(
             max_horizon_hours=max_horizon_hours,
             include_rolling_metrics=True,
             regime=regime,
+            feature_selection=_movement_ablation_feature_selection(feature_set),
         )
         metrics_by_set[feature_set] = metrics
 

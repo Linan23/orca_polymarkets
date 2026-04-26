@@ -59,6 +59,12 @@ def parse_args() -> argparse.Namespace:
         help="Whether to include grouped rolling diagnostics in the report.",
     )
     parser.add_argument(
+        "--feature-selection",
+        choices=("none", "training_correlation"),
+        default="none",
+        help="Optional train-fold feature selection for regression tasks.",
+    )
+    parser.add_argument(
         "--regime",
         choices=("all", "trade_covered", "cold_start"),
         default="all",
@@ -116,6 +122,7 @@ def main() -> int:
         min_horizon_hours=args.min_horizon_hours,
         max_horizon_hours=args.max_horizon_hours,
         regime=args.regime,
+        feature_selection=args.feature_selection,
     )
     print(json.dumps(summary, sort_keys=True))
     return 0
