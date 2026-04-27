@@ -69,6 +69,9 @@ RESIDUAL_SELECTOR_THRESHOLDS = (0.01, 0.02, 0.05)
 RESIDUAL_SELECTOR_MAX_FEATURES = (8, 16, 24)
 RESIDUAL_NEAR_BEST_RMSE_TOLERANCE = 0.0006
 RESIDUAL_SEGMENT_MIN_ROWS = 20
+RESIDUAL_RIDGE_PARAMS = {
+    "alpha": 1.0,
+}
 RESIDUAL_RANDOM_FOREST_PARAMS = {
     "n_estimators": 120,
     "max_depth": 3,
@@ -286,7 +289,7 @@ def _normalize_task(task: str) -> str:
 def _normalize_estimator_type(estimator_type: str) -> str:
     """Normalize and validate the estimator family."""
     normalized = str(estimator_type).strip().lower()
-    if normalized not in {"random_forest", "lightgbm"}:
+    if normalized not in {"random_forest", "lightgbm", "ridge"}:
         raise RuntimeError(f"Unsupported estimator_type: {estimator_type}")
     return normalized
 
@@ -746,6 +749,17 @@ def _build_estimator(
     task = _normalize_task(task)
     estimator_type = _normalize_estimator_type(estimator_type)
     estimator_params = estimator_params or {}
+    if estimator_type == "ridge":
+        if task == TASK_MARKET_OUTCOME:
+            raise RuntimeError("ridge estimator is supported only for regression tasks.")
+        from sklearn.linear_model import Ridge
+        from sklearn.pipeline import make_pipeline
+        from sklearn.preprocessing import StandardScaler
+
+        params = {"alpha": 1.0}
+        params.update(estimator_params)
+        return make_pipeline(StandardScaler(), Ridge(**params))
+
     if estimator_type == "random_forest":
         if task == TASK_MARKET_OUTCOME:
             from sklearn.ensemble import RandomForestClassifier
@@ -995,6 +1009,13 @@ def _coverage_segment_metrics(
 def _feature_importance_rows(model: Any, feature_columns: tuple[str, ...]) -> list[tuple[str, float]]:
     """Return sorted feature importances from a fitted estimator."""
     raw_importances = getattr(model, "feature_importances_", None)
+    if raw_importances is None and hasattr(model, "named_steps"):
+        linear_model = model.named_steps.get("ridge")
+        coefficients = getattr(linear_model, "coef_", None)
+        if coefficients is not None:
+            importances = list(zip(feature_columns, [abs(float(value)) for value in coefficients], strict=True))
+            importances.sort(key=lambda item: float(item[1]), reverse=True)
+            return [(feature, float(importance)) for feature, importance in importances]
     if raw_importances is None:
         return [(feature, 0.0) for feature in feature_columns]
     importances = list(zip(feature_columns, raw_importances, strict=True))
@@ -2790,6 +2811,35 @@ def _residual_segment_groups(rows: list[dict[str, Any]]) -> dict[str, dict[str, 
     return groups
 
 
+def _normalize_segment_filter(values: tuple[str, ...] | list[str] | None) -> tuple[str, ...]:
+    """Normalize optional comma-style segment filters."""
+    return tuple(_safe_segment_name(value) for value in (values or []) if str(value).strip())
+
+
+def _filter_rows_by_residual_segments(
+    rows: list[dict[str, Any]],
+    *,
+    research_segments: tuple[str, ...] | list[str] | None = None,
+    exclude_market_families: tuple[str, ...] | list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Filter rows by residual diagnostic segment labels."""
+    selected_segments = set(_normalize_segment_filter(research_segments))
+    excluded_families = set(_normalize_segment_filter(exclude_market_families))
+    if not selected_segments and not excluded_families:
+        return list(rows)
+
+    filtered: list[dict[str, Any]] = []
+    for row in rows:
+        research_segment = _safe_segment_name(_research_focus_segment(row))
+        market_family = _safe_segment_name(_market_family_segment(row))
+        if selected_segments and research_segment not in selected_segments:
+            continue
+        if excluded_families and market_family in excluded_families:
+            continue
+        filtered.append(row)
+    return filtered
+
+
 def _residual_segment_metric(
     *,
     rows: list[dict[str, Any]],
@@ -2937,6 +2987,8 @@ def _residual_estimator_params(estimator_type: str) -> dict[str, Any]:
     estimator_type = _normalize_estimator_type(estimator_type)
     if estimator_type == "random_forest":
         return dict(RESIDUAL_RANDOM_FOREST_PARAMS)
+    if estimator_type == "ridge":
+        return dict(RESIDUAL_RIDGE_PARAMS)
     return dict(RESIDUAL_LIGHTGBM_PARAMS)
 
 
@@ -3333,6 +3385,8 @@ def _write_week10_11_residual_markdown(summary: dict[str, Any], markdown_path: P
         f"Dataset: `{summary['dataset_path']}`",
         f"Regime: `{summary['regime']}`",
         f"Rows evaluated: {summary['row_count']}",
+        f"Research segments: `{', '.join(summary.get('research_segments') or ['all'])}`",
+        f"Excluded market families: `{', '.join(summary.get('exclude_market_families') or ['none'])}`",
         "",
         "## Decision",
         "",
@@ -3341,6 +3395,13 @@ def _write_week10_11_residual_markdown(summary: dict[str, Any], markdown_path: P
             if summary["overall_residual_whale_lift_demonstrated"]
             else "Residual whale correction does not yet demonstrate rolling lift over price-only."
         ),
+        "",
+        "## Week 10-11 Summary",
+        "",
+        "- 12h residual whale correction is the only window with whale-valid lift in the current run.",
+        "- 24h does not yet support a whale-lift claim because no selected config both improves RMSE and keeps recurring whale features.",
+        "- Segment diagnostics should drive the claim: the report separates short crypto up/down, short non-crypto, and longer markets.",
+        "- The current result is early evidence and should be rechecked after each trade backfill.",
         "",
         "## Results",
         "",
@@ -3377,6 +3438,34 @@ def _write_week10_11_residual_markdown(summary: dict[str, Any], markdown_path: P
                 lift="yes" if recommendation.get("whale_lift_demonstrated") else "no",
             )
         )
+    lift_windows = [
+        window_name
+        for window_name, window_summary in summary["windows"].items()
+        if window_summary.get("recommendation", {}).get("whale_lift_demonstrated")
+    ]
+    non_lift_windows = [
+        window_name
+        for window_name, window_summary in summary["windows"].items()
+        if not window_summary.get("recommendation", {}).get("whale_lift_demonstrated")
+    ]
+    crypto_notes: list[str] = []
+    for window_name, window_summary in summary["windows"].items():
+        recommendation = window_summary.get("recommendation", {})
+        config_name = recommendation.get("selected_config") or recommendation.get("best_config")
+        config = window_summary.get("configs", {}).get(config_name, {}) if config_name else {}
+        crypto_segments = (
+            config.get("rolling", {})
+            .get("segment_diagnostics", {})
+            .get("research_focus", {})
+        )
+        if not isinstance(crypto_segments, dict):
+            continue
+        for segment_name, segment in crypto_segments.items():
+            if "crypto_updown" not in str(segment_name) or not isinstance(segment, dict):
+                continue
+            crypto_delta = segment.get("lift_vs_price_only", {}).get("rmse_delta")
+            if crypto_delta is not None and float(crypto_delta) > 0:
+                crypto_notes.append(f"{window_name} {segment_name} worsens by {crypto_delta} RMSE")
     lines.extend(
         [
             "",
@@ -3388,6 +3477,25 @@ def _write_week10_11_residual_markdown(summary: dict[str, Any], markdown_path: P
             "| --- | --- | --- | ---: | ---: | ---: | ---: | --- |",
         ]
     )
+    summary_lines = [
+        (
+            f"- Whale-valid lift is currently shown on {', '.join(lift_windows)}."
+            if lift_windows
+            else "- No 12h/24h window currently has whale-valid lift."
+        ),
+        (
+            f"- Windows without whale-valid support: {', '.join(non_lift_windows)}."
+            if non_lift_windows
+            else "- Both 12h and 24h currently have whale-valid support under the selected gate."
+        ),
+        "- Segment diagnostics should drive the claim: the report separates short crypto up/down, short non-crypto, and longer markets.",
+        "- The current result is early evidence and should be rechecked after each trade backfill.",
+    ]
+    if crypto_notes:
+        summary_lines.append(f"- Crypto up/down remains a weak segment: {'; '.join(crypto_notes)}.")
+    summary_start = lines.index("## Week 10-11 Summary")
+    summary_end = lines.index("## Results")
+    lines[summary_start + 2 : summary_end - 1] = summary_lines
     for window_name, window_summary in summary["windows"].items():
         recommendation = window_summary.get("recommendation", {})
         config_name = recommendation.get("selected_config") or recommendation.get("best_config")
@@ -3444,24 +3552,42 @@ def _write_week10_11_residual_markdown(summary: dict[str, Any], markdown_path: P
             "",
             "## Recurring Whale Features",
             "",
-            "| Window | Feature | Near-best configs | Avg selection frequency | Avg abs correlation |",
-            "| --- | --- | ---: | ---: | ---: |",
+            "| Window | Feature | Source | Avg selection frequency | Avg abs correlation |",
+            "| --- | --- | --- | ---: | ---: |",
         ]
     )
     for window_name, window_summary in summary["windows"].items():
+        recommendation = window_summary.get("recommendation", {})
         feature_summary = (
             window_summary.get("recommendation", {})
             .get("near_best_whale_feature_stability", {})
             .get("top_features", [])
         )
+        source_label = "near-best configs"
+        if not feature_summary and recommendation.get("selected_config"):
+            selected_config = window_summary.get("configs", {}).get(recommendation["selected_config"], {})
+            feature_summary = (
+                selected_config.get("rolling", {})
+                .get("feature_selection_stability", {})
+                .get("top_stable_whale_features", [])
+            )
+            source_label = "selected config"
         for feature in feature_summary[:5]:
+            if source_label == "near-best configs":
+                source = f"{feature.get('config_count')} near-best configs"
+                frequency = feature.get("average_selection_frequency")
+                correlation = feature.get("average_abs_correlation")
+            else:
+                source = source_label
+                frequency = feature.get("selection_frequency")
+                correlation = feature.get("average_abs_correlation")
             lines.append(
-                "| {window} | `{feature}` | {config_count} | {frequency} | {correlation} |".format(
+                "| {window} | `{feature}` | {source} | {frequency} | {correlation} |".format(
                     window=window_name,
                     feature=feature.get("feature"),
-                    config_count=feature.get("config_count"),
-                    frequency=feature.get("average_selection_frequency"),
-                    correlation=feature.get("average_abs_correlation"),
+                    source=source,
+                    frequency=frequency,
+                    correlation=correlation,
                 )
             )
     lines.extend(
@@ -3492,6 +3618,8 @@ def analyze_market_movement_residuals(
     min_horizon_hours: float | None = None,
     max_horizon_hours: float | None = None,
     regime: str = REGIME_TRADE_COVERED,
+    research_segments: tuple[str, ...] | list[str] | None = None,
+    exclude_market_families: tuple[str, ...] | list[str] | None = None,
     selector_thresholds: tuple[float, ...] | list[float] | None = None,
     selector_max_features: tuple[int, ...] | list[int] | None = None,
 ) -> dict[str, Any]:
@@ -3509,13 +3637,19 @@ def analyze_market_movement_residuals(
     if not max_features_values or any(value <= 0 for value in max_features_values):
         raise RuntimeError("selector_max_features must contain positive values.")
 
-    filtered_rows = _filter_rows_by_regime(
-        _filter_rows_by_horizon(
-            _load_training_rows(dataset_path),
-            min_horizon_hours=min_horizon_hours,
-            max_horizon_hours=max_horizon_hours,
+    selected_research_segments = _normalize_segment_filter(research_segments)
+    excluded_market_families = _normalize_segment_filter(exclude_market_families)
+    filtered_rows = _filter_rows_by_residual_segments(
+        _filter_rows_by_regime(
+            _filter_rows_by_horizon(
+                _load_training_rows(dataset_path),
+                min_horizon_hours=min_horizon_hours,
+                max_horizon_hours=max_horizon_hours,
+            ),
+            regime,
         ),
-        regime,
+        research_segments=selected_research_segments,
+        exclude_market_families=excluded_market_families,
     )
     if not filtered_rows:
         raise RuntimeError(f"No rows were found in {dataset_path} for residual movement analysis.")
@@ -3560,6 +3694,8 @@ def analyze_market_movement_residuals(
         "random_state": random_state,
         "min_horizon_hours": min_horizon_hours,
         "max_horizon_hours": max_horizon_hours,
+        "research_segments": list(selected_research_segments),
+        "exclude_market_families": list(excluded_market_families),
         "selector_thresholds": list(thresholds),
         "selector_max_features": list(max_features_values),
         "minimum_required_rolling_rmse_delta": round(-MIN_ROLLING_RMSE_LIFT, 6),

@@ -66,6 +66,8 @@ Current whale feature semantics:
 - residual movement recommendations now distinguish raw best residual lift from whale-valid lift that keeps recurring selected whale features
 - residual reports include segment diagnostics for short crypto up/down markets versus other market durations and families
 - residual reports include fold-level RMSE-delta confidence diagnostics as a stability check, not formal statistical proof
+- residual analysis supports `--segment short_non_crypto` and `--exclude-family crypto_updown` for scoped validation
+- residual analysis supports `--estimator ridge` for a simpler linear residual diagnostic alongside tree models
 - historical current exposure is approximated from open shares valued at average buy price
 - resolved outcomes prefer Polymarket Gamma `outcomePrices`, with price thresholds only as fallback
 
@@ -159,6 +161,13 @@ Analyze residual whale movement signal with selector threshold/cap sweeps:
 
 ```bash
 .venv/bin/python data_platform/jobs/analyze_market_movement_residuals.py --regime trade_covered
+```
+
+Run scoped residual diagnostics:
+
+```bash
+.venv/bin/python data_platform/jobs/analyze_market_movement_residuals.py --segment short_non_crypto
+.venv/bin/python data_platform/jobs/analyze_market_movement_residuals.py --exclude-family crypto_updown --estimator ridge
 ```
 
 Train the grouped time-aware market baseline:

@@ -91,6 +91,8 @@ def main() -> int:
         report_path=report_path,
         markdown_path=markdown_path,
         estimator_type="random_forest",
+        research_segments=("short_non_crypto",),
+        exclude_market_families=("crypto_updown",),
         selector_thresholds=(0.02,),
         selector_max_features=(8,),
     )
@@ -121,6 +123,13 @@ def main() -> int:
             "name": "overall_gate_present",
             "ok": isinstance(summary.get("overall_residual_whale_lift_demonstrated"), bool),
             "overall_residual_whale_lift_demonstrated": summary.get("overall_residual_whale_lift_demonstrated"),
+        },
+        {
+            "name": "segment_filters_recorded",
+            "ok": summary.get("research_segments") == ["short_non_crypto"]
+            and summary.get("exclude_market_families") == ["crypto_updown"],
+            "research_segments": summary.get("research_segments"),
+            "exclude_market_families": summary.get("exclude_market_families"),
         },
     ]
     for window_name in ("12h", "24h"):

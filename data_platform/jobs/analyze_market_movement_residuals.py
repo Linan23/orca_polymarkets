@@ -20,6 +20,11 @@ from data_platform.ml.market_baseline_model import (
 from data_platform.ml.market_dataset_builder import DEFAULT_DATASET_PATH
 
 
+def _split_csv(value: str) -> tuple[str, ...]:
+    """Return non-empty comma-separated string values."""
+    return tuple(item.strip() for item in str(value or "").split(",") if item.strip())
+
+
 def _split_float_csv(value: str) -> tuple[float, ...]:
     """Return non-empty comma-separated float values."""
     return tuple(float(item.strip()) for item in str(value or "").split(",") if item.strip())
@@ -50,9 +55,9 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--estimator",
-        choices=("random_forest", "lightgbm"),
+        choices=("random_forest", "lightgbm", "ridge"),
         default="random_forest",
-        help="Estimator family used for price-only and residual models.",
+        help="Estimator family used for price-only and residual models. ridge is a linear regression diagnostic.",
     )
     parser.add_argument(
         "--regime",
@@ -74,6 +79,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--random-state", type=int, default=42, help="Random seed for reproducibility.")
     parser.add_argument("--min-horizon-hours", type=float, default=None, help="Optional inclusive minimum horizon filter.")
     parser.add_argument("--max-horizon-hours", type=float, default=None, help="Optional inclusive maximum horizon filter.")
+    parser.add_argument(
+        "--segment",
+        default="",
+        help="Optional comma-separated research-focus segment filter, for example short_non_crypto.",
+    )
+    parser.add_argument(
+        "--exclude-family",
+        default="",
+        help="Optional comma-separated market family exclusion, for example crypto_updown.",
+    )
     return parser.parse_args()
 
 
@@ -97,6 +112,8 @@ def _compact_result(result: dict) -> dict:
         "markdown_path": result["markdown_path"],
         "row_count": summary.get("row_count"),
         "regime": summary.get("regime"),
+        "research_segments": summary.get("research_segments"),
+        "exclude_market_families": summary.get("exclude_market_families"),
         "overall_residual_whale_lift_demonstrated": summary.get("overall_residual_whale_lift_demonstrated"),
         "windows": windows,
     }
@@ -115,6 +132,8 @@ def main() -> int:
         min_horizon_hours=args.min_horizon_hours,
         max_horizon_hours=args.max_horizon_hours,
         regime=args.regime,
+        research_segments=_split_csv(args.segment),
+        exclude_market_families=_split_csv(args.exclude_family),
         selector_thresholds=_split_float_csv(args.selector_thresholds),
         selector_max_features=_split_int_csv(args.selector_max_features),
     )
