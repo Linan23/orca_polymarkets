@@ -49,6 +49,7 @@ def main() -> int:
             ("build_whale_scores", [py, "build_whale_scores.py"]),
             ("build_dashboard_snapshot", [py, "build_dashboard_snapshot.py"]),
             ("build_home_summary_snapshot", [py, "build_home_summary_snapshot.py"]),
+            ("build_research_analytics_snapshot", [py, "build_research_analytics_snapshot.py"]),
         ):
             started = time.monotonic()
             completed = subprocess.run(command, cwd=ROOT_DIR, env=env, text=True, capture_output=True)

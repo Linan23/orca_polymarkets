@@ -700,6 +700,23 @@ class HomeSummarySnapshot(Base):
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
 
 
+class ResearchAnalyticsSnapshot(Base):
+    __tablename__ = "research_analytics_snapshot"
+    __table_args__ = (
+        Index("ix_research_analytics_snapshot_timeframe_generated", "timeframe", "generated_at"),
+        {"schema": "analytics"},
+    )
+
+    research_analytics_snapshot_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    generated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), nullable=False)
+    timeframe: Mapped[str] = mapped_column(String(16), nullable=False)
+    top_profitable_payload: Mapped[dict] = mapped_column(JSON_VARIANT, nullable=False)
+    recent_entries_payload: Mapped[dict] = mapped_column(JSON_VARIANT, nullable=False)
+    market_concentration_payload: Mapped[dict] = mapped_column(JSON_VARIANT, nullable=False)
+    whale_entry_payload: Mapped[dict] = mapped_column(JSON_VARIANT, nullable=False)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
 class DashboardMarket(Base):
     __tablename__ = "dashboard_market"
     __table_args__ = (
