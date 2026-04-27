@@ -708,14 +708,16 @@ The normalized layer feeds the dashboard-facing tables.
 To build the preliminary whale score snapshot:
 
 ```bash
+.venv/bin/python refresh_resolved_conditions.py
 .venv/bin/python build_whale_scores.py
 ```
 
 Current profitability and resolution logic:
 
-- closed Polymarket binary markets are treated as resolved only when `last_trade_price` is effectively `1` or `0`
-- the winning outcome is inferred from the stored normalized outcome labels
-- captured trade signals are also used conservatively, so a condition can count as resolved when one outcome trades at `>= 0.98` and the opposite outcome trades at `<= 0.02`
+- `analytics.resolved_condition` stores reusable Polymarket condition outcomes before whale scoring runs
+- closed Polymarket binary markets can be resolved from `last_trade_price` when it is effectively `1` or `0`
+- captured trade signals are also persisted conservatively, so a condition can count as resolved when one outcome trades at `>= 0.98` and the opposite outcome trades at `<= 0.02`
+- whale scoring reads the persisted table first, then falls back to in-memory resolution inference only when the table is empty
 - realized profitability is computed only for users whose captured trade history in that resolved market is internally consistent enough to avoid overstating PnL from partial history
 - if no resolved trade overlap exists yet, `profitability_score` stays `0`
 

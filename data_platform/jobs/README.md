@@ -213,6 +213,12 @@ Backfill trades for deterministically resolved closed Polymarket markets:
   --max-pages-per-market 5
 ```
 
+Persist reusable resolved-condition coverage for whale scoring:
+
+```bash
+.venv/bin/python refresh_resolved_conditions.py
+```
+
 Backfill only deterministically resolved conditions with no ingested trades yet:
 
 ```bash

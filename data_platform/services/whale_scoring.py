@@ -141,6 +141,24 @@ POSITION_EXPOSURE_SQL = text(
 )
 
 
+RESOLVED_CONDITION_SQL = text(
+    """
+    SELECT
+      rc.condition_ref,
+      rc.winning_outcome_label,
+      rc.resolver_method,
+      rc.confidence,
+      rc.resolved_at
+    FROM analytics.resolved_condition rc
+    JOIN analytics.platform p
+      ON p.platform_id = rc.platform_id
+    WHERE p.platform_name = 'polymarket'
+      AND rc.condition_ref IS NOT NULL
+      AND rc.winning_outcome_label IS NOT NULL
+    """
+)
+
+
 RESOLVED_MARKET_SQL = text(
     """
     SELECT
@@ -320,6 +338,20 @@ def _load_current_exposure_by_user(session: Session) -> dict[int, float]:
 
 def load_resolved_market_outcome_details(session: Session) -> dict[str, ResolvedMarketOutcome]:
     """Return confident resolved Polymarket outcomes with source metadata."""
+    persisted_rows = session.execute(RESOLVED_CONDITION_SQL).mappings().all()
+    if persisted_rows:
+        return {
+            str(row["condition_ref"]): ResolvedMarketOutcome(
+                condition_ref=str(row["condition_ref"]),
+                winning_outcome_label=str(row["winning_outcome_label"]).strip().lower(),
+                resolution_source=str(row["resolver_method"]),
+                resolution_confidence=float(row["confidence"] or 0),
+                resolution_time=row["resolved_at"],
+            )
+            for row in persisted_rows
+            if str(row["winning_outcome_label"]).strip()
+        }
+
     rows = session.execute(RESOLVED_MARKET_SQL).mappings().all()
     resolved: dict[str, ResolvedMarketOutcome] = {}
     condition_labels: dict[str, tuple[str, str]] = {}

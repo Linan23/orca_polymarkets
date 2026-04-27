@@ -45,6 +45,7 @@ def main() -> int:
         started_at = datetime.now(timezone.utc)
         steps: list[dict[str, object]] = []
         for name, command in (
+            ("refresh_resolved_conditions", [py, "refresh_resolved_conditions.py"]),
             ("build_whale_scores", [py, "build_whale_scores.py"]),
             ("build_dashboard_snapshot", [py, "build_dashboard_snapshot.py"]),
         ):

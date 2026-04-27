@@ -188,6 +188,29 @@ class MarketTagMap(Base):
     tag_id: Mapped[int] = mapped_column(ForeignKey("analytics.market_tag.tag_id"), primary_key=True)
 
 
+class ResolvedCondition(Base):
+    __tablename__ = "resolved_condition"
+    __table_args__ = (
+        UniqueConstraint("platform_id", "condition_ref", name="uq_resolved_condition_platform_condition"),
+        Index("ix_resolved_condition_method", "resolver_method"),
+        Index("ix_resolved_condition_resolved_at", "resolved_at"),
+        {"schema": "analytics"},
+    )
+
+    resolved_condition_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    platform_id: Mapped[int] = mapped_column(ForeignKey("analytics.platform.platform_id"), nullable=False)
+    condition_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    resolver_method: Mapped[str] = mapped_column(String(64), nullable=False)
+    winning_outcome_label: Mapped[str] = mapped_column(String(128), nullable=False)
+    resolved_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True))
+    max_winning_price: Mapped[float | None] = mapped_column(MONEY)
+    min_losing_price: Mapped[float | None] = mapped_column(MONEY)
+    trade_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    confidence: Mapped[float] = mapped_column(Numeric(6, 4), nullable=False)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+    updated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
 class UserAccountHistory(Base):
     __tablename__ = "user_account_history"
     __table_args__ = (
