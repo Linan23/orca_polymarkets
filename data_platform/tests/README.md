@@ -176,3 +176,15 @@ That comparison check verifies:
 - the residual model-family report and markdown are written
 - Random Forest and Ridge residual families are compared on the same 12h/24h windows
 - the report includes a default estimator recommendation and ranking criteria
+
+Week 10-11 ML report endpoint validation:
+
+```bash
+.venv/bin/python data_platform/tests/ml_report_endpoint_check.py
+```
+
+That endpoint check verifies:
+- the backend-only ML report endpoint is available
+- the report is scoped to Polymarket
+- the current selected model is Ridge
+- the tracked Week 10-11 report and client update markdown are included

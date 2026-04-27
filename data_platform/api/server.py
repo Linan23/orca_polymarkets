@@ -61,6 +61,7 @@ from data_platform.services.read_api import (
     user_activity_insights,
     whale_entry_behavior,
 )
+from data_platform.services.ml_reports import week10_11_residual_movement_report
 from data_platform.settings import get_settings
 
 app = FastAPI(
@@ -591,6 +592,12 @@ async def ingestion_status() -> dict[str, object | None]:
             return {"latest_scrape_run": latest_scrape_run(session)}
     except (OSError, SQLAlchemyError) as exc:
         raise _service_error(exc) from exc
+
+
+@app.get("/api/ml/week10-11/residual-movement")
+def get_week10_11_residual_movement_report() -> dict[str, object]:
+    """Return the current Week 10-11 residual whale movement ML report metadata."""
+    return {"report": week10_11_residual_movement_report()}
 
 
 @app.get("/api/markets")

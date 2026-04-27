@@ -183,6 +183,10 @@ On the larger trade-covered backfill, Ridge is the current best residual whale m
 
 Final tracked Week 10-11 report artifact:
 - [`WEEK10_11_RESIDUAL_MOVEMENT_REPORT.md`](WEEK10_11_RESIDUAL_MOVEMENT_REPORT.md)
+- [`CLIENT_ML_UPDATE.md`](CLIENT_ML_UPDATE.md)
+
+Backend report metadata endpoint:
+- `GET /api/ml/week10-11/residual-movement`
 
 | Robustness case | Default model | 12h pick | 24h pick | Interpretation |
 | --- | --- | --- | --- | --- |
