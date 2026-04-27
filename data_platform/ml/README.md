@@ -181,6 +181,9 @@ Current Week 10-11 residual movement claim:
 
 On the larger trade-covered backfill, Ridge is the current best residual whale model for both 12h and 24h movement. Random Forest and conservative LightGBM remain supporting benchmarks. The claim is sensitive to data coverage and crypto up/down segmentation, so reports should mention that model choice changes on the smaller backfill and when crypto up/down markets are excluded.
 
+Final tracked Week 10-11 report artifact:
+- [`WEEK10_11_RESIDUAL_MOVEMENT_REPORT.md`](WEEK10_11_RESIDUAL_MOVEMENT_REPORT.md)
+
 | Robustness case | Default model | 12h pick | 24h pick | Interpretation |
 | --- | --- | --- | --- | --- |
 | Larger backfill, seed 42 | `ridge` | `ridge` | `ridge` | Primary claim case. |
