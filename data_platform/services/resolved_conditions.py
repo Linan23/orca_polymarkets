@@ -39,7 +39,7 @@ _REFRESH_RESOLVED_CONDITIONS_SQL = text(
         AND mc.outcome_b_label IS NOT NULL
         AND LOWER(TRIM(mc.outcome_a_label)) <> LOWER(TRIM(mc.outcome_b_label))
     ),
-    trade_stats AS (
+    closed_market_trade_stats AS (
       SELECT
         cm.platform_id,
         cm.condition_ref,
@@ -56,14 +56,43 @@ _REFRESH_RESOLVED_CONDITIONS_SQL = text(
         AND tf.price IS NOT NULL
       GROUP BY cm.platform_id, cm.condition_ref, LOWER(TRIM(tf.outcome_label))
     ),
-    condition_trade_counts AS (
+    closed_market_trade_counts AS (
       SELECT
         platform_id,
         condition_ref,
         SUM(trade_count)::integer AS trade_count,
         MAX(latest_trade_time) AS latest_trade_time
-      FROM trade_stats
+      FROM closed_market_trade_stats
       GROUP BY platform_id, condition_ref
+    ),
+    broad_trade_stats AS (
+      SELECT
+        tf.platform_id,
+        mc.condition_ref,
+        LOWER(TRIM(tf.outcome_label)) AS outcome_label,
+        MAX(tf.price) AS max_trade_price,
+        MIN(tf.price) AS min_trade_price,
+        COUNT(*) AS trade_count,
+        MAX(tf.transaction_time) AS latest_trade_time
+      FROM analytics.transaction_fact tf
+      JOIN analytics.market_contract mc
+        ON mc.market_contract_id = tf.market_contract_id
+      JOIN polymarket p
+        ON p.platform_id = tf.platform_id
+      WHERE mc.condition_ref IS NOT NULL
+        AND tf.outcome_label IS NOT NULL
+        AND tf.price IS NOT NULL
+      GROUP BY tf.platform_id, mc.condition_ref, LOWER(TRIM(tf.outcome_label))
+    ),
+    broad_binary_conditions AS (
+      SELECT
+        platform_id,
+        condition_ref,
+        SUM(trade_count)::integer AS trade_count,
+        MAX(latest_trade_time) AS latest_trade_time
+      FROM broad_trade_stats
+      GROUP BY platform_id, condition_ref
+      HAVING COUNT(DISTINCT outcome_label) = 2
     ),
     last_trade_candidates AS (
       SELECT
@@ -81,7 +110,7 @@ _REFRESH_RESOLVED_CONDITIONS_SQL = text(
         0.7500::numeric AS confidence,
         1 AS priority
       FROM closed_markets cm
-      LEFT JOIN condition_trade_counts ctc
+      LEFT JOIN closed_market_trade_counts ctc
         ON ctc.platform_id = cm.platform_id
        AND ctc.condition_ref = cm.condition_ref
       WHERE cm.last_trade_price >= :price_high
@@ -89,34 +118,29 @@ _REFRESH_RESOLVED_CONDITIONS_SQL = text(
     ),
     trade_pair_candidates AS (
       SELECT
-        cm.platform_id,
-        cm.condition_ref,
+        ctc.platform_id,
+        ctc.condition_ref,
         'trade_price_extreme_fallback'::text AS resolver_method,
         winner.outcome_label AS winning_outcome_label,
-        COALESCE(cm.resolved_at, ctc.latest_trade_time) AS resolved_at,
+        ctc.latest_trade_time AS resolved_at,
         winner.max_trade_price AS max_winning_price,
         loser.min_trade_price AS min_losing_price,
         COALESCE(ctc.trade_count, 0) AS trade_count,
         0.6000::numeric AS confidence,
         2 AS priority,
         ROW_NUMBER() OVER (
-          PARTITION BY cm.platform_id, cm.condition_ref
+          PARTITION BY ctc.platform_id, ctc.condition_ref
           ORDER BY winner.max_trade_price DESC, loser.min_trade_price ASC, COALESCE(ctc.trade_count, 0) DESC
         ) AS rn
-      FROM closed_markets cm
-      JOIN trade_stats winner
-        ON winner.platform_id = cm.platform_id
-       AND winner.condition_ref = cm.condition_ref
-      JOIN trade_stats loser
-        ON loser.platform_id = cm.platform_id
-       AND loser.condition_ref = cm.condition_ref
+      FROM broad_binary_conditions ctc
+      JOIN broad_trade_stats winner
+        ON winner.platform_id = ctc.platform_id
+       AND winner.condition_ref = ctc.condition_ref
+      JOIN broad_trade_stats loser
+        ON loser.platform_id = ctc.platform_id
+       AND loser.condition_ref = ctc.condition_ref
        AND loser.outcome_label <> winner.outcome_label
-      LEFT JOIN condition_trade_counts ctc
-        ON ctc.platform_id = cm.platform_id
-       AND ctc.condition_ref = cm.condition_ref
-      WHERE winner.outcome_label IN (cm.outcome_a_label, cm.outcome_b_label)
-        AND loser.outcome_label IN (cm.outcome_a_label, cm.outcome_b_label)
-        AND winner.max_trade_price >= :price_high
+      WHERE winner.max_trade_price >= :price_high
         AND loser.min_trade_price <= :price_low
     ),
     candidates AS (
