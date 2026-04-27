@@ -710,6 +710,8 @@ To build the preliminary whale score snapshot:
 ```bash
 .venv/bin/python refresh_resolved_conditions.py
 .venv/bin/python build_whale_scores.py
+.venv/bin/python build_dashboard_snapshot.py
+.venv/bin/python build_home_summary_snapshot.py
 ```
 
 Current profitability and resolution logic:

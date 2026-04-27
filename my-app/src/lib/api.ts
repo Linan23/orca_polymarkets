@@ -454,6 +454,9 @@ export type FollowingDashboard = {
 };
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
+const HOME_SUMMARY_CLIENT_CACHE_MS = 60_000;
+
+let homeSummaryClientCache: { expiresAt: number; value: HomeSummary } | null = null;
 
 export class ApiError extends Error {
   status: number;
@@ -629,7 +632,15 @@ export async function fetchMarketProfile(marketSlug: string): Promise<MarketProf
 }
 
 export async function fetchHomeSummary(): Promise<HomeSummary> {
+  const now = Date.now();
+  if (homeSummaryClientCache && homeSummaryClientCache.expiresAt > now) {
+    return homeSummaryClientCache.value;
+  }
   const payload = await fetchJson<{ summary: HomeSummary }>("/api/home/summary");
+  homeSummaryClientCache = {
+    expiresAt: Date.now() + HOME_SUMMARY_CLIENT_CACHE_MS,
+    value: payload.summary,
+  };
   return payload.summary;
 }
 

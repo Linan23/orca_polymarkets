@@ -23,6 +23,7 @@ from data_platform.models import (
     UserProfile,
     WhaleScoreSnapshot,
 )
+from data_platform.services.home_summary_snapshot import latest_home_summary_snapshot_payload
 from data_platform.services.whale_scoring import load_resolved_market_outcomes, load_resolved_user_performance
 from data_platform.settings import get_settings
 
@@ -592,6 +593,14 @@ def latest_dashboard_markets(session: Session, limit: int = DEFAULT_LIMIT) -> di
 
 def home_summary(session: Session) -> dict[str, Any]:
     """Return a compact homepage summary for the React dashboard."""
+    cached_summary = latest_home_summary_snapshot_payload(session)
+    if cached_summary is not None:
+        return cached_summary
+    return _live_home_summary(session)
+
+
+def _live_home_summary(session: Session) -> dict[str, Any]:
+    """Fallback summary path used before the first cached snapshot is built."""
     latest_batch = _latest_whale_batch(session)
     whales_detected = 0
     trusted_whales = 0

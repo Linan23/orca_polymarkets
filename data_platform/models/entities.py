@@ -680,6 +680,26 @@ class Dashboard(Base):
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
 
 
+class HomeSummarySnapshot(Base):
+    __tablename__ = "home_summary_snapshot"
+    __table_args__ = (
+        Index("ix_home_summary_snapshot_generated_at", "generated_at"),
+        {"schema": "analytics"},
+    )
+
+    home_summary_snapshot_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    generated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), nullable=False)
+    scoring_version: Mapped[str | None] = mapped_column(String(64))
+    whales_detected: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    trusted_whales: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    resolved_markets_available: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    resolved_markets_observed: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    profitability_users: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    latest_successful_ingest_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True))
+    summary_payload: Mapped[dict] = mapped_column(JSON_VARIANT, nullable=False)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
 class DashboardMarket(Base):
     __tablename__ = "dashboard_market"
     __table_args__ = (

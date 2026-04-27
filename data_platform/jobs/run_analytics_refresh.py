@@ -48,6 +48,7 @@ def main() -> int:
             ("refresh_resolved_conditions", [py, "refresh_resolved_conditions.py"]),
             ("build_whale_scores", [py, "build_whale_scores.py"]),
             ("build_dashboard_snapshot", [py, "build_dashboard_snapshot.py"]),
+            ("build_home_summary_snapshot", [py, "build_home_summary_snapshot.py"]),
         ):
             started = time.monotonic()
             completed = subprocess.run(command, cwd=ROOT_DIR, env=env, text=True, capture_output=True)
