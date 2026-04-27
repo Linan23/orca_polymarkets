@@ -313,6 +313,13 @@ Compare Random Forest and LightGBM on the same grouped market split:
 .venv/bin/python data_platform/jobs/compare_market_model_families.py
 ```
 
+Compare residual whale movement model families for the Week 10-11 claim model:
+
+```bash
+.venv/bin/python data_platform/jobs/compare_market_movement_residual_models.py --regime trade_covered
+.venv/bin/python data_platform/jobs/compare_market_movement_residual_models.py --estimators random_forest,ridge,lightgbm,lightgbm_conservative --regime trade_covered
+```
+
 Analyze residual whale signal beyond price:
 
 ```bash

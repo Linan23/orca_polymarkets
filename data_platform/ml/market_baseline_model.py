@@ -55,6 +55,12 @@ DEFAULT_WEEK10_11_MOVEMENT_REPORT_PATH = Path("data_platform/runtime/ml/week10_1
 DEFAULT_WHALE_FEATURE_ABLATION_REPORT_PATH = Path("data_platform/runtime/ml/market_whale_feature_ablation_report.json")
 DEFAULT_MOVEMENT_RESIDUAL_REPORT_PATH = Path("data_platform/runtime/ml/market_movement_residual_report.json")
 DEFAULT_WEEK10_11_RESIDUAL_REPORT_PATH = Path("data_platform/runtime/ml/week10_11_market_movement_residual_report.md")
+DEFAULT_MOVEMENT_RESIDUAL_MODEL_COMPARISON_PATH = Path(
+    "data_platform/runtime/ml/market_movement_residual_model_comparison.json"
+)
+DEFAULT_WEEK10_11_RESIDUAL_MODEL_COMPARISON_PATH = Path(
+    "data_platform/runtime/ml/week10_11_market_movement_residual_model_comparison.md"
+)
 ROLLING_MIN_TRAIN_FRACTION = 0.5
 ROLLING_TEST_WINDOW_FRACTION = 0.15
 PRICE_SATURATION_THRESHOLD = 0.98
@@ -67,6 +73,7 @@ FEATURE_SELECTION_MIN_ABS_CORRELATION = 0.015
 FEATURE_SELECTION_MAX_WHALE_FEATURES = 24
 RESIDUAL_SELECTOR_THRESHOLDS = (0.01, 0.02, 0.05)
 RESIDUAL_SELECTOR_MAX_FEATURES = (8, 16, 24)
+RESIDUAL_MODEL_COMPARISON_ESTIMATORS = ("random_forest", "ridge", "lightgbm")
 RESIDUAL_NEAR_BEST_RMSE_TOLERANCE = 0.0006
 RESIDUAL_SEGMENT_MIN_ROWS = 20
 RESIDUAL_RIDGE_PARAMS = {
@@ -88,6 +95,20 @@ RESIDUAL_LIGHTGBM_PARAMS = {
     "colsample_bytree": 0.75,
     "reg_lambda": 5.0,
     "reg_alpha": 0.25,
+    "verbose": -1,
+}
+RESIDUAL_LIGHTGBM_CONSERVATIVE_PARAMS = {
+    "n_estimators": 120,
+    "learning_rate": 0.02,
+    "num_leaves": 7,
+    "max_depth": 3,
+    "min_child_samples": 30,
+    "subsample": 0.65,
+    "colsample_bytree": 0.65,
+    "reg_lambda": 12.0,
+    "reg_alpha": 1.0,
+    "min_split_gain": 0.01,
+    "verbose": -1,
 }
 MOVEMENT_TUNING_PROFILES: tuple[dict[str, Any], ...] = (
     {
@@ -2982,14 +3003,17 @@ def _fold_rmse_delta_summary(folds: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def _residual_estimator_params(estimator_type: str) -> dict[str, Any]:
+def _residual_estimator_params(estimator_type: str, overrides: dict[str, Any] | None = None) -> dict[str, Any]:
     """Return the regularized estimator params used for residual experiments."""
     estimator_type = _normalize_estimator_type(estimator_type)
     if estimator_type == "random_forest":
-        return dict(RESIDUAL_RANDOM_FOREST_PARAMS)
-    if estimator_type == "ridge":
-        return dict(RESIDUAL_RIDGE_PARAMS)
-    return dict(RESIDUAL_LIGHTGBM_PARAMS)
+        params = dict(RESIDUAL_RANDOM_FOREST_PARAMS)
+    elif estimator_type == "ridge":
+        params = dict(RESIDUAL_RIDGE_PARAMS)
+    else:
+        params = dict(RESIDUAL_LIGHTGBM_PARAMS)
+    params.update(overrides or {})
+    return params
 
 
 def _predict_estimator(model: Any, features: list[list[float]]) -> list[float]:
@@ -3009,6 +3033,7 @@ def _residual_split_report(
     test_rows: list[dict[str, Any]],
     task: str,
     estimator_type: str,
+    estimator_params: dict[str, Any] | None,
     random_state: int,
     min_abs_correlation: float,
     max_selected_whale_features: int,
@@ -3016,7 +3041,7 @@ def _residual_split_report(
     """Fit price-only movement first, then fit whale features against the residual target."""
     task = _normalize_task(task)
     estimator_type = _normalize_estimator_type(estimator_type)
-    estimator_params = _residual_estimator_params(estimator_type)
+    estimator_params = _residual_estimator_params(estimator_type, estimator_params)
     y_train = _targets(train_rows, task)
     y_test = _targets(test_rows, task)
 
@@ -3143,6 +3168,7 @@ def _residual_rolling_report(
     rows: list[dict[str, Any]],
     task: str,
     estimator_type: str,
+    estimator_params: dict[str, Any] | None,
     random_state: int,
     min_abs_correlation: float,
     max_selected_whale_features: int,
@@ -3156,6 +3182,7 @@ def _residual_rolling_report(
             test_rows=split_definition["test_rows"],
             task=task,
             estimator_type=estimator_type,
+            estimator_params=estimator_params,
             random_state=random_state,
             min_abs_correlation=min_abs_correlation,
             max_selected_whale_features=max_selected_whale_features,
@@ -3202,6 +3229,7 @@ def _residual_config_report(
     rows: list[dict[str, Any]],
     task: str,
     estimator_type: str,
+    estimator_params: dict[str, Any] | None,
     train_fraction: float,
     random_state: int,
     min_abs_correlation: float,
@@ -3214,6 +3242,7 @@ def _residual_config_report(
         test_rows=test_rows,
         task=task,
         estimator_type=estimator_type,
+        estimator_params=estimator_params,
         random_state=random_state,
         min_abs_correlation=min_abs_correlation,
         max_selected_whale_features=max_selected_whale_features,
@@ -3231,6 +3260,7 @@ def _residual_config_report(
         rows=rows,
         task=task,
         estimator_type=estimator_type,
+        estimator_params=estimator_params,
         random_state=random_state,
         min_abs_correlation=min_abs_correlation,
         max_selected_whale_features=max_selected_whale_features,
@@ -3613,6 +3643,8 @@ def analyze_market_movement_residuals(
     report_path: Path | None = None,
     markdown_path: Path | None = None,
     estimator_type: str = "random_forest",
+    estimator_params: dict[str, Any] | None = None,
+    estimator_profile: str | None = None,
     train_fraction: float = 0.75,
     random_state: int = 42,
     min_horizon_hours: float | None = None,
@@ -3626,6 +3658,8 @@ def analyze_market_movement_residuals(
     """Analyze whether whale features can explain movement residuals left by price-only."""
     _require_ml_dependencies()
     estimator_type = _normalize_estimator_type(estimator_type)
+    resolved_estimator_params = _residual_estimator_params(estimator_type, estimator_params)
+    estimator_profile = estimator_profile or estimator_type
     regime = _normalize_regime(regime)
     dataset_path = dataset_path or DEFAULT_DATASET_PATH
     report_path = report_path or DEFAULT_MOVEMENT_RESIDUAL_REPORT_PATH
@@ -3663,6 +3697,7 @@ def analyze_market_movement_residuals(
                 rows=filtered_rows,
                 task=task,
                 estimator_type=estimator_type,
+                estimator_params=resolved_estimator_params,
                 train_fraction=train_fraction,
                 random_state=random_state,
                 min_abs_correlation=threshold,
@@ -3689,7 +3724,8 @@ def analyze_market_movement_residuals(
         "task": "market_movement_residuals",
         "row_count": len(filtered_rows),
         "estimator_type": estimator_type,
-        "estimator_params": _residual_estimator_params(estimator_type),
+        "estimator_profile": estimator_profile,
+        "estimator_params": resolved_estimator_params,
         "train_fraction": train_fraction,
         "random_state": random_state,
         "min_horizon_hours": min_horizon_hours,
@@ -3721,6 +3757,554 @@ def analyze_market_movement_residuals(
     return {
         "report_path": str(report_path),
         "markdown_path": str(markdown_path),
+        "summary": summary,
+    }
+
+
+def _residual_model_profile_spec(profile_name: str) -> dict[str, Any]:
+    """Resolve a residual model comparison profile name."""
+    profile = _safe_segment_name(profile_name)
+    if profile == "lightgbm_conservative":
+        return {
+            "profile": profile,
+            "estimator_type": "lightgbm",
+            "estimator_params": dict(RESIDUAL_LIGHTGBM_CONSERVATIVE_PARAMS),
+        }
+    estimator_type = _normalize_estimator_type(profile)
+    return {
+        "profile": estimator_type,
+        "estimator_type": estimator_type,
+        "estimator_params": _residual_estimator_params(estimator_type),
+    }
+
+
+def _normalize_residual_model_profiles(estimator_types: tuple[str, ...] | list[str] | None) -> tuple[dict[str, Any], ...]:
+    """Normalize residual model-family comparison profiles while preserving order."""
+    requested = estimator_types or RESIDUAL_MODEL_COMPARISON_ESTIMATORS
+    normalized: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for requested_profile in requested:
+        spec = _residual_model_profile_spec(requested_profile)
+        profile = str(spec["profile"])
+        if profile in seen:
+            continue
+        normalized.append(spec)
+        seen.add(profile)
+    if not normalized:
+        raise RuntimeError("At least one residual model estimator is required.")
+    return tuple(normalized)
+
+
+def _residual_model_detail_stem(
+    *,
+    estimator_type: str,
+    regime: str,
+    research_segments: tuple[str, ...],
+    exclude_market_families: tuple[str, ...],
+) -> str:
+    """Return a stable file stem for per-estimator residual reports."""
+    parts = [estimator_type, regime]
+    if research_segments:
+        parts.append("segments_" + "_".join(research_segments))
+    if exclude_market_families:
+        parts.append("exclude_" + "_".join(exclude_market_families))
+    return _safe_segment_name("_".join(parts))
+
+
+def _residual_comparison_feature_rows(window_summary: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return compact recurring whale feature rows for a residual comparison window."""
+    recommendation = window_summary.get("recommendation", {})
+    feature_summary = (
+        recommendation.get("near_best_whale_feature_stability", {}).get("top_features", [])
+    )
+    source_label = "near_best_configs"
+    if not feature_summary and recommendation.get("selected_config"):
+        selected_config = window_summary.get("configs", {}).get(recommendation["selected_config"], {})
+        feature_summary = (
+            selected_config.get("rolling", {})
+            .get("feature_selection_stability", {})
+            .get("top_stable_whale_features", [])
+        )
+        source_label = "selected_config"
+
+    rows: list[dict[str, Any]] = []
+    for feature in feature_summary[:5]:
+        rows.append(
+            {
+                "feature": feature.get("feature"),
+                "source": source_label,
+                "near_best_config_count": feature.get("config_count") if source_label == "near_best_configs" else None,
+                "selection_frequency": (
+                    feature.get("average_selection_frequency")
+                    if source_label == "near_best_configs"
+                    else feature.get("selection_frequency")
+                ),
+                "average_abs_correlation": feature.get("average_abs_correlation"),
+            }
+        )
+    return rows
+
+
+def _residual_comparison_segment_rows(config: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return compact research-focus segment rows for a residual comparison config."""
+    segments = (
+        config.get("rolling", {})
+        .get("segment_diagnostics", {})
+        .get("research_focus", {})
+    )
+    if not isinstance(segments, dict):
+        return []
+    rows: list[dict[str, Any]] = []
+    for segment_name in sorted(segments):
+        segment = segments[segment_name]
+        if not isinstance(segment, dict) or segment.get("below_min_row_count"):
+            continue
+        lift = segment.get("lift_vs_price_only", {})
+        rmse_delta = lift.get("rmse_delta")
+        rows.append(
+            {
+                "segment": segment_name,
+                "row_count": segment.get("row_count"),
+                "price_only_rmse": segment.get("price_only", {}).get("rmse"),
+                "residual_corrected_rmse": segment.get("residual_corrected", {}).get("rmse"),
+                "rmse_delta": rmse_delta,
+                "whale_lift_demonstrated": bool(lift.get("whale_lift_demonstrated")),
+                "worsens_price_only": rmse_delta is not None and float(rmse_delta) > 0,
+            }
+        )
+    return rows
+
+
+def _residual_comparison_window_row(window_summary: dict[str, Any]) -> dict[str, Any]:
+    """Return a compact model-family comparison row for one 12h/24h residual window."""
+    recommendation = window_summary.get("recommendation", {})
+    selected_config = recommendation.get("selected_config")
+    config_name = selected_config or recommendation.get("best_config")
+    config = window_summary.get("configs", {}).get(config_name, {}) if config_name else {}
+    fold_summary = config.get("rolling", {}).get("fold_rmse_delta_summary", {})
+    price_rmse = (
+        recommendation.get("selected_price_only_rolling_rmse")
+        if selected_config
+        else recommendation.get("best_price_only_rolling_rmse")
+    )
+    residual_rmse = (
+        recommendation.get("selected_residual_corrected_rolling_rmse")
+        if selected_config
+        else recommendation.get("best_residual_corrected_rolling_rmse")
+    )
+    rmse_delta = (
+        recommendation.get("selected_rolling_rmse_delta")
+        if selected_config
+        else recommendation.get("best_rolling_rmse_delta")
+    )
+    segment_rows = _residual_comparison_segment_rows(config)
+    return {
+        "selected_config": selected_config,
+        "raw_best_config": recommendation.get("best_config"),
+        "config_used_for_diagnostics": config_name,
+        "config_source": "selected_whale_config" if selected_config else "raw_best_config",
+        "price_only_rolling_rmse": price_rmse,
+        "residual_corrected_rolling_rmse": residual_rmse,
+        "rmse_delta": rmse_delta,
+        "selected_rolling_rmse_delta": recommendation.get("selected_rolling_rmse_delta"),
+        "raw_best_rolling_rmse_delta": recommendation.get("best_rolling_rmse_delta"),
+        "stable_whale_feature_count": recommendation.get("stable_whale_feature_count", 0),
+        "raw_best_stable_whale_feature_count": recommendation.get("raw_best_stable_whale_feature_count", 0),
+        "whale_lift_demonstrated": bool(recommendation.get("whale_lift_demonstrated")),
+        "fold_count": fold_summary.get("fold_count"),
+        "passing_fold_count": fold_summary.get("passing_fold_count"),
+        "improving_fold_count": fold_summary.get("improving_fold_count"),
+        "normal_approx_95ci_low": fold_summary.get("normal_approx_95ci_low"),
+        "normal_approx_95ci_high": fold_summary.get("normal_approx_95ci_high"),
+        "research_focus_segments": segment_rows,
+        "worsening_research_segment_count": sum(1 for segment in segment_rows if segment["worsens_price_only"]),
+        "recurring_whale_features": _residual_comparison_feature_rows(window_summary),
+    }
+
+
+def _residual_model_score(window_rows: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    """Return ranking inputs for one residual model family."""
+    rows = list(window_rows.values())
+    lift_rows = [row for row in rows if row.get("whale_lift_demonstrated")]
+    selected_deltas = [
+        float(row["selected_rolling_rmse_delta"])
+        for row in lift_rows
+        if row.get("selected_rolling_rmse_delta") is not None
+    ]
+    worsening_deltas = [
+        float(segment["rmse_delta"])
+        for row in rows
+        for segment in row.get("research_focus_segments", [])
+        if segment.get("rmse_delta") is not None and float(segment["rmse_delta"]) > 0
+    ]
+    return {
+        "lift_window_count": len(lift_rows),
+        "required_window_count": len(rows),
+        "all_required_windows_lift": len(lift_rows) == len(rows) and bool(rows),
+        "mean_selected_rmse_delta": (
+            round(sum(selected_deltas) / len(selected_deltas), 6) if selected_deltas else None
+        ),
+        "stable_whale_feature_count_sum": sum(int(row.get("stable_whale_feature_count") or 0) for row in lift_rows),
+        "passing_fold_count_sum": sum(int(row.get("passing_fold_count") or 0) for row in lift_rows),
+        "fold_count_sum": sum(int(row.get("fold_count") or 0) for row in lift_rows),
+        "worsening_research_segment_count": len(worsening_deltas),
+        "max_worsening_rmse_delta": round(max(worsening_deltas), 6) if worsening_deltas else 0.0,
+    }
+
+
+def _residual_model_ranking_key(model_result: dict[str, Any]) -> tuple[Any, ...]:
+    """Return a deterministic comparison ranking key for model-family recommendation."""
+    score = model_result["score"]
+    estimator_type = str(model_result["estimator_type"])
+    estimator_profile = str(model_result.get("estimator_profile") or estimator_type)
+    mean_delta = score.get("mean_selected_rmse_delta")
+    complexity_rank = {"ridge": 0, "random_forest": 1, "lightgbm": 2}.get(estimator_type, 99)
+    return (
+        -int(score.get("lift_window_count") or 0),
+        float(mean_delta) if mean_delta is not None else float("inf"),
+        int(score.get("worsening_research_segment_count") or 0),
+        float(score.get("max_worsening_rmse_delta") or 0.0),
+        -int(score.get("stable_whale_feature_count_sum") or 0),
+        -int(score.get("passing_fold_count_sum") or 0),
+        complexity_rank,
+        estimator_profile,
+    )
+
+
+def _residual_window_ranking_key(model_result: dict[str, Any], window_name: str) -> tuple[Any, ...]:
+    """Return a deterministic comparison ranking key for one prediction window."""
+    window = model_result["windows"].get(window_name, {})
+    selected_delta = window.get("selected_rolling_rmse_delta")
+    diagnostic_delta = window.get("rmse_delta")
+    complexity_rank = {"ridge": 0, "random_forest": 1, "lightgbm": 2}.get(
+        str(model_result["estimator_type"]),
+        99,
+    )
+    estimator_profile = str(model_result.get("estimator_profile") or model_result["estimator_type"])
+    return (
+        0 if window.get("whale_lift_demonstrated") else 1,
+        float(selected_delta) if selected_delta is not None else float("inf"),
+        float(diagnostic_delta) if diagnostic_delta is not None else float("inf"),
+        int(window.get("worsening_research_segment_count") or 0),
+        -int(window.get("stable_whale_feature_count") or 0),
+        -int(window.get("passing_fold_count") or 0),
+        complexity_rank,
+        estimator_profile,
+    )
+
+
+def _residual_model_comparison_recommendation(model_results: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    """Return the default and per-window residual model-family recommendations."""
+    if not model_results:
+        return {
+            "available": False,
+            "default_estimator": None,
+            "reason": "No residual model families were evaluated.",
+        }
+    ranked_models = sorted(model_results.values(), key=_residual_model_ranking_key)
+    default_model = ranked_models[0]
+    window_names = sorted(next(iter(model_results.values())).get("windows", {}).keys())
+    window_recommendations: dict[str, Any] = {}
+    for window_name in window_names:
+        ranked_for_window = sorted(model_results.values(), key=lambda result: _residual_window_ranking_key(result, window_name))
+        best = ranked_for_window[0]
+        best_window = best["windows"].get(window_name, {})
+        window_recommendations[window_name] = {
+            "estimator_profile": best.get("estimator_profile", best["estimator_type"]),
+            "estimator_type": best["estimator_type"],
+            "whale_lift_demonstrated": bool(best_window.get("whale_lift_demonstrated")),
+            "selected_config": best_window.get("selected_config"),
+            "rmse_delta": best_window.get("rmse_delta"),
+            "stable_whale_feature_count": best_window.get("stable_whale_feature_count"),
+            "passing_fold_count": best_window.get("passing_fold_count"),
+            "worsening_research_segment_count": best_window.get("worsening_research_segment_count"),
+        }
+
+    return {
+        "available": True,
+        "default_estimator": default_model.get("estimator_profile", default_model["estimator_type"]),
+        "default_estimator_type": default_model["estimator_type"],
+        "default_score": default_model["score"],
+        "all_required_windows_lift": bool(default_model["score"].get("all_required_windows_lift")),
+        "window_recommendations": window_recommendations,
+        "ranking": [
+            {
+                "estimator_profile": model.get("estimator_profile", model["estimator_type"]),
+                "estimator_type": model["estimator_type"],
+                "score": model["score"],
+            }
+            for model in ranked_models
+        ],
+        "selection_reason": (
+            "Ranked by whale-lift window count, mean selected RMSE delta, fewer worsening research segments, "
+            "stable whale features, passing folds, then model simplicity."
+        ),
+    }
+
+
+def _comparison_markdown_value(value: Any) -> str:
+    """Return a compact markdown-safe value."""
+    if value is None:
+        return "n/a"
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+    return str(value)
+
+
+def _write_week10_11_residual_model_comparison_markdown(summary: dict[str, Any], markdown_path: Path) -> None:
+    """Write a compact side-by-side residual model-family comparison."""
+    markdown_path.parent.mkdir(parents=True, exist_ok=True)
+    recommendation = summary.get("recommendation", {})
+    lines = [
+        "# Week 10-11 Residual Model Family Comparison",
+        "",
+        f"Generated: {summary['generated_at']}",
+        f"Dataset: `{summary['dataset_path']}`",
+        f"Regime: `{summary['regime']}`",
+        f"Rows evaluated: {summary['row_count']}",
+        f"Research segments: `{', '.join(summary.get('research_segments') or ['all'])}`",
+        f"Excluded market families: `{', '.join(summary.get('exclude_market_families') or ['none'])}`",
+        f"Estimators: `{', '.join(summary.get('estimator_types', []))}`",
+        "",
+        "## Recommendation",
+        "",
+        f"- Default claim model: `{recommendation.get('default_estimator')}`.",
+        f"- All 12h/24h windows lift: {_comparison_markdown_value(recommendation.get('all_required_windows_lift'))}.",
+        f"- Selection rule: {recommendation.get('selection_reason')}",
+        "",
+        "## Model Results",
+        "",
+        "| Estimator | Window | Config | Price-only RMSE | Residual RMSE | RMSE delta | Stable whale features | Passing folds | Worsening segments | Whale lift |",
+        "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
+    ]
+    for estimator_type, model_result in summary["models"].items():
+        for window_name, window in model_result["windows"].items():
+            lines.append(
+                "| {estimator} | {window_name} | {config} | {price_rmse} | {residual_rmse} | {delta} | {stable} | {passing}/{folds} | {worsening} | {lift} |".format(
+                    estimator=estimator_type,
+                    window_name=window_name,
+                    config=f"`{window.get('selected_config')}`" if window.get("selected_config") else "none",
+                    price_rmse=_comparison_markdown_value(window.get("price_only_rolling_rmse")),
+                    residual_rmse=_comparison_markdown_value(window.get("residual_corrected_rolling_rmse")),
+                    delta=_comparison_markdown_value(window.get("rmse_delta")),
+                    stable=_comparison_markdown_value(window.get("stable_whale_feature_count")),
+                    passing=_comparison_markdown_value(window.get("passing_fold_count")),
+                    folds=_comparison_markdown_value(window.get("fold_count")),
+                    worsening=_comparison_markdown_value(window.get("worsening_research_segment_count")),
+                    lift=_comparison_markdown_value(window.get("whale_lift_demonstrated")),
+                )
+            )
+
+    lines.extend(
+        [
+            "",
+            "## Window Picks",
+            "",
+            "| Window | Estimator | RMSE delta | Stable whale features | Passing folds | Worsening segments |",
+            "| --- | --- | ---: | ---: | ---: | ---: |",
+        ]
+    )
+    for window_name, window in recommendation.get("window_recommendations", {}).items():
+        lines.append(
+            "| {window} | `{estimator}` | {delta} | {stable} | {passing} | {worsening} |".format(
+                window=window_name,
+                estimator=window.get("estimator_type"),
+                delta=_comparison_markdown_value(window.get("rmse_delta")),
+                stable=_comparison_markdown_value(window.get("stable_whale_feature_count")),
+                passing=_comparison_markdown_value(window.get("passing_fold_count")),
+                worsening=_comparison_markdown_value(window.get("worsening_research_segment_count")),
+            )
+        )
+
+    lines.extend(
+        [
+            "",
+            "## Segment Behavior",
+            "",
+            "| Estimator | Window | Segment | Rows | RMSE delta | Whale lift |",
+            "| --- | --- | --- | ---: | ---: | --- |",
+        ]
+    )
+    for estimator_type, model_result in summary["models"].items():
+        for window_name, window in model_result["windows"].items():
+            for segment in window.get("research_focus_segments", []):
+                lines.append(
+                    "| {estimator} | {window} | `{segment}` | {rows} | {delta} | {lift} |".format(
+                        estimator=estimator_type,
+                        window=window_name,
+                        segment=segment.get("segment"),
+                        rows=_comparison_markdown_value(segment.get("row_count")),
+                        delta=_comparison_markdown_value(segment.get("rmse_delta")),
+                        lift=_comparison_markdown_value(segment.get("whale_lift_demonstrated")),
+                    )
+                )
+
+    lines.extend(
+        [
+            "",
+            "## Recurring Whale Features",
+            "",
+            "| Estimator | Window | Feature | Source | Selection frequency | Avg abs correlation |",
+            "| --- | --- | --- | --- | ---: | ---: |",
+        ]
+    )
+    for estimator_type, model_result in summary["models"].items():
+        for window_name, window in model_result["windows"].items():
+            for feature in window.get("recurring_whale_features", [])[:5]:
+                source = feature.get("source")
+                if source == "near_best_configs":
+                    source = f"{feature.get('near_best_config_count')} near-best configs"
+                lines.append(
+                    "| {estimator} | {window} | `{feature}` | {source} | {frequency} | {correlation} |".format(
+                        estimator=estimator_type,
+                        window=window_name,
+                        feature=feature.get("feature"),
+                        source=source,
+                        frequency=_comparison_markdown_value(feature.get("selection_frequency")),
+                        correlation=_comparison_markdown_value(feature.get("average_abs_correlation")),
+                    )
+                )
+
+    lines.extend(
+        [
+            "",
+            "## Notes",
+            "",
+            "- Each estimator uses the same residual-analysis gates, selector thresholds, feature caps, regime, and segment filters.",
+            "- The default claim model is a report recommendation, not a production deployment switch.",
+            "- Fold confidence intervals are diagnostics over rolling folds, not formal statistical proof.",
+            "",
+            f"JSON report: `{summary['comparison_path']}`",
+        ]
+    )
+    markdown_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def compare_market_movement_residual_model_families(
+    *,
+    dataset_path: Path | None = None,
+    comparison_path: Path | None = None,
+    markdown_path: Path | None = None,
+    estimator_types: tuple[str, ...] | list[str] | None = None,
+    train_fraction: float = 0.75,
+    random_state: int = 42,
+    min_horizon_hours: float | None = None,
+    max_horizon_hours: float | None = None,
+    regime: str = REGIME_TRADE_COVERED,
+    research_segments: tuple[str, ...] | list[str] | None = None,
+    exclude_market_families: tuple[str, ...] | list[str] | None = None,
+    selector_thresholds: tuple[float, ...] | list[float] | None = None,
+    selector_max_features: tuple[int, ...] | list[int] | None = None,
+) -> dict[str, Any]:
+    """Compare residual whale movement model families side by side for Week 10-11 claims."""
+    dataset_path = dataset_path or DEFAULT_DATASET_PATH
+    comparison_path = comparison_path or DEFAULT_MOVEMENT_RESIDUAL_MODEL_COMPARISON_PATH
+    markdown_path = markdown_path or DEFAULT_WEEK10_11_RESIDUAL_MODEL_COMPARISON_PATH
+    comparison_path.parent.mkdir(parents=True, exist_ok=True)
+    detail_report_dir = comparison_path.parent / "market_movement_residual_model_reports"
+    detail_report_dir.mkdir(parents=True, exist_ok=True)
+
+    model_specs = _normalize_residual_model_profiles(estimator_types)
+    regime = _normalize_regime(regime)
+    selected_research_segments = _normalize_segment_filter(research_segments)
+    excluded_market_families = _normalize_segment_filter(exclude_market_families)
+    thresholds = tuple(float(value) for value in (selector_thresholds or RESIDUAL_SELECTOR_THRESHOLDS))
+    max_features_values = tuple(int(value) for value in (selector_max_features or RESIDUAL_SELECTOR_MAX_FEATURES))
+
+    model_results: dict[str, dict[str, Any]] = {}
+    row_count: int | None = None
+    for model_spec in model_specs:
+        estimator_profile = str(model_spec["profile"])
+        estimator_type = str(model_spec["estimator_type"])
+        estimator_params = dict(model_spec["estimator_params"])
+        stem = _residual_model_detail_stem(
+            estimator_type=estimator_profile,
+            regime=regime,
+            research_segments=selected_research_segments,
+            exclude_market_families=excluded_market_families,
+        )
+        estimator_report_path = detail_report_dir / f"market_movement_residual_report_{stem}.json"
+        estimator_markdown_path = detail_report_dir / f"week10_11_market_movement_residual_report_{stem}.md"
+        result = analyze_market_movement_residuals(
+            dataset_path=dataset_path,
+            report_path=estimator_report_path,
+            markdown_path=estimator_markdown_path,
+            estimator_type=estimator_type,
+            estimator_profile=estimator_profile,
+            estimator_params=estimator_params,
+            train_fraction=train_fraction,
+            random_state=random_state,
+            min_horizon_hours=min_horizon_hours,
+            max_horizon_hours=max_horizon_hours,
+            regime=regime,
+            research_segments=selected_research_segments,
+            exclude_market_families=excluded_market_families,
+            selector_thresholds=thresholds,
+            selector_max_features=max_features_values,
+        )
+        estimator_summary = result["summary"]
+        row_count = row_count if row_count is not None else int(estimator_summary["row_count"])
+        window_rows = {
+            window_name: _residual_comparison_window_row(window_summary)
+            for window_name, window_summary in estimator_summary.get("windows", {}).items()
+        }
+        model_results[estimator_profile] = {
+            "estimator_profile": estimator_profile,
+            "estimator_type": estimator_type,
+            "estimator_params": estimator_summary.get("estimator_params"),
+            "report_path": result["report_path"],
+            "markdown_path": result["markdown_path"],
+            "row_count": estimator_summary.get("row_count"),
+            "overall_residual_whale_lift_demonstrated": estimator_summary.get(
+                "overall_residual_whale_lift_demonstrated"
+            ),
+            "windows": window_rows,
+            "score": _residual_model_score(window_rows),
+        }
+
+    summary = {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "dataset_path": str(dataset_path),
+        "dataset_version": DATASET_VERSION,
+        "comparison_path": str(comparison_path),
+        "markdown_path": str(markdown_path),
+        "detail_report_dir": str(detail_report_dir),
+        **_regime_summary_context(regime),
+        "task": "market_movement_residual_model_family_comparison",
+        "row_count": row_count,
+        "estimator_types": [str(model_spec["profile"]) for model_spec in model_specs],
+        "train_fraction": train_fraction,
+        "random_state": random_state,
+        "min_horizon_hours": min_horizon_hours,
+        "max_horizon_hours": max_horizon_hours,
+        "research_segments": list(selected_research_segments),
+        "exclude_market_families": list(excluded_market_families),
+        "selector_thresholds": list(thresholds),
+        "selector_max_features": list(max_features_values),
+        "comparison_criteria": [
+            "Prefer models that demonstrate whale-valid lift on both 12h and 24h windows.",
+            "Then prefer lower mean selected RMSE delta across lifted windows.",
+            "Then prefer fewer research-focus segments where residual correction worsens price-only.",
+            "Then prefer more stable recurring whale features and more passing rolling folds.",
+            "Use model simplicity only as a final tie-breaker.",
+        ],
+        "recommendation": _residual_model_comparison_recommendation(model_results),
+        "models": model_results,
+        "assumptions": [
+            "Each model family uses the same residual target construction and selector sweep.",
+            "Price-only is trained first; the whale model predicts only the remaining movement residual.",
+            "The comparison is intended for Week 10-11 claim selection, not for changing production defaults.",
+        ],
+    }
+
+    with comparison_path.open("w", encoding="utf-8") as handle:
+        json.dump(summary, handle, indent=2, sort_keys=True)
+        handle.write("\n")
+    _write_week10_11_residual_model_comparison_markdown(summary, markdown_path)
+    return {
+        "comparison_path": str(comparison_path),
+        "markdown_path": str(markdown_path),
+        "detail_report_dir": str(detail_report_dir),
         "summary": summary,
     }
 

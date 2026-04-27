@@ -170,6 +170,13 @@ Run scoped residual diagnostics:
 .venv/bin/python data_platform/jobs/analyze_market_movement_residuals.py --exclude-family crypto_updown --estimator ridge
 ```
 
+Compare residual model families for the Week 10-11 claim model:
+
+```bash
+.venv/bin/python data_platform/jobs/compare_market_movement_residual_models.py --regime trade_covered
+.venv/bin/python data_platform/jobs/compare_market_movement_residual_models.py --estimators random_forest,ridge,lightgbm,lightgbm_conservative --regime trade_covered
+```
+
 Train the grouped time-aware market baseline:
 
 ```bash
