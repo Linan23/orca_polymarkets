@@ -55,7 +55,8 @@ services:
       - ..:/workspace
       - react_node_modules:/workspace/my-app/node_modules
     environment:
-      VITE_API_BASE_URL: http://139.147.9.248:8001
+      VITE_API_BASE_URL: ""
+      VITE_PROXY_API_TARGET: http://data_platform_api:8001
     depends_on:
       - data_platform_api
 

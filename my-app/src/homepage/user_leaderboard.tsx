@@ -13,6 +13,7 @@ import {
   matchesUserIdentityQuery,
 } from "../lib/userIdentity";
 import { useApiData } from "../hooks/useApiData";
+import { formatProfitabilityScorePercent, formatTrustScorePercent } from "../lib/scoreFormatting";
 
 function getRankClass(rank: number) {
   if (rank === 1) return "gold";
@@ -55,11 +56,11 @@ function UserRows({ items }: { items: WhaleScoreRow[] }) {
                   </div>
                 </div>
 
-                <div className="leaderboard-score">{user.trust_score.toFixed(3)}</div>
+                <div className="leaderboard-score">{formatTrustScorePercent(user.trust_score)}</div>
               </div>
 
               <div className="leaderboard-meta">
-                <span className="meta-pill">Profit {user.profitability_score.toFixed(3)}</span>
+                <span className="meta-pill">Profit {formatProfitabilityScorePercent(user.profitability_score)}</span>
                 <span className={`meta-pill ${deriveWhaleTierPillClass(tier)}`}>
                   {deriveWhaleTierLabel(tier)}
                 </span>

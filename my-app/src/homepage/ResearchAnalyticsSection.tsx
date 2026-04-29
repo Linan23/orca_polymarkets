@@ -21,13 +21,14 @@ import {
   deriveWhaleTierPillClass,
   matchesUserIdentityQuery,
 } from "../lib/userIdentity";
+import {
+  formatContractPrice,
+  formatContractPriceDelta,
+  formatProbabilityPercent,
+} from "../lib/marketFormatting";
+import { formatProfitabilityScorePercent, formatTrustScorePercent } from "../lib/scoreFormatting";
 
 const RESEARCH_CARD_LIMIT = 5;
-
-function formatPercent(value: number | null) {
-  if (value === null) return "--";
-  return `${(value * 100).toFixed(1)}%`;
-}
 
 function formatCurrency(value: number) {
   return new Intl.NumberFormat("en-US", {
@@ -54,12 +55,6 @@ function formatDateTime(value: string | null) {
     hour: "numeric",
     minute: "2-digit",
   }).format(date);
-}
-
-function formatPointDelta(value: number | null) {
-  if (value === null) return "--";
-  const points = value * 100;
-  return `${points > 0 ? "+" : ""}${points.toFixed(1)} pts`;
 }
 
 function leanClass(label: string) {
@@ -160,10 +155,10 @@ function ResearchUserRows({
                 <div className="leaderboard-score">{formatCurrency(user.realized_pnl)}</div>
               </div>
               <div className="leaderboard-meta">
-                <span className="meta-pill">ROI {formatPercent(user.realized_roi)}</span>
-                <span className="meta-pill">Win {formatPercent(user.win_rate)}</span>
-                <span className="meta-pill">Trust {user.trust_score.toFixed(3)}</span>
-                <span className="meta-pill">Profit {user.profitability_score.toFixed(3)}</span>
+                <span className="meta-pill">ROI {formatProbabilityPercent(user.realized_roi)}</span>
+                <span className="meta-pill">Win {formatProbabilityPercent(user.win_rate)}</span>
+                <span className="meta-pill">Trust {formatTrustScorePercent(user.trust_score)}</span>
+                <span className="meta-pill">Profit {formatProfitabilityScorePercent(user.profitability_score)}</span>
                 <span className="meta-pill">
                   Avg P&amp;L {avgResolvedPnl === null ? "--" : formatCurrency(avgResolvedPnl)}
                 </span>
@@ -211,7 +206,7 @@ function ResearchMarketRows({
                 </Link>
                 <div className="leaderboard-subtext">{market.platform_name} · {market.market_slug}</div>
               </div>
-              <div className="leaderboard-price">{formatPercent(market.price)}</div>
+              <div className="leaderboard-price">Yes {formatContractPrice(market.price)}</div>
             </div>
             <div className="leaderboard-meta">
               <span className="meta-pill">Whale Traders {market.whale_count}</span>
@@ -260,7 +255,7 @@ function ResearchRecentEntryRows({
                 </Link>
                 <div className="leaderboard-subtext">{market.platform_name} · {market.market_slug}</div>
               </div>
-              <div className="leaderboard-price">{formatPercent(market.price)}</div>
+              <div className="leaderboard-price">Yes {formatContractPrice(market.price)}</div>
             </div>
             <div className="leaderboard-meta">
               <span className="meta-pill">Whale Traders {market.whale_count}</span>
@@ -315,12 +310,12 @@ function ResearchEntryRows({
                     {identity.secondary} · {user.entry_trade_count} buy entries · {user.distinct_markets} markets
                   </div>
                 </div>
-                <div className="leaderboard-score">{formatPercent(user.weighted_avg_entry_price)}</div>
+                <div className="leaderboard-score">Buy {formatContractPrice(user.weighted_avg_entry_price)}</div>
               </div>
               <div className="leaderboard-meta">
-                <span className="meta-pill">Now {formatPercent(user.weighted_current_price)}</span>
+                <span className="meta-pill">Current Price {formatContractPrice(user.weighted_current_price)}</span>
                 <span className={`meta-pill ${entryEdgeClass}`}>
-                  Price vs Entry {formatPointDelta(user.entry_edge)}
+                  Current vs Avg Buy {formatContractPriceDelta(user.entry_edge)}
                 </span>
                 <span className={`meta-pill ${leanClass(entryBiasLabel)}`}>{entryBiasLabel}</span>
                 <span className="meta-pill">Yes Buys {user.yes_entry_trade_count}</span>

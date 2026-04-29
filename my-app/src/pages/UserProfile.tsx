@@ -13,6 +13,8 @@ import {
   fetchUserActivityInsights,
   fetchUserWhaleProfile,
 } from "../lib/api";
+import { formatContractPrice, formatProbabilityPercent } from "../lib/marketFormatting";
+import { formatProfitabilityScorePercent, formatTrustScorePercent } from "../lib/scoreFormatting";
 import { deriveUserIdentity, deriveWhaleTierLabel } from "../lib/userIdentity";
 import {
   HourlyActivityChart,
@@ -42,8 +44,7 @@ function formatSignedCurrency(value: number | null | undefined) {
 }
 
 function formatPercent(value: number | null | undefined) {
-  if (value === null || value === undefined) return "--";
-  return `${(value * 100).toFixed(1)}%`;
+  return formatProbabilityPercent(value);
 }
 
 function formatCompactNumber(value: number | null | undefined) {
@@ -164,11 +165,11 @@ function OverviewTab({
           <div className="info-list">
             <div>
               <span>Trust Score</span>
-              <strong>{score ? score.trust_score.toFixed(3) : "--"}</strong>
+              <strong>{formatTrustScorePercent(score?.trust_score)}</strong>
             </div>
             <div>
               <span>Profitability Score</span>
-              <strong>{score ? score.profitability_score.toFixed(3) : "--"}</strong>
+              <strong>{formatProfitabilityScorePercent(score?.profitability_score)}</strong>
             </div>
             <div>
               <span>Sample Trades</span>
@@ -244,7 +245,7 @@ function RecentTradesTable({ trades }: { trades: RecentTradeRow[] }) {
             <th>Time</th>
             <th>Market</th>
             <th>Outcome</th>
-            <th>Price</th>
+            <th>Price Paid</th>
             <th>Shares</th>
             <th>Notional</th>
           </tr>
@@ -259,7 +260,7 @@ function RecentTradesTable({ trades }: { trades: RecentTradeRow[] }) {
                 </Link>
               </td>
               <td>{trade.outcome_label ?? "--"}</td>
-              <td>{formatPercent(trade.price)}</td>
+              <td>{formatContractPrice(trade.price)}</td>
               <td>{formatCompactNumber(trade.shares)}</td>
               <td>{formatCurrency(trade.notional_value)}</td>
             </tr>
@@ -283,8 +284,8 @@ function CurrentPositionsTable({ positions }: { positions: CurrentPositionRow[] 
             <th>Market</th>
             <th>Snapshot</th>
             <th>Size</th>
-            <th>Avg Entry</th>
-            <th>Mark</th>
+            <th>Avg Entry Price</th>
+            <th>Current Price</th>
             <th>Value</th>
             <th>Unrealized P&amp;L</th>
           </tr>
@@ -299,8 +300,8 @@ function CurrentPositionsTable({ positions }: { positions: CurrentPositionRow[] 
               </td>
               <td>{formatDateTime(position.snapshot_time)}</td>
               <td>{formatCompactNumber(position.position_size)}</td>
-              <td>{formatPercent(position.avg_entry_price)}</td>
-              <td>{formatPercent(position.current_mark_price)}</td>
+              <td>{formatContractPrice(position.avg_entry_price)}</td>
+              <td>{formatContractPrice(position.current_mark_price)}</td>
               <td>{formatCurrency(position.market_value)}</td>
               <td>{formatSignedCurrency(position.unrealized_pnl)}</td>
             </tr>
@@ -380,80 +381,112 @@ export default function UserProfile() {
 
   return (
     <div className="page user-profile-page">
-<div className="profile-top-actions">
-  <Link to="/leaderboard" className="table-link back-link">
-    ← Back to leaderboard
-  </Link>
+      <header className="hero market-hero user-hero">
+        <div className="hero-top-row">
+          <div className="profile-title-stack">
+            <p className="eyebrow">Trader Profile</p>
+            <h1 className="market-title">{primary}</h1>
+            <p className="profile-secondary-line">{secondary}</p>
+            <p className="hero-text">
+              Trader intelligence view with whale scoring, market-preference analytics, and recent position history.
+            </p>
+          </div>
 
-  <FollowButton
-    isFollowing={isUserFollowed(parsedUserId)}
-    onToggle={() => toggleUser(parsedUserId)}
-  />
-</div>
+          <div className="hero-action-stack">
+            <FollowButton
+              isFollowing={isUserFollowed(parsedUserId)}
+              onToggle={() => toggleUser(parsedUserId)}
+            />
+          </div>
+        </div>
 
-<header className="profile-info-panel profile-dashboard">
-  {/* LEFT */}
-  <aside className="profile-user-column profile-card">
-    <div className="profile-avatar">
-      {primary.slice(0, 2).toUpperCase()}
-    </div>
+        <div className="hero-actions">
+          <Link to="/leaderboard" className="table-link back-link">
+            ← Back to leaderboard
+          </Link>
 
-    <h3>{primary}</h3>
-    <p>{secondary}</p>
-
-    <div className="profile-left-tags">
-      <span className="profile-user-tag">User #{data?.user_id}</span>
-
-      <span className="profile-user-tag tier-tag">
-        {deriveWhaleTierLabel(traderTierSource)}
-      </span>
-
-      <span className="profile-user-tag">
-        {data?.is_likely_insider ? "Insider" : "Not Insider"}
-      </span>
-
-      <span className="profile-user-tag">
-        Profitability: {formatPercent(score?.profitability_score)}
-      </span>
-    </div>
-  </aside>
-
-  {/* RIGHT */}
-<section className="profile-metrics">
-  {/* BIG P&L */}
-  <div className={`pnl-hero ${pnlClass(resolved?.realized_pnl)}`}>
-    <span>Realized P&amp;L</span>
-
-    <strong>
-      {formatSignedCurrency(resolved?.realized_pnl)}
-    </strong>
-
-  </div>
-
-  {/* small cards */}
-  <div className="metric-card">
-    <span>Trust Score</span>
-    <strong>{score ? score.trust_score.toFixed(3) : "--"}</strong>
-  </div>
-
-  <div className="metric-card">
-    <span>ROI</span>
-    <strong>{formatPercent(resolved?.realized_roi)}</strong>
-  </div>
-
-  <div className="metric-card">
-    <span>Win Rate</span>
-    <strong>{formatPercent(resolved?.win_rate)}</strong>
-  </div>
-</section>
-</header>
+          {data && (
+            <div className="hero-pills">
+              <span className="hero-pill">User #{data.user_id}</span>
+              <span className="hero-pill">{deriveWhaleTierLabel(traderTierSource)}</span>
+              <span className="hero-pill">Trades {score?.sample_trade_count ?? 0}</span>
+            </div>
+          )}
+        </div>
+      </header>
 
       {loading && <section className="status-panel">Loading trader intelligence...</section>}
       {error && <section className="status-panel error-panel">{error}</section>}
 
       {!loading && !error && data && (
         <>
-  
+          <section className="trader-overview-box">
+            <div className="trader-overview-main">
+              <div className="trader-pnl-row">
+                <p className={`trader-pnl ${pnlClass(resolved?.realized_pnl)}`}>
+                  {formatSignedCurrency(resolved?.realized_pnl)}
+                </p>
+                <div className="hero-pills">
+                  <span className="hero-pill">ROI {formatPercent(resolved?.realized_roi)}</span>
+                  <span className="hero-pill">Win Rate {formatPercent(resolved?.win_rate)}</span>
+                  <span className="hero-pill">Resolved {resolved?.resolved_market_count ?? 0}</span>
+                </div>
+              </div>
+
+              <div className="overview-inline-metrics">
+                <div className="inline-metric">
+                  <span>Trust Score</span>
+                  <strong>{formatTrustScorePercent(score?.trust_score)}</strong>
+                </div>
+                <div className="inline-metric">
+                  <span>Profitability</span>
+                  <strong>{formatProfitabilityScorePercent(score?.profitability_score)}</strong>
+                </div>
+                <div className="inline-metric">
+                  <span>Resolved Markets</span>
+                  <strong>{resolved?.resolved_market_count ?? 0}</strong>
+                </div>
+                <div className="inline-metric">
+                  <span>Win Rate</span>
+                  <strong>{formatPercent(resolved?.win_rate)}</strong>
+                </div>
+              </div>
+
+              <div className="overview-bottom-grid">
+                <div className="overview-info-block">
+                  <span className="overview-label">Wallet Identity</span>
+                  <strong className="wallet-identity-text">{secondary}</strong>
+                  <small>{primary}</small>
+                </div>
+                <div className="overview-info-block">
+                  <span className="overview-label">Dashboard Volume</span>
+                  <strong>{formatCurrency(dashboard?.total_volume)}</strong>
+                  <small>Shares {formatCompactNumber(dashboard?.total_shares)}</small>
+                </div>
+                <div className="overview-info-block">
+                  <span className="overview-label">Insider Flag</span>
+                  <strong>{data.is_likely_insider ? "Flagged" : "Not flagged"}</strong>
+                  <small>Excluded markets {resolved?.excluded_market_count ?? 0}</small>
+                </div>
+                <div className="overview-info-block">
+                  <span className="overview-label">Latest Activity</span>
+                  <strong>{formatDateTime(insights?.summary.latest_trade_time)}</strong>
+                  <small>{insights?.summary.trade_count ?? 0} trades in the selected timeframe</small>
+                </div>
+              </div>
+            </div>
+
+            <div className="trader-overview-side">
+              <div className="side-metric-card accent">
+                <span>Trader Tier</span>
+                <strong>{deriveWhaleTierLabel(traderTierSource)}</strong>
+              </div>
+              <div className="side-metric-card surface">
+                <span>Active Markets</span>
+                <strong>{insights?.summary.distinct_markets ?? 0}</strong>
+              </div>
+            </div>
+          </section>
 
           <section className="trader-tabs-box">
             <div className="user-tabs">

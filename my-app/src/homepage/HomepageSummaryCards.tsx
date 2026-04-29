@@ -2,12 +2,9 @@ import { useCallback } from "react";
 import { Link } from "react-router-dom";
 import { useApiData } from "../hooks/useApiData";
 import { fetchHomeSummary } from "../lib/api";
+import { formatContractPrice } from "../lib/marketFormatting";
+import { formatProfitabilityScorePercent, formatTrustScorePercent } from "../lib/scoreFormatting";
 import { deriveUserIdentity } from "../lib/userIdentity";
-
-function formatPercent(value: number | null) {
-  if (value === null) return "--";
-  return `${Math.round(value * 100)}%`;
-}
 
 function formatCompact(value: number) {
   return new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(value);
@@ -59,11 +56,11 @@ export default function HomepageSummaryCards() {
                 <div className="summary-stat-list">
                   <div>
                     <span>Trust</span>
-                    <strong>{data.top_trusted_whale.trust_score.toFixed(3)}</strong>
+                    <strong>{formatTrustScorePercent(data.top_trusted_whale.trust_score)}</strong>
                   </div>
                   <div>
                     <span>Profit</span>
-                    <strong>{data.top_trusted_whale.profitability_score.toFixed(3)}</strong>
+                    <strong>{formatProfitabilityScorePercent(data.top_trusted_whale.profitability_score)}</strong>
                   </div>
                   <div>
                     <span>Trades</span>
@@ -90,8 +87,8 @@ export default function HomepageSummaryCards() {
                 </Link>
                 <div className="summary-stat-list">
                   <div>
-                    <span>Price</span>
-                    <strong>{formatPercent(data.most_whale_concentrated_market.price)}</strong>
+                    <span>Yes Price</span>
+                    <strong>{formatContractPrice(data.most_whale_concentrated_market.price)}</strong>
                   </div>
                   <div>
                     <span>Whale Traders</span>

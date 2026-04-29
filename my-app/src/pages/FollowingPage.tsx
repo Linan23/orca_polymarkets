@@ -12,6 +12,8 @@ import {
   type FollowingUserCard,
   fetchFollowingDashboard,
 } from "../lib/api";
+import { formatContractPrice } from "../lib/marketFormatting";
+import { formatTrustScorePercent } from "../lib/scoreFormatting";
 import { deriveUserIdentity } from "../lib/userIdentity";
 import TopNavbar from "../homepage/TopNavbar";
 
@@ -428,7 +430,7 @@ function UserWatchlistRows({
               </Link>
               <p className="watchlist-card-subtitle">{subtitle}</p>
               <div className="leaderboard-meta">
-                <span className="meta-pill">Trust {user.latest_whale_score?.trust_score?.toFixed(3) ?? "--"}</span>
+                <span className="meta-pill">Trust {formatTrustScorePercent(user.latest_whale_score?.trust_score)}</span>
                 <span className="meta-pill">Trades {user.latest_whale_score?.sample_trade_count ?? 0}</span>
                 {focus && <span className="meta-pill">{sourceLabel(focus.focus_source)}</span>}
               </div>
@@ -487,7 +489,7 @@ function MarketWatchlistRows({
               </Link>
               <p className="watchlist-card-subtitle">{market.market_slug}</p>
               <div className="leaderboard-meta">
-                <span className="meta-pill">Price {market.price === null ? "--" : formatPercent(market.price)}</span>
+                <span className="meta-pill">Yes Price {formatContractPrice(market.price)}</span>
                 <span className="meta-pill">Whale Traders {market.whale_count}</span>
                 <span className="meta-pill">Trusted Whales {market.trusted_whale_count}</span>
               </div>

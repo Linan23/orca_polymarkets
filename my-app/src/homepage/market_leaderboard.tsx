@@ -2,23 +2,13 @@ import { useCallback, useMemo } from "react";
 import { Link } from "react-router-dom";
 import { fetchDashboardMarkets, type DashboardMarketRow } from "../lib/api";
 import { useApiData } from "../hooks/useApiData";
+import { formatContractPrice, formatOpposingContractPrice } from "../lib/marketFormatting";
 
 function getRankClass(rank: number) {
   if (rank === 1) return "gold";
   if (rank === 2) return "silver";
   if (rank === 3) return "bronze";
   return "default";
-}
-
-function formatPercent(value: number | null) {
-  if (value === null) return "--";
-  return `${Math.round(value * 100)}%`;
-}
-
-function formatOpposingPercent(value: number | null) {
-  if (value === null) return "--";
-  const normalized = Math.min(Math.max(value, 0), 1);
-  return `${Math.round((1 - normalized) * 100)}%`;
 }
 
 function formatCurrency(value: number | null) {
@@ -60,12 +50,12 @@ function MarketRows({ items }: { items: DashboardMarketRow[] }) {
                   </div>
                 </div>
 
-                <div className="leaderboard-price">Yes {formatPercent(market.price)}</div>
+                <div className="leaderboard-price">Yes {formatContractPrice(market.price)}</div>
               </div>
 
               <div className="leaderboard-meta">
                 <span className="meta-pill">Vol {formatCurrency(market.volume)}</span>
-                <span className="meta-pill">No {formatOpposingPercent(market.odds ?? market.price)}</span>
+                <span className="meta-pill">No {formatOpposingContractPrice(market.odds ?? market.price)}</span>
                 <span className="meta-pill">Whale Traders {market.whale_count}</span>
                 <span className="meta-pill">Trusted Whales {market.trusted_whale_count}</span>
                 <span className="meta-pill">Depth {formatDepth(market.orderbook_depth)}</span>
