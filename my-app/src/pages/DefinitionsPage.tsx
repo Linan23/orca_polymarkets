@@ -13,6 +13,19 @@ const definitions = [
     "Trusted Whales are highly successful traders identified through Orca’s proprietary trust-scoring model, which uses machine learning to evaluate consistency, signal quality, and historical market performance.",
 },
 
+
+  {
+  term: "Volume",
+  description:
+    "The total amount of a security/stock that has been traded during a specific time period. High Volume can indicate strong interest and liquidity in a market.",
+},
+
+  {
+  term: "Liquidity",
+  description:
+    "The ease with which an asset or security can be bought or sold in the market without significantly affecting its price. High liquidity indicates a large number of buyers and sellers.",
+},
+
   {
     term: "P & L",
     description:

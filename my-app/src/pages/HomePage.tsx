@@ -14,7 +14,7 @@ export default function HomePage() {
           <h1>Track whales before the market moves.</h1>
           <p>
             Monitor whale activity, follow market signals, and understand
-            Polymarket behavior through a cleaner research dashboard.
+            Polymarket behavior with Orca.
           </p>
 
           <div className="home-hero-actions">

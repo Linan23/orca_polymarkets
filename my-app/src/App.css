@@ -1044,7 +1044,7 @@ a {
 
 .topbar-inner {
   width: 100%;
-  padding: 0 32px;
+  padding: 0 20px;
   height: 64px;
   display: flex;
   align-items: center;
@@ -1055,7 +1055,7 @@ a {
 .topbar-left {
   display: flex;
   align-items: center;
-  gap: 28px;
+  gap: 10px;
 }
 
 .topbar-brand {
@@ -3764,4 +3764,158 @@ border-radius:999px;
 background:rgba(40,70,130,.22);
 border:1px solid rgba(120,170,255,.18);
 font-weight:700;
+}
+
+.profile-dashboard {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  gap: 1.5rem;
+  padding: 1.5rem;
+}
+
+.profile-card {
+  background: rgba(20, 40, 80, 0.6);
+  border-radius: 24px;
+  padding: 2rem;
+}
+
+.profile-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(150px, 1fr));
+  gap: 1rem;
+}
+
+.metric-card {
+  background: rgba(10, 20, 40, 0.8);
+  border-radius: 18px;
+  padding: 1.2rem;
+}
+
+.metric-card span {
+  font-size: 0.8rem;
+  color: #93c5fd;
+}
+
+.metric-card strong {
+  display: block;
+  font-size: 1.4rem;
+  margin-top: 0.4rem;
+  color: white;
+}
+
+.metric-card small {
+  font-size: 0.75rem;
+  color: #9ca3af;
+}
+
+.tier-tag {
+  color: #22c55e;
+}
+
+.pnl-card .profit {
+  color: #22c55e;
+}
+
+.pnl-card .loss {
+  color: #ef4444;
+}
+
+.user-tabs {
+  display: flex;
+  gap: 2rem;
+  border-bottom: 1px solid rgba(147, 197, 253, 0.18);
+  margin-bottom: 1.5rem;
+}
+
+.user-tab {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0 0 0.75rem;
+  color: #94a3b8;
+  font-weight: 600;
+  cursor: pointer;
+  position: relative;
+}
+
+.user-tab:hover {
+  color: #ffffff;
+}
+
+.user-tab.active {
+  color: #93c5fd;
+}
+
+.user-tab.active::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 999px;
+  background: #60a5fa;
+}
+
+.brand-logo {
+  width: 90px;
+  height: 90px;
+  object-fit: contain;
+    filter: brightness(0) invert(1);
+}
+
+.profile-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem;
+}
+
+/* BIG TOP CARD */
+.pnl-hero {
+  grid-column: 1 / -1;
+  padding: 2rem;
+  border-radius: 20px;
+  background: linear-gradient(135deg, #0b1a33, #10264a);
+  border: 1px solid rgba(147, 197, 253, 0.15);
+}
+
+.pnl-hero span {
+  color: #93c5fd;
+  font-size: 0.8rem;
+}
+
+.pnl-hero strong {
+  display: block;
+  font-size: 3.5rem;
+  margin-top: 0.5rem;
+}
+
+/* COLORS */
+.pnl-hero.profit strong {
+  color: #22c55e;
+}
+
+.pnl-hero.loss strong {
+  color: #ef4444;
+}
+
+/* subtle glow */
+.pnl-hero.profit {
+  box-shadow: 0 0 40px rgba(34, 197, 94, 0.2);
+}
+
+.pnl-hero.loss {
+  box-shadow: 0 0 40px rgba(239, 68, 68, 0.2);
+}
+
+/* bottom cards */
+.metric-card {
+  padding: 1.25rem;
+  border-radius: 16px;
+  background: #0b1a33;
+  border: 1px solid rgba(147, 197, 253, 0.1);
+}
+
+.metric-card strong {
+  font-size: 1.3rem;
 }

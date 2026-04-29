@@ -1,5 +1,6 @@
 import { NavLink, Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
+import logo from "../assets/orca.png";
 
 export default function TopNavbar() {
   const { account, isAuthenticated, logout } = useAuth();
@@ -11,10 +12,11 @@ export default function TopNavbar() {
     <header className="topbar">
       <div className="topbar-inner">
         <div className="topbar-left">
+          
           <Link to="/" className="topbar-brand">
-            <span className="brand-dot" />
-            <span>Orca</span>
-          </Link>
+  <img src={logo} alt="Orca logo" className="brand-logo" />
+
+</Link>
 
           <nav className="topbar-nav">
             <NavLink to="/" end className={getLinkClass}>
