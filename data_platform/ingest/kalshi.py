@@ -18,6 +18,7 @@ from data_platform.ingest.store import (
     upsert_market_event,
     upsert_user_account,
 )
+from data_platform.services.market_scope import canonicalize_focus_domains, kalshi_trade_payload_matches_focus_domains
 
 
 def _kalshi_user_ref(payload: dict[str, Any]) -> str:
@@ -58,10 +59,25 @@ def ingest_scrape_record(
     record: dict[str, Any],
     request_url: str,
     raw_output_path: str | None = None,
+    focus_domains: list[str] | None = None,
 ) -> dict[str, int]:
     """Persist one Kalshi scrape record, with trade normalization when available."""
+    focus_domains = canonicalize_focus_domains(focus_domains)
     endpoint_name = str(record.get("endpoint") or "custom")
     data = record.get("data") if isinstance(record.get("data"), dict) else {}
+    filtered_data = dict(data)
+    filtered_out_of_scope = 0
+    if endpoint_name == "trades":
+        trades = data.get("trades") if isinstance(data.get("trades"), list) else []
+        filtered_trades = [
+            trade
+            for trade in trades
+            if isinstance(trade, dict) and kalshi_trade_payload_matches_focus_domains(trade, focus_domains)
+        ]
+        filtered_data["trades"] = filtered_trades
+        filtered_out_of_scope = max(len(trades) - len(filtered_trades), 0)
+    filtered_record = dict(record)
+    filtered_record["data"] = filtered_data
     scrape_run = start_scrape_run(
         session,
         platform_name="kalshi",
@@ -77,14 +93,14 @@ def ingest_scrape_record(
         platform_name="kalshi",
         entity_type=endpoint_name,
         entity_external_id=None,
-        payload=record,
+        payload=filtered_record,
         collected_at=parse_datetime(record.get("scraped_at_iso")),
     )
 
     records_written = 0
     error_count = 0
     if endpoint_name == "trades":
-        trades = data.get("trades") if isinstance(data.get("trades"), list) else []
+        trades = filtered_data.get("trades") if isinstance(filtered_data.get("trades"), list) else []
         for trade in trades:
             if not isinstance(trade, dict):
                 continue
@@ -162,7 +178,11 @@ def ingest_scrape_record(
         error_count=error_count,
         error_summary=None,
     )
-    return {"records_written": records_written, "error_count": error_count}
+    return {
+        "records_written": records_written,
+        "error_count": error_count,
+        "skipped_out_of_scope": filtered_out_of_scope,
+    }
 
 
 def ingest_orderbook_batch(

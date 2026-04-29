@@ -31,6 +31,7 @@ if str(ROOT_DIR) not in sys.path:
 
 from data_platform.db.session import session_scope
 from data_platform.ingest.kalshi import ingest_scrape_record
+from data_platform.services.market_scope import add_focus_domain_argument, canonicalize_focus_domains
 from clients import KalshiHttpClient, Environment
 
 
@@ -126,6 +127,7 @@ def parse_args() -> argparse.Namespace:
         default="",
         help="Optional database URL override. Defaults to DATABASE_URL when omitted.",
     )
+    add_focus_domain_argument(parser)
 
     parser.add_argument(
         "--path",
@@ -185,6 +187,10 @@ def parse_args() -> argparse.Namespace:
 
     try:
         args.custom_query_params = parse_query_params(args.query_param)
+    except ValueError as exc:
+        parser.error(str(exc))
+    try:
+        args.focus_domains = canonicalize_focus_domains(args.focus_domain)
     except ValueError as exc:
         parser.error(str(exc))
 
@@ -455,6 +461,7 @@ def persist_record_to_database(args: argparse.Namespace, record: dict[str, Any])
             record=record,
             request_url=request_url,
             raw_output_path=args.output_file,
+            focus_domains=args.focus_domains,
         )
 
 
@@ -492,6 +499,7 @@ def main() -> None:
 
     print(
         f"Starting scraper: endpoint={args.endpoint}, env={args.environment}, "
+        f"focus_domains={args.focus_domains or ['all']}, "
         f"interval={args.interval_seconds}s (+jitter {args.jitter_seconds}s), "
         f"window={args.window_start or 'always'}-{args.window_end or 'always'} {args.timezone}, "
         f"max_requests={args.max_requests or 'infinite'}"

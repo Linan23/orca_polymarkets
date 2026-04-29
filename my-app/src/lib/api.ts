@@ -454,6 +454,11 @@ export type FollowingDashboard = {
 };
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
+const HOME_SUMMARY_CLIENT_CACHE_MS = 60_000;
+const DASHBOARD_READ_CLIENT_CACHE_MS = 60_000;
+
+let homeSummaryClientCache: { expiresAt: number; value: HomeSummary } | null = null;
+const clientReadCache = new Map<string, { expiresAt: number; value: unknown }>();
 
 export class ApiError extends Error {
   status: number;
@@ -486,6 +491,17 @@ async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
     throw new ApiError(response.status, detail, payload);
   }
   return (await response.json()) as T;
+}
+
+async function fetchCachedJson<T>(path: string, ttlMs = DASHBOARD_READ_CLIENT_CACHE_MS): Promise<T> {
+  const now = Date.now();
+  const cached = clientReadCache.get(path);
+  if (cached && cached.expiresAt > now) {
+    return cached.value as T;
+  }
+  const value = await fetchJson<T>(path);
+  clientReadCache.set(path, { expiresAt: Date.now() + ttlMs, value });
+  return value;
 }
 
 export async function fetchAuthSession(): Promise<AuthSession> {
@@ -586,7 +602,7 @@ export async function importLocalWatchlist(payload: WatchlistState): Promise<{
 }
 
 export async function fetchDashboardMarkets(limit = 10): Promise<DashboardMarketRow[]> {
-  const payload = await fetchJson<{ markets: { items: DashboardMarketRow[] } | null }>(
+  const payload = await fetchCachedJson<{ markets: { items: DashboardMarketRow[] } | null }>(
     `/api/dashboards/latest/markets?limit=${limit}`,
   );
   return payload.markets?.items ?? [];
@@ -603,14 +619,14 @@ export async function fetchLatestWhales(options?: {
   if (options?.tier && options.tier !== "all") params.set("tier", options.tier);
   if (options?.whalesOnly) params.set("whales_only", "true");
   if (options?.trustedOnly) params.set("trusted_only", "true");
-  const payload = await fetchJson<{ whales: { items: WhaleScoreRow[] } | null }>(
+  const payload = await fetchCachedJson<{ whales: { items: WhaleScoreRow[] } | null }>(
     `/api/whales/latest?${params.toString()}`,
   );
   return payload.whales?.items ?? [];
 }
 
 export async function fetchTrustedLeaderboard(): Promise<LeaderboardRow[]> {
-  const payload = await fetchJson<{ leaderboard: { rows: LeaderboardRow[] } | null }>(
+  const payload = await fetchCachedJson<{ leaderboard: { rows: LeaderboardRow[] } | null }>(
     "/api/leaderboards/trusted/latest",
   );
   return payload.leaderboard?.rows ?? [];
@@ -629,7 +645,15 @@ export async function fetchMarketProfile(marketSlug: string): Promise<MarketProf
 }
 
 export async function fetchHomeSummary(): Promise<HomeSummary> {
+  const now = Date.now();
+  if (homeSummaryClientCache && homeSummaryClientCache.expiresAt > now) {
+    return homeSummaryClientCache.value;
+  }
   const payload = await fetchJson<{ summary: HomeSummary }>("/api/home/summary");
+  homeSummaryClientCache = {
+    expiresAt: Date.now() + HOME_SUMMARY_CLIENT_CACHE_MS,
+    value: payload.summary,
+  };
   return payload.summary;
 }
 
@@ -637,7 +661,7 @@ export async function fetchTopProfitableUsers(
   limit = 5,
   timeframe: AnalyticsTimeframe = "all",
 ): Promise<TopProfitableUserRow[]> {
-  const payload = await fetchJson<{ analytics: { items: TopProfitableUserRow[] } | null }>(
+  const payload = await fetchCachedJson<{ analytics: { items: TopProfitableUserRow[] } | null }>(
     `/api/analytics/top-profitable-users?limit=${limit}&timeframe=${timeframe}`,
   );
   return payload.analytics?.items ?? [];
@@ -647,7 +671,7 @@ export async function fetchMarketWhaleConcentration(
   limit = 5,
   timeframe: AnalyticsTimeframe = "all",
 ): Promise<MarketConcentrationRow[]> {
-  const payload = await fetchJson<{ analytics: { items: MarketConcentrationRow[] } | null }>(
+  const payload = await fetchCachedJson<{ analytics: { items: MarketConcentrationRow[] } | null }>(
     `/api/analytics/market-whale-concentration?limit=${limit}&timeframe=${timeframe}`,
   );
   return payload.analytics?.items ?? [];
@@ -657,7 +681,7 @@ export async function fetchWhaleEntryBehavior(
   limit = 5,
   timeframe: AnalyticsTimeframe = "all",
 ): Promise<WhaleEntryBehaviorRow[]> {
-  const payload = await fetchJson<{ analytics: { items: WhaleEntryBehaviorRow[] } | null }>(
+  const payload = await fetchCachedJson<{ analytics: { items: WhaleEntryBehaviorRow[] } | null }>(
     `/api/analytics/whale-entry-behavior?limit=${limit}&timeframe=${timeframe}`,
   );
   return payload.analytics?.items ?? [];
@@ -667,7 +691,7 @@ export async function fetchRecentWhaleEntries(
   limit = 5,
   timeframe: AnalyticsTimeframe = "all",
 ): Promise<RecentWhaleEntryRow[]> {
-  const payload = await fetchJson<{ analytics: { items: RecentWhaleEntryRow[] } | null }>(
+  const payload = await fetchCachedJson<{ analytics: { items: RecentWhaleEntryRow[] } | null }>(
     `/api/analytics/recent-whale-entries?limit=${limit}&timeframe=${timeframe}`,
   );
   return payload.analytics?.items ?? [];

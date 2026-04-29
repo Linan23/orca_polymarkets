@@ -129,6 +129,7 @@ class MarketContract(Base):
     __tablename__ = "market_contract"
     __table_args__ = (
         Index("ix_market_contract_market_slug", "market_slug"),
+        Index("ix_market_contract_event_id", "event_id"),
         UniqueConstraint("platform_id", "external_market_ref", name="uq_market_contract_platform_external"),
         {"schema": "analytics"},
     )
@@ -185,6 +186,29 @@ class MarketTagMap(Base):
 
     event_id: Mapped[int] = mapped_column(ForeignKey("analytics.market_event.event_id"), primary_key=True)
     tag_id: Mapped[int] = mapped_column(ForeignKey("analytics.market_tag.tag_id"), primary_key=True)
+
+
+class ResolvedCondition(Base):
+    __tablename__ = "resolved_condition"
+    __table_args__ = (
+        UniqueConstraint("platform_id", "condition_ref", name="uq_resolved_condition_platform_condition"),
+        Index("ix_resolved_condition_method", "resolver_method"),
+        Index("ix_resolved_condition_resolved_at", "resolved_at"),
+        {"schema": "analytics"},
+    )
+
+    resolved_condition_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    platform_id: Mapped[int] = mapped_column(ForeignKey("analytics.platform.platform_id"), nullable=False)
+    condition_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    resolver_method: Mapped[str] = mapped_column(String(64), nullable=False)
+    winning_outcome_label: Mapped[str] = mapped_column(String(128), nullable=False)
+    resolved_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True))
+    max_winning_price: Mapped[float | None] = mapped_column(MONEY)
+    min_losing_price: Mapped[float | None] = mapped_column(MONEY)
+    trade_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    confidence: Mapped[float] = mapped_column(Numeric(6, 4), nullable=False)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+    updated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
 
 
 class UserAccountHistory(Base):
@@ -336,6 +360,8 @@ class TransactionFact(Base):
     __table_args__ = (
         Index("ix_transaction_fact_user_time", "user_id", "transaction_time"),
         Index("ix_transaction_fact_user_market_time", "user_id", "market_contract_id", "transaction_time"),
+        Index("ix_transaction_fact_event_id", "event_id"),
+        Index("ix_transaction_fact_market_contract_id", "market_contract_id"),
         UniqueConstraint("platform_id", "source_transaction_id", name="uq_transaction_platform_source"),
         {"schema": "analytics"},
     )
@@ -366,6 +392,8 @@ class PositionSnapshot(Base):
     __tablename__ = "position_snapshot"
     __table_args__ = (
         Index("ix_position_snapshot_user_market_time", "user_id", "market_contract_id", "snapshot_time"),
+        Index("ix_position_snapshot_event_id", "event_id"),
+        Index("ix_position_snapshot_market_contract_id", "market_contract_id"),
         {"schema": "analytics"},
     )
 
@@ -469,6 +497,8 @@ class PositionSnapshotDaily(Base):
             "bucket_date",
             name="uq_position_snapshot_daily_bucket",
         ),
+        Index("ix_position_snapshot_daily_event_id", "event_id"),
+        Index("ix_position_snapshot_daily_market_contract_id", "market_contract_id"),
         {"schema": "analytics"},
     )
 
@@ -537,6 +567,8 @@ class TransactionFactPart(Base):
     __table_args__ = (
         Index("ix_transaction_fact_part_user_time", "user_id", "transaction_time"),
         Index("ix_transaction_fact_part_user_market_time", "user_id", "market_contract_id", "transaction_time"),
+        Index("ix_transaction_fact_part_event_id", "event_id"),
+        Index("ix_transaction_fact_part_market_contract_id", "market_contract_id"),
         {"schema": "analytics", "postgresql_partition_by": "RANGE (transaction_time)"},
     )
 
@@ -588,6 +620,8 @@ class PositionSnapshotPart(Base):
     __tablename__ = "position_snapshot_part"
     __table_args__ = (
         Index("ix_position_snapshot_part_user_market_time", "user_id", "market_contract_id", "snapshot_time"),
+        Index("ix_position_snapshot_part_event_id", "event_id"),
+        Index("ix_position_snapshot_part_market_contract_id", "market_contract_id"),
         {"schema": "analytics", "postgresql_partition_by": "RANGE (snapshot_time)"},
     )
 
@@ -643,6 +677,43 @@ class Dashboard(Base):
     timeframe: Mapped[str] = mapped_column(String(32), nullable=False)
     scope_label: Mapped[str | None] = mapped_column(String(255))
     notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
+class HomeSummarySnapshot(Base):
+    __tablename__ = "home_summary_snapshot"
+    __table_args__ = (
+        Index("ix_home_summary_snapshot_generated_at", "generated_at"),
+        {"schema": "analytics"},
+    )
+
+    home_summary_snapshot_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    generated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), nullable=False)
+    scoring_version: Mapped[str | None] = mapped_column(String(64))
+    whales_detected: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    trusted_whales: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    resolved_markets_available: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    resolved_markets_observed: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    profitability_users: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    latest_successful_ingest_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True))
+    summary_payload: Mapped[dict] = mapped_column(JSON_VARIANT, nullable=False)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
+class ResearchAnalyticsSnapshot(Base):
+    __tablename__ = "research_analytics_snapshot"
+    __table_args__ = (
+        Index("ix_research_analytics_snapshot_timeframe_generated", "timeframe", "generated_at"),
+        {"schema": "analytics"},
+    )
+
+    research_analytics_snapshot_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    generated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), nullable=False)
+    timeframe: Mapped[str] = mapped_column(String(16), nullable=False)
+    top_profitable_payload: Mapped[dict] = mapped_column(JSON_VARIANT, nullable=False)
+    recent_entries_payload: Mapped[dict] = mapped_column(JSON_VARIANT, nullable=False)
+    market_concentration_payload: Mapped[dict] = mapped_column(JSON_VARIANT, nullable=False)
+    whale_entry_payload: Mapped[dict] = mapped_column(JSON_VARIANT, nullable=False)
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
 
 

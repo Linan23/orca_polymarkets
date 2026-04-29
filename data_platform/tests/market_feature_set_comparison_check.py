@@ -63,6 +63,15 @@ def main() -> int:
             "train_condition_count": summary["train_condition_count"],
             "test_condition_count": summary["test_condition_count"],
         },
+        {
+            "name": "comparison_diagnostics_present",
+            "ok": summary.get("price_rule_accuracy") is not None
+            and isinstance(summary.get("price_saturated"), bool)
+            and summary["price_only"].get("rolling_metrics", {}).get("fold_count", 0) > 0
+            and summary["price_plus_whale"].get("rolling_metrics", {}).get("fold_count", 0) > 0,
+            "price_rule_accuracy": summary.get("price_rule_accuracy"),
+            "price_saturated": summary.get("price_saturated"),
+        },
     ]
     ok = all(check["ok"] for check in checks)
     print(json.dumps({"ok": ok, "checks": checks, "lift": summary["lift"]}, indent=2, sort_keys=True))

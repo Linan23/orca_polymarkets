@@ -30,7 +30,13 @@ if str(ROOT_DIR) not in sys.path:
 
 from data_platform.db.session import session_scope
 from data_platform.ingest.polymarket import ingest_discovery_cycle, ingest_trades_record
-from data_platform.models import MarketContract, MarketEvent, Platform
+from data_platform.models import MarketContract, MarketEvent, MarketTag, MarketTagMap, Platform
+from data_platform.services.market_scope import (
+    add_focus_domain_argument,
+    build_market_scope_texts,
+    canonicalize_focus_domains,
+    matches_focus_domains,
+)
 
 
 POLYMARKET_EVENTS_URL = "https://gamma-api.polymarket.com/events"
@@ -44,6 +50,7 @@ def parse_args() -> argparse.Namespace:
         description="Broad Polymarket market/trader crawler that fills markets and users from public flow."
     )
     parser.add_argument("--database-url", default="", help="Optional database URL override.")
+    add_focus_domain_argument(parser)
     parser.add_argument(
         "--output-file",
         default=str(RUNTIME_DIR / "polymarket_market_trader_crawl.jsonl"),
@@ -159,6 +166,10 @@ def parse_args() -> argparse.Namespace:
         parser.error("--timeout-seconds must be > 0.")
     if args.max_retries < 0:
         parser.error("--max-retries must be >= 0.")
+    try:
+        args.focus_domains = canonicalize_focus_domains(args.focus_domain)
+    except ValueError as exc:
+        parser.error(str(exc))
     return args
 
 
@@ -248,6 +259,7 @@ def refresh_active_events(session: Session, client: httpx.Client, args: argparse
         cycle=cycle,
         request_url=request_url,
         raw_output_path=args.output_file,
+        focus_domains=args.focus_domains,
     )
     return {
         "requested": len(discovered),
@@ -258,34 +270,89 @@ def refresh_active_events(session: Session, client: httpx.Client, args: argparse
     }
 
 
-def load_active_target_markets(session: Session, market_limit: int) -> list[MarketContract]:
-    """Return high-volume active Polymarket markets that can be crawled by condition id."""
-    rows = session.scalars(
-        select(MarketContract)
+def _load_event_tags(session: Session, event_ids: set[int]) -> dict[int, list[str]]:
+    """Return tag labels/slugs grouped by event id."""
+    if not event_ids:
+        return {}
+    rows = session.execute(
+        select(MarketTagMap.event_id, MarketTag.tag_label, MarketTag.tag_slug)
+        .join(MarketTag, MarketTag.tag_id == MarketTagMap.tag_id)
+        .where(MarketTagMap.event_id.in_(event_ids))
+    ).all()
+    grouped: dict[int, list[str]] = {}
+    for event_id, tag_label, tag_slug in rows:
+        grouped.setdefault(int(event_id), []).extend(
+            [value for value in (tag_label, tag_slug) if isinstance(value, str) and value.strip()]
+        )
+    return grouped
+
+
+def _candidate_market_rows(
+    session: Session,
+    *,
+    is_closed: bool,
+    limit: int,
+    closed_after: datetime | None = None,
+) -> list[tuple[MarketContract, MarketEvent]]:
+    query = (
+        select(MarketContract, MarketEvent)
         .join(MarketEvent, MarketEvent.event_id == MarketContract.event_id)
         .join(Platform, Platform.platform_id == MarketContract.platform_id)
         .where(Platform.platform_name == "polymarket")
-        .where(MarketContract.is_active.is_(True))
-        .where(MarketContract.is_closed.is_(False))
         .where(MarketContract.condition_ref.is_not(None))
+        .where(MarketContract.is_closed.is_(is_closed))
         .order_by(
             desc(MarketContract.volume),
             desc(MarketEvent.volume),
+            desc(MarketEvent.closed_time),
             desc(MarketContract.updated_at),
         )
-        .limit(market_limit * 4)
-    ).all()
+        .limit(limit * 12)
+    )
+    if is_closed:
+        query = query.where(MarketEvent.closed_time.is_not(None))
+        if closed_after is not None:
+            query = query.where(MarketEvent.closed_time >= closed_after)
+    else:
+        query = query.where(MarketContract.is_active.is_(True)).where(MarketContract.is_closed.is_(False))
+    return [(market, event) for market, event in session.execute(query).all()]
+
+
+def _filter_markets_by_scope(
+    session: Session,
+    rows: list[tuple[MarketContract, MarketEvent]],
+    *,
+    market_limit: int,
+    focus_domains: list[str],
+) -> list[MarketContract]:
+    event_tags = _load_event_tags(session, {event.event_id for _, event in rows})
     selected: list[MarketContract] = []
     seen_condition_refs: set[str] = set()
-    for row in rows:
-        condition_ref = str(row.condition_ref or "").strip()
+    for market, event in rows:
+        condition_ref = str(market.condition_ref or "").strip()
         if not condition_ref or condition_ref in seen_condition_refs:
             continue
+        if focus_domains and not matches_focus_domains(
+            build_market_scope_texts(
+                platform_name="polymarket",
+                event=event,
+                market=market,
+                tags=event_tags.get(event.event_id, []),
+            ),
+            focus_domains,
+        ):
+            continue
         seen_condition_refs.add(condition_ref)
-        selected.append(row)
+        selected.append(market)
         if len(selected) >= market_limit:
             break
     return selected
+
+
+def load_active_target_markets(session: Session, market_limit: int, *, focus_domains: list[str]) -> list[MarketContract]:
+    """Return high-volume active Polymarket markets that can be crawled by condition id."""
+    rows = _candidate_market_rows(session, is_closed=False, limit=market_limit)
+    return _filter_markets_by_scope(session, rows, market_limit=market_limit, focus_domains=focus_domains)
 
 
 def load_recent_closed_markets(
@@ -293,39 +360,13 @@ def load_recent_closed_markets(
     market_limit: int,
     *,
     closed_after: datetime | None = None,
+    focus_domains: list[str],
 ) -> list[MarketContract]:
     """Return recently closed Polymarket markets that can be crawled by condition id."""
     if market_limit == 0:
         return []
-    query = (
-        select(MarketContract)
-        .join(MarketEvent, MarketEvent.event_id == MarketContract.event_id)
-        .join(Platform, Platform.platform_id == MarketContract.platform_id)
-        .where(Platform.platform_name == "polymarket")
-        .where(MarketContract.is_closed.is_(True))
-        .where(MarketContract.condition_ref.is_not(None))
-        .where(MarketEvent.closed_time.is_not(None))
-        .order_by(
-            desc(MarketEvent.closed_time),
-            desc(MarketContract.volume),
-            desc(MarketContract.updated_at),
-        )
-        .limit(market_limit * 4)
-    )
-    if closed_after is not None:
-        query = query.where(MarketEvent.closed_time >= closed_after)
-    rows = session.scalars(query).all()
-    selected: list[MarketContract] = []
-    seen_condition_refs: set[str] = set()
-    for row in rows:
-        condition_ref = str(row.condition_ref or "").strip()
-        if not condition_ref or condition_ref in seen_condition_refs:
-            continue
-        seen_condition_refs.add(condition_ref)
-        selected.append(row)
-        if len(selected) >= market_limit:
-            break
-    return selected
+    rows = _candidate_market_rows(session, is_closed=True, limit=market_limit, closed_after=closed_after)
+    return _filter_markets_by_scope(session, rows, market_limit=market_limit, focus_domains=focus_domains)
 
 
 def fetch_trades_page(
@@ -370,6 +411,7 @@ def ingest_trade_batch(
         record=record,
         request_url=request_url,
         raw_output_path=args.output_file,
+        focus_domains=args.focus_domains,
     )
 
 
@@ -393,8 +435,13 @@ def run_once(args: argparse.Namespace) -> dict[str, Any]:
         if not args.skip_refresh_active_events:
             refresh_summary = refresh_active_events(session, client, args)
 
-        active_markets = load_active_target_markets(session, args.market_limit)
-        closed_markets = load_recent_closed_markets(session, args.closed_market_limit, closed_after=closed_after)
+        active_markets = load_active_target_markets(session, args.market_limit, focus_domains=args.focus_domains)
+        closed_markets = load_recent_closed_markets(
+            session,
+            args.closed_market_limit,
+            closed_after=closed_after,
+            focus_domains=args.focus_domains,
+        )
         target_markets: list[tuple[str, MarketContract]] = []
         seen_condition_refs: set[str] = set()
         for market in active_markets:
@@ -492,6 +539,7 @@ def run_once(args: argparse.Namespace) -> dict[str, Any]:
         "started_at": started_at.isoformat(),
         "finished_at": datetime.now(timezone.utc).isoformat(),
         "refresh_active_events": refresh_summary,
+        "focus_domains": args.focus_domains,
         "closed_after": closed_after.isoformat() if closed_after is not None else None,
         "global_pages": global_summaries,
         "max_total_trade_pages": args.max_total_trade_pages,

@@ -32,6 +32,12 @@ def parse_args() -> argparse.Namespace:
         default=str(DEFAULT_MODEL_FAMILY_COMPARISON_PATH),
         help="JSON output path for the comparison summary.",
     )
+    parser.add_argument(
+        "--regime",
+        choices=("all", "trade_covered", "cold_start"),
+        default="all",
+        help="Optional regime filter. Use this to compare model families inside one regime only.",
+    )
     parser.add_argument("--train-fraction", type=float, default=0.75, help="Oldest-condition fraction used for training.")
     parser.add_argument("--random-state", type=int, default=42, help="Random seed for reproducibility.")
     return parser.parse_args()
@@ -45,6 +51,7 @@ def main() -> int:
         comparison_path=Path(args.comparison_path),
         train_fraction=args.train_fraction,
         random_state=args.random_state,
+        regime=args.regime,
     )
     print(json.dumps(result, sort_keys=True))
     return 0

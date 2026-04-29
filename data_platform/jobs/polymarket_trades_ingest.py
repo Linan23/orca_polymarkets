@@ -20,6 +20,7 @@ if str(ROOT_DIR) not in sys.path:
 
 from data_platform.db.session import session_scope
 from data_platform.ingest.polymarket import ingest_trades_record
+from data_platform.services.market_scope import add_focus_domain_argument, canonicalize_focus_domains
 
 POLYMARKET_TRADES_URL = "https://data-api.polymarket.com/trades"
 
@@ -29,6 +30,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Capture Polymarket trades into PostgreSQL.")
     parser.add_argument("--database-url", default="", help="Optional database URL override.")
     parser.add_argument("--limit", type=int, default=200, help="Maximum trade rows requested per cycle.")
+    add_focus_domain_argument(parser)
     parser.add_argument(
         "--output-file",
         default="data_platform/runtime/polymarket_trades.jsonl",
@@ -52,6 +54,10 @@ def parse_args() -> argparse.Namespace:
         parser.error("--timeout-seconds must be > 0.")
     if args.max_retries < 0:
         parser.error("--max-retries must be >= 0.")
+    try:
+        args.focus_domains = canonicalize_focus_domains(args.focus_domain)
+    except ValueError as exc:
+        parser.error(str(exc))
     return args
 
 
@@ -106,6 +112,7 @@ def run_once(args: argparse.Namespace) -> dict[str, Any]:
             record=record,
             request_url=request_url,
             raw_output_path=args.output_file,
+            focus_domains=args.focus_domains,
         )
 
     summary = {
@@ -132,4 +139,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

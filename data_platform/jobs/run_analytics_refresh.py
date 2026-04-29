@@ -45,8 +45,11 @@ def main() -> int:
         started_at = datetime.now(timezone.utc)
         steps: list[dict[str, object]] = []
         for name, command in (
+            ("refresh_resolved_conditions", [py, "refresh_resolved_conditions.py"]),
             ("build_whale_scores", [py, "build_whale_scores.py"]),
             ("build_dashboard_snapshot", [py, "build_dashboard_snapshot.py"]),
+            ("build_home_summary_snapshot", [py, "build_home_summary_snapshot.py"]),
+            ("build_research_analytics_snapshot", [py, "build_research_analytics_snapshot.py"]),
         ):
             started = time.monotonic()
             completed = subprocess.run(command, cwd=ROOT_DIR, env=env, text=True, capture_output=True)

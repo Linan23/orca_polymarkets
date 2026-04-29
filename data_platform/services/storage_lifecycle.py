@@ -164,6 +164,21 @@ PARTITION_CONFIGS: tuple[PartitionConfig, ...] = (
     ),
 )
 
+RAW_PAYLOAD_UNREFERENCED_PREDICATE = '''
+    NOT EXISTS (SELECT 1 FROM analytics.market_event me WHERE me.raw_payload_id = p.payload_id)
+    AND NOT EXISTS (SELECT 1 FROM analytics.market_contract mc WHERE mc.raw_payload_id = p.payload_id)
+    AND NOT EXISTS (SELECT 1 FROM analytics.market_event_history meh WHERE meh.source_raw_payload_id = p.payload_id)
+    AND NOT EXISTS (SELECT 1 FROM analytics.market_contract_history mch WHERE mch.source_raw_payload_id = p.payload_id)
+    AND NOT EXISTS (SELECT 1 FROM analytics.user_account_history uah WHERE uah.source_raw_payload_id = p.payload_id)
+    AND NOT EXISTS (SELECT 1 FROM analytics.market_tag_map_history mtmh WHERE mtmh.source_raw_payload_id = p.payload_id)
+    AND NOT EXISTS (SELECT 1 FROM analytics.transaction_fact tf WHERE tf.raw_payload_id = p.payload_id)
+    AND NOT EXISTS (SELECT 1 FROM analytics.transaction_fact_part tfp WHERE tfp.raw_payload_id = p.payload_id)
+    AND NOT EXISTS (SELECT 1 FROM analytics.orderbook_snapshot ob WHERE ob.raw_payload_id = p.payload_id)
+    AND NOT EXISTS (SELECT 1 FROM analytics.orderbook_snapshot_part obp WHERE obp.raw_payload_id = p.payload_id)
+    AND NOT EXISTS (SELECT 1 FROM analytics.position_snapshot ps WHERE ps.raw_payload_id = p.payload_id)
+    AND NOT EXISTS (SELECT 1 FROM analytics.position_snapshot_part psp WHERE psp.raw_payload_id = p.payload_id)
+'''
+
 
 def month_floor(value: datetime) -> datetime:
     return value.astimezone(timezone.utc).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
@@ -535,3 +550,158 @@ def snapshot_window_bounds(session: Session) -> dict[str, Any]:
         "min_timestamp": row.min_timestamp.isoformat() if row and row.min_timestamp else None,
         "max_timestamp": row.max_timestamp.isoformat() if row and row.max_timestamp else None,
     }
+
+
+def cleanup_orphan_market_events(
+    session: Session,
+    *,
+    batch_size: int = 1000,
+    max_batches: int = 10,
+) -> dict[str, int]:
+    if batch_size <= 0:
+        raise ValueError("batch_size must be > 0")
+    if max_batches < 0:
+        raise ValueError("max_batches must be >= 0")
+
+    totals = {
+        "deleted_event_ids": 0,
+        "analytics.market_tag_map_history": 0,
+        "analytics.market_tag_map": 0,
+        "analytics.market_event_history": 0,
+        "analytics.market_event": 0,
+        "analytics.market_tag": 0,
+        "batches": 0,
+    }
+
+    remaining_batches = max_batches
+    while remaining_batches != 0:
+        event_ids = [
+            int(event_id)
+            for event_id in session.execute(
+                text(
+                    '''
+                    SELECT me.event_id
+                    FROM analytics.market_event me
+                    WHERE NOT EXISTS (
+                        SELECT 1
+                        FROM analytics.market_contract mc
+                        WHERE mc.event_id = me.event_id
+                    )
+                    ORDER BY me.event_id
+                    LIMIT :batch_size
+                    '''
+                ),
+                {"batch_size": batch_size},
+            ).scalars()
+        ]
+        if not event_ids:
+            break
+
+        params = {"event_ids": event_ids}
+        totals["deleted_event_ids"] += len(event_ids)
+        totals["analytics.market_tag_map_history"] += int(
+            session.execute(
+                text("DELETE FROM analytics.market_tag_map_history WHERE event_id = ANY(:event_ids)"),
+                params,
+            ).rowcount
+            or 0
+        )
+        totals["analytics.market_tag_map"] += int(
+            session.execute(
+                text("DELETE FROM analytics.market_tag_map WHERE event_id = ANY(:event_ids)"),
+                params,
+            ).rowcount
+            or 0
+        )
+        totals["analytics.market_event_history"] += int(
+            session.execute(
+                text("DELETE FROM analytics.market_event_history WHERE event_id = ANY(:event_ids)"),
+                params,
+            ).rowcount
+            or 0
+        )
+        totals["analytics.market_event"] += int(
+            session.execute(
+                text("DELETE FROM analytics.market_event WHERE event_id = ANY(:event_ids)"),
+                params,
+            ).rowcount
+            or 0
+        )
+        totals["batches"] += 1
+        session.flush()
+        if remaining_batches > 0:
+            remaining_batches -= 1
+
+    totals["analytics.market_tag"] = int(
+        session.execute(
+            text(
+                '''
+                DELETE FROM analytics.market_tag t
+                WHERE NOT EXISTS (SELECT 1 FROM analytics.market_tag_map m WHERE m.tag_id = t.tag_id)
+                  AND NOT EXISTS (SELECT 1 FROM analytics.market_tag_map_history mh WHERE mh.tag_id = t.tag_id)
+                '''
+            )
+        ).rowcount
+        or 0
+    )
+    session.flush()
+    return totals
+
+
+def garbage_collect_unreferenced_raw_payloads(
+    session: Session,
+    *,
+    batch_size: int = 1000,
+    max_batches: int = 10,
+) -> dict[str, int]:
+    if batch_size <= 0:
+        raise ValueError("batch_size must be > 0")
+    if max_batches < 0:
+        raise ValueError("max_batches must be >= 0")
+
+    totals = {
+        "deleted_payload_rows": 0,
+        "raw.api_payload": 0,
+        "raw.api_payload_part": 0,
+        "batches": 0,
+    }
+
+    remaining_batches = max_batches
+    while remaining_batches != 0:
+        batch_deleted = 0
+        for qualified_name in ("raw.api_payload", "raw.api_payload_part"):
+            payload_ids = [
+                int(payload_id)
+                for payload_id in session.execute(
+                    text(
+                        f'''
+                        SELECT p.payload_id
+                        FROM {qualified_name} p
+                        WHERE {RAW_PAYLOAD_UNREFERENCED_PREDICATE}
+                        ORDER BY p.payload_id
+                        LIMIT :batch_size
+                        '''
+                    ),
+                    {"batch_size": batch_size},
+                ).scalars()
+            ]
+            if not payload_ids:
+                continue
+            deleted = int(
+                session.execute(
+                    text(f"DELETE FROM {qualified_name} WHERE payload_id = ANY(:payload_ids)"),
+                    {"payload_ids": payload_ids},
+                ).rowcount
+                or 0
+            )
+            totals[qualified_name] += deleted
+            batch_deleted += deleted
+        if batch_deleted == 0:
+            break
+        totals["deleted_payload_rows"] += batch_deleted
+        totals["batches"] += 1
+        session.flush()
+        if remaining_batches > 0:
+            remaining_batches -= 1
+
+    return totals

@@ -308,6 +308,7 @@ The runtime is now split into three jobs instead of one all-purpose crawler:
    - default cadence: every 2 minutes
    - Polymarket and Kalshi market/trade/orderbook collection
    - wallet positions only when wallets are configured
+   - default focus domains: `politics`, `crypto`, `technology`, `video-games`
 2. `data_platform/jobs/run_analytics_refresh.py`
    - whale score rebuild
    - dashboard rebuild
@@ -316,6 +317,8 @@ The runtime is now split into three jobs instead of one all-purpose crawler:
    - partition creation
    - shadow-table backfill
    - snapshot rollups
+   - batched orphan `market_event` cleanup
+   - batched unreferenced `raw.api_payload` garbage collection
    - optional backup snapshot export
 
 Useful local commands:
@@ -326,7 +329,9 @@ Useful local commands:
 .venv/bin/python data_platform/jobs/run_retention_maintenance.py --skip-snapshot
 ```
 
-VM wrapper scripts are included in `scripts/` and example `systemd` units live in `deploy/systemd/`.
+VM wrapper scripts are included in `scripts/`, example `systemd` units live in `deploy/systemd/`, and the deployment runbook is in `deploy/VM_RUNBOOK.md`.
+The runbook and example service files use placeholder values such as `YOUR_VM_USER`; replace them with the collaborator's actual VM username and repo path before enabling services.
+For snapshot-enabled maintenance on Linux VMs, install the PostgreSQL client package so `pg_dump` is available on `PATH`.
 
 What the baseline migration creates:
 
@@ -703,14 +708,18 @@ The normalized layer feeds the dashboard-facing tables.
 To build the preliminary whale score snapshot:
 
 ```bash
+.venv/bin/python refresh_resolved_conditions.py
 .venv/bin/python build_whale_scores.py
+.venv/bin/python build_dashboard_snapshot.py
+.venv/bin/python build_home_summary_snapshot.py
 ```
 
 Current profitability and resolution logic:
 
-- closed Polymarket binary markets are treated as resolved only when `last_trade_price` is effectively `1` or `0`
-- the winning outcome is inferred from the stored normalized outcome labels
-- captured trade signals are also used conservatively, so a condition can count as resolved when one outcome trades at `>= 0.98` and the opposite outcome trades at `<= 0.02`
+- `analytics.resolved_condition` stores reusable Polymarket condition outcomes before whale scoring runs
+- closed Polymarket binary markets can be resolved from `last_trade_price` when it is effectively `1` or `0`
+- captured trade signals are also persisted conservatively, so a condition can count as resolved when one outcome trades at `>= 0.98` and the opposite outcome trades at `<= 0.02`
+- whale scoring reads the persisted table first, then falls back to in-memory resolution inference only when the table is empty
 - realized profitability is computed only for users whose captured trade history in that resolved market is internally consistent enough to avoid overstating PnL from partial history
 - if no resolved trade overlap exists yet, `profitability_score` stays `0`
 
@@ -760,10 +769,13 @@ To backfill deterministically resolved closed-market trades into `transaction_fa
 
 ```bash
 .venv/bin/python data_platform/jobs/polymarket_resolved_trades_backfill.py \
+  --refresh-closed-events \
   --market-limit 5 \
   --trade-limit 200 \
   --max-pages-per-market 5
 ```
+
+Closed-event refreshes default to Gamma `closedTime` descending so newer resolved markets are discovered before older archived markets.
 
 To backfill only deterministically resolved conditions that still have no ingested trades:
 

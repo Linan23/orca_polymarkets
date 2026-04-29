@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from bisect import bisect_right
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -57,6 +58,17 @@ class ResolvedUserPerformance:
     realized_pnl: float
     realized_roi: float
     excluded_market_count: int
+
+
+@dataclass(frozen=True)
+class ResolvedMarketOutcome:
+    """Resolved outcome plus source metadata for one Polymarket condition."""
+
+    condition_ref: str
+    winning_outcome_label: str
+    resolution_source: str
+    resolution_confidence: float
+    resolution_time: datetime | None
 
 
 @dataclass(frozen=True)
@@ -129,22 +141,49 @@ POSITION_EXPOSURE_SQL = text(
 )
 
 
+RESOLVED_CONDITION_SQL = text(
+    """
+    SELECT
+      rc.condition_ref,
+      rc.winning_outcome_label,
+      rc.resolver_method,
+      rc.confidence,
+      rc.resolved_at
+    FROM analytics.resolved_condition rc
+    JOIN analytics.platform p
+      ON p.platform_id = rc.platform_id
+    WHERE p.platform_name = 'polymarket'
+      AND rc.condition_ref IS NOT NULL
+      AND rc.winning_outcome_label IS NOT NULL
+    """
+)
+
+
 RESOLVED_MARKET_SQL = text(
     """
     SELECT
       mc.condition_ref,
       mc.outcome_a_label,
       mc.outcome_b_label,
-      mc.last_trade_price
+      mc.last_trade_price,
+      COALESCE(mc.end_time, me.end_time, me.closed_time) AS resolution_time,
+      rp.payload AS raw_payload
     FROM analytics.market_contract mc
+    JOIN analytics.market_event me
+      ON me.event_id = mc.event_id
     JOIN analytics.platform p
       ON p.platform_id = mc.platform_id
+    LEFT JOIN raw.api_payload rp
+      ON rp.payload_id = mc.raw_payload_id
     WHERE p.platform_name = 'polymarket'
       AND mc.is_closed = TRUE
       AND mc.condition_ref IS NOT NULL
       AND mc.outcome_a_label IS NOT NULL
       AND mc.outcome_b_label IS NOT NULL
-      AND mc.last_trade_price IS NOT NULL
+      AND (
+        mc.last_trade_price IS NOT NULL
+        OR rp.payload IS NOT NULL
+      )
     """
 )
 
@@ -224,17 +263,99 @@ def _normalized_label(value: str | None) -> str | None:
     return text or None
 
 
+def _parse_json_list(raw_value: Any) -> list[Any]:
+    """Return a list from raw JSON/list values used by Gamma payload fields."""
+    if raw_value is None:
+        return []
+    if isinstance(raw_value, list):
+        return raw_value
+    try:
+        decoded = json.loads(str(raw_value))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return []
+    return decoded if isinstance(decoded, list) else []
+
+
+def _market_payload_for_condition(raw_payload: Any, condition_ref: str) -> dict[str, Any] | None:
+    """Return the nested Gamma market payload matching a condition id."""
+    if not isinstance(raw_payload, dict):
+        return None
+    if str(raw_payload.get("conditionId") or "") == condition_ref:
+        return raw_payload
+    markets = raw_payload.get("markets")
+    if not isinstance(markets, list):
+        return None
+    for market_payload in markets:
+        if isinstance(market_payload, dict) and str(market_payload.get("conditionId") or "") == condition_ref:
+            return market_payload
+    return None
+
+
+def _official_outcome_from_payload(
+    *,
+    raw_payload: Any,
+    condition_ref: str,
+    outcome_a: str,
+    outcome_b: str,
+) -> str | None:
+    """Return a resolved label from Gamma outcomePrices when the payload is decisive."""
+    market_payload = _market_payload_for_condition(raw_payload, condition_ref)
+    if not market_payload:
+        return None
+    if market_payload.get("closed") is not True:
+        return None
+    raw_outcomes = _parse_json_list(market_payload.get("outcomes"))
+    raw_prices = _parse_json_list(market_payload.get("outcomePrices"))
+    if len(raw_outcomes) < 2 or len(raw_prices) < 2:
+        return None
+
+    parsed: list[tuple[str, float]] = []
+    for raw_label, raw_price in zip(raw_outcomes, raw_prices, strict=False):
+        label = _normalized_label(str(raw_label))
+        if label not in {outcome_a, outcome_b}:
+            continue
+        try:
+            price = float(raw_price)
+        except (TypeError, ValueError):
+            continue
+        parsed.append((label, price))
+    if len(parsed) < 2:
+        return None
+
+    parsed.sort(key=lambda item: item[1], reverse=True)
+    winning_label, winning_price = parsed[0]
+    losing_price = parsed[1][1]
+    if winning_price >= RESOLUTION_PRICE_HIGH and losing_price <= RESOLUTION_PRICE_LOW:
+        return winning_label
+    return None
+
+
 def _load_current_exposure_by_user(session: Session) -> dict[int, float]:
     """Return latest known position exposure per user."""
     rows = session.execute(POSITION_EXPOSURE_SQL).mappings().all()
     return {int(row["user_id"]): float(row["current_exposure"] or 0) for row in rows}
 
 
-def load_resolved_market_outcomes(session: Session) -> dict[str, str]:
-    """Return confident resolved Polymarket outcomes keyed by condition id."""
+def load_resolved_market_outcome_details(session: Session) -> dict[str, ResolvedMarketOutcome]:
+    """Return confident resolved Polymarket outcomes with source metadata."""
+    persisted_rows = session.execute(RESOLVED_CONDITION_SQL).mappings().all()
+    if persisted_rows:
+        return {
+            str(row["condition_ref"]): ResolvedMarketOutcome(
+                condition_ref=str(row["condition_ref"]),
+                winning_outcome_label=str(row["winning_outcome_label"]).strip().lower(),
+                resolution_source=str(row["resolver_method"]),
+                resolution_confidence=float(row["confidence"] or 0),
+                resolution_time=row["resolved_at"],
+            )
+            for row in persisted_rows
+            if str(row["winning_outcome_label"]).strip()
+        }
+
     rows = session.execute(RESOLVED_MARKET_SQL).mappings().all()
-    resolved: dict[str, str] = {}
+    resolved: dict[str, ResolvedMarketOutcome] = {}
     condition_labels: dict[str, tuple[str, str]] = {}
+    condition_resolution_time: dict[str, datetime | None] = {}
     for row in rows:
         condition_ref = str(row["condition_ref"])
         outcome_a = _normalized_label(str(row["outcome_a_label"]))
@@ -242,6 +363,26 @@ def load_resolved_market_outcomes(session: Session) -> dict[str, str]:
         if not outcome_a or not outcome_b or outcome_a == outcome_b:
             continue
         condition_labels.setdefault(condition_ref, (outcome_a, outcome_b))
+        condition_resolution_time.setdefault(condition_ref, row["resolution_time"])
+
+        official_winner = _official_outcome_from_payload(
+            raw_payload=row["raw_payload"],
+            condition_ref=condition_ref,
+            outcome_a=outcome_a,
+            outcome_b=outcome_b,
+        )
+        if official_winner:
+            resolved[condition_ref] = ResolvedMarketOutcome(
+                condition_ref=condition_ref,
+                winning_outcome_label=official_winner,
+                resolution_source="gamma_outcome_prices",
+                resolution_confidence=1.0,
+                resolution_time=row["resolution_time"],
+            )
+            continue
+
+        if row["last_trade_price"] is None or condition_ref in resolved:
+            continue
         last_trade_price = float(row["last_trade_price"])
         if last_trade_price >= RESOLUTION_PRICE_HIGH:
             winner = outcome_a
@@ -250,7 +391,13 @@ def load_resolved_market_outcomes(session: Session) -> dict[str, str]:
         else:
             winner = None
         if winner:
-            resolved[condition_ref] = winner
+            resolved[condition_ref] = ResolvedMarketOutcome(
+                condition_ref=condition_ref,
+                winning_outcome_label=winner,
+                resolution_source="last_trade_price_threshold",
+                resolution_confidence=0.75,
+                resolution_time=row["resolution_time"],
+            )
 
     trade_rows = session.execute(RESOLVED_TRADE_SIGNAL_SQL).mappings().all()
     trade_stats_by_condition: dict[str, dict[str, dict[str, float]]] = {}
@@ -268,6 +415,8 @@ def load_resolved_market_outcomes(session: Session) -> dict[str, str]:
         }
 
     for condition_ref, labels in condition_labels.items():
+        if condition_ref in resolved:
+            continue
         trade_stats = trade_stats_by_condition.get(condition_ref, {})
         if len(trade_stats) < 2:
             continue
@@ -279,14 +428,34 @@ def load_resolved_market_outcomes(session: Session) -> dict[str, str]:
                 outcome_a_stats["max_trade_price"] >= RESOLUTION_PRICE_HIGH
                 and outcome_b_stats["min_trade_price"] <= RESOLUTION_PRICE_LOW
             ):
-                resolved[condition_ref] = outcome_a
+                resolved[condition_ref] = ResolvedMarketOutcome(
+                    condition_ref=condition_ref,
+                    winning_outcome_label=outcome_a,
+                    resolution_source="trade_price_extreme_fallback",
+                    resolution_confidence=0.60,
+                    resolution_time=condition_resolution_time.get(condition_ref),
+                )
                 continue
             if (
                 outcome_b_stats["max_trade_price"] >= RESOLUTION_PRICE_HIGH
                 and outcome_a_stats["min_trade_price"] <= RESOLUTION_PRICE_LOW
             ):
-                resolved[condition_ref] = outcome_b
+                resolved[condition_ref] = ResolvedMarketOutcome(
+                    condition_ref=condition_ref,
+                    winning_outcome_label=outcome_b,
+                    resolution_source="trade_price_extreme_fallback",
+                    resolution_confidence=0.60,
+                    resolution_time=condition_resolution_time.get(condition_ref),
+                )
     return resolved
+
+
+def load_resolved_market_outcomes(session: Session) -> dict[str, str]:
+    """Return confident resolved Polymarket outcome labels keyed by condition id."""
+    return {
+        condition_ref: detail.winning_outcome_label
+        for condition_ref, detail in load_resolved_market_outcome_details(session).items()
+    }
 
 
 def load_resolved_user_performance(

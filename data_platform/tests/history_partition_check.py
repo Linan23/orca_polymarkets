@@ -52,6 +52,11 @@ class CheckResult:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Validate history/partition lifecycle rollout state.")
     parser.add_argument("--database-url", default=get_settings().database_url)
+    parser.add_argument(
+        "--allow-empty-position-snapshots",
+        action="store_true",
+        help="Allow zero rows in position snapshot legacy/shadow tables for scoped crawls without tracked positions.",
+    )
     return parser.parse_args()
 
 
@@ -60,7 +65,7 @@ def _count(session: Any, qualified_name: str) -> int:
     return int(session.execute(text(f'SELECT COUNT(*) FROM "{schema_name}"."{table_name}"')).scalar_one())
 
 
-def run_checks(database_url: str) -> list[CheckResult]:
+def run_checks(database_url: str, *, allow_empty_position_snapshots: bool = False) -> list[CheckResult]:
     results: list[CheckResult] = []
     with session_scope(database_url) as session:
         rows = session.execute(
@@ -94,11 +99,33 @@ def run_checks(database_url: str) -> list[CheckResult]:
                     )
                 ).scalar_one()
             )
+            details = {"current_count": current_count, "history_current_count": current_history_count, "key": key_name}
+            ok = current_count == current_history_count
+            if not ok and current_table == "analytics.market_event":
+                orphan_current_count = int(
+                    session.execute(
+                        text(
+                            """
+                            SELECT COUNT(*)
+                            FROM analytics.market_event me
+                            LEFT JOIN analytics.market_event_history meh
+                              ON meh.event_id = me.event_id
+                             AND meh.is_current
+                            LEFT JOIN analytics.market_contract mc
+                              ON mc.event_id = me.event_id
+                            WHERE meh.event_id IS NULL
+                              AND mc.market_contract_id IS NULL
+                            """
+                        )
+                    ).scalar_one()
+                )
+                details["orphan_current_without_history_count"] = orphan_current_count
+                ok = current_count == current_history_count + orphan_current_count
             results.append(
                 CheckResult(
                     f"history_current_alignment:{history_table}",
-                    current_count == current_history_count,
-                    {"current_count": current_count, "history_current_count": current_history_count, "key": key_name},
+                    ok,
+                    details,
                 )
             )
 
@@ -138,11 +165,14 @@ def run_checks(database_url: str) -> list[CheckResult]:
             "analytics.position_snapshot_part": _count(session, "analytics.position_snapshot_part"),
             "analytics.whale_score_snapshot_part": _count(session, "analytics.whale_score_snapshot_part"),
         }
+        required_shadow_tables = {name for name in shadow_counts if name != "analytics.position_snapshot_part"}
+        if not allow_empty_position_snapshots:
+            required_shadow_tables.add("analytics.position_snapshot_part")
         results.append(
             CheckResult(
                 "shadow_tables_populated",
-                all(value > 0 for value in shadow_counts.values()),
-                shadow_counts,
+                all(shadow_counts[name] > 0 for name in required_shadow_tables),
+                {**shadow_counts, "allow_empty_position_snapshots": allow_empty_position_snapshots},
             )
         )
 
@@ -167,7 +197,10 @@ def run_checks(database_url: str) -> list[CheckResult]:
 
 def main() -> int:
     args = parse_args()
-    results = run_checks(args.database_url)
+    results = run_checks(
+        args.database_url,
+        allow_empty_position_snapshots=args.allow_empty_position_snapshots,
+    )
     ok = all(item.ok for item in results)
     payload = {"ok": ok, "checks": [asdict(item) for item in results]}
     print(json.dumps(payload, indent=2))

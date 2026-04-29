@@ -23,6 +23,8 @@ from data_platform.models import (
     UserProfile,
     WhaleScoreSnapshot,
 )
+from data_platform.services.home_summary_snapshot import latest_home_summary_snapshot_payload
+from data_platform.services.research_analytics_snapshot import latest_research_analytics_view
 from data_platform.services.whale_scoring import load_resolved_market_outcomes, load_resolved_user_performance
 from data_platform.settings import get_settings
 
@@ -592,6 +594,14 @@ def latest_dashboard_markets(session: Session, limit: int = DEFAULT_LIMIT) -> di
 
 def home_summary(session: Session) -> dict[str, Any]:
     """Return a compact homepage summary for the React dashboard."""
+    cached_summary = latest_home_summary_snapshot_payload(session)
+    if cached_summary is not None:
+        return cached_summary
+    return _live_home_summary(session)
+
+
+def _live_home_summary(session: Session) -> dict[str, Any]:
+    """Fallback summary path used before the first cached snapshot is built."""
     latest_batch = _latest_whale_batch(session)
     whales_detected = 0
     trusted_whales = 0
@@ -710,6 +720,24 @@ def top_profitable_resolved_users(
     timeframe: str = "all",
 ) -> dict[str, Any]:
     """Return the top Polymarket users ranked by conservative resolved-market profitability."""
+    cached_payload = latest_research_analytics_view(
+        session,
+        timeframe=timeframe,
+        view_name="top_profitable_users",
+        limit=limit,
+    )
+    if cached_payload is not None:
+        return cached_payload
+    return _live_top_profitable_resolved_users(session, limit=limit, timeframe=timeframe)
+
+
+def _live_top_profitable_resolved_users(
+    session: Session,
+    limit: int = DEFAULT_LIMIT,
+    *,
+    timeframe: str = "all",
+) -> dict[str, Any]:
+    """Return top resolved-market profitability using live transaction scans."""
     start_time = timeframe_start(timeframe)
     resolved_performance_by_user, profitability_summary = load_resolved_user_performance(
         session,
@@ -834,6 +862,24 @@ def market_whale_concentration(
     timeframe: str = "all",
 ) -> dict[str, Any] | None:
     """Return the most whale-concentrated markets within a timeframe."""
+    cached_payload = latest_research_analytics_view(
+        session,
+        timeframe=timeframe,
+        view_name="market_whale_concentration",
+        limit=limit,
+    )
+    if cached_payload is not None:
+        return cached_payload
+    return _live_market_whale_concentration(session, limit=limit, timeframe=timeframe)
+
+
+def _live_market_whale_concentration(
+    session: Session,
+    limit: int = DEFAULT_LIMIT,
+    *,
+    timeframe: str = "all",
+) -> dict[str, Any] | None:
+    """Return market whale concentration using live transaction scans."""
     latest_batch = _latest_whale_batch(session)
     if latest_batch is None:
         return None
@@ -949,6 +995,24 @@ def recent_whale_entries(
     timeframe: str = "all",
 ) -> dict[str, Any] | None:
     """Return the most recent whale buy-entry markets within a timeframe."""
+    cached_payload = latest_research_analytics_view(
+        session,
+        timeframe=timeframe,
+        view_name="recent_whale_entries",
+        limit=limit,
+    )
+    if cached_payload is not None:
+        return cached_payload
+    return _live_recent_whale_entries(session, limit=limit, timeframe=timeframe)
+
+
+def _live_recent_whale_entries(
+    session: Session,
+    limit: int = DEFAULT_LIMIT,
+    *,
+    timeframe: str = "all",
+) -> dict[str, Any] | None:
+    """Return recent whale entry markets using live transaction scans."""
     latest_batch = _latest_whale_batch(session)
     if latest_batch is None:
         return None
@@ -1065,6 +1129,24 @@ def whale_entry_behavior(
     timeframe: str = "all",
 ) -> dict[str, Any] | None:
     """Return entry-price behavior for whale-labelled Polymarket users."""
+    cached_payload = latest_research_analytics_view(
+        session,
+        timeframe=timeframe,
+        view_name="whale_entry_behavior",
+        limit=limit,
+    )
+    if cached_payload is not None:
+        return cached_payload
+    return _live_whale_entry_behavior(session, limit=limit, timeframe=timeframe)
+
+
+def _live_whale_entry_behavior(
+    session: Session,
+    limit: int = DEFAULT_LIMIT,
+    *,
+    timeframe: str = "all",
+) -> dict[str, Any] | None:
+    """Return whale entry behavior using live transaction scans."""
     latest_batch = _latest_whale_batch(session)
     if latest_batch is None:
         return None

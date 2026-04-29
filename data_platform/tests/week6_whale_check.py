@@ -216,12 +216,16 @@ def _run_checks(require_data: bool) -> list[CheckResult]:
     expected_summary_keys = sorted(
         [
             "latest_ingestion",
+            "freshness_source",
+            "is_stale",
+            "last_successful_ingest_at",
             "most_whale_concentrated_market",
             "platform_coverage",
             "profitability_users",
             "resolved_markets_available",
             "resolved_markets_observed",
             "scoring_version",
+            "stale_as_of",
             "top_trusted_whale",
             "trusted_whales",
             "whales_detected",

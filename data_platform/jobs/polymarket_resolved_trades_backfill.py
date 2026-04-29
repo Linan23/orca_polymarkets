@@ -80,11 +80,40 @@ def parse_args() -> argparse.Namespace:
         default=0,
         help="Closed-event offset used when --refresh-closed-events is enabled.",
     )
+    parser.add_argument(
+        "--closed-event-order",
+        default="closedTime",
+        help="Gamma field used to sort closed-event refresh pages.",
+    )
+    parser.add_argument(
+        "--closed-event-ascending",
+        default="false",
+        choices=("true", "false"),
+        help="Gamma sort direction for closed-event refresh pages.",
+    )
     parser.add_argument("--timeout-seconds", type=float, default=20.0)
     parser.add_argument("--max-retries", type=int, default=5)
     parser.add_argument("--backoff-base-seconds", type=float, default=1.0)
     parser.add_argument("--backoff-cap-seconds", type=float, default=30.0)
     parser.add_argument("--per-request-delay-seconds", type=float, default=1.0)
+    parser.add_argument(
+        "--batch-count",
+        type=int,
+        default=1,
+        help="Number of sequential backfill batches to run. Each batch reselects target markets.",
+    )
+    parser.add_argument(
+        "--target-written-trades",
+        type=int,
+        default=0,
+        help="Stop once cumulative written trades across batches reaches this value. 0 disables the target.",
+    )
+    parser.add_argument(
+        "--target-markets-processed",
+        type=int,
+        default=0,
+        help="Stop once cumulative processed markets across batches reaches this value. 0 disables the target.",
+    )
     args = parser.parse_args()
 
     if args.market_limit <= 0:
@@ -103,6 +132,12 @@ def parse_args() -> argparse.Namespace:
         parser.error("--max-retries must be >= 0.")
     if args.per_request_delay_seconds < 0:
         parser.error("--per-request-delay-seconds must be >= 0.")
+    if args.batch_count <= 0:
+        parser.error("--batch-count must be > 0.")
+    if args.target_written_trades < 0:
+        parser.error("--target-written-trades must be >= 0.")
+    if args.target_markets_processed < 0:
+        parser.error("--target-markets-processed must be >= 0.")
     return args
 
 
@@ -146,6 +181,8 @@ def refresh_closed_events(session: Session, client: httpx.Client, args: argparse
         "active": "false",
         "limit": args.closed_event_limit,
         "offset": args.closed_event_offset,
+        "order": getattr(args, "closed_event_order", "closedTime"),
+        "ascending": getattr(args, "closed_event_ascending", "false"),
     }
     payload = request_json(client, url=POLYMARKET_EVENTS_URL, args=args, params=params)
     events = [item for item in payload if isinstance(item, dict)] if isinstance(payload, list) else []
@@ -189,7 +226,7 @@ def load_target_markets(session: Session, market_limit: int, *, only_uncovered: 
             | (MarketContract.last_trade_price <= RESOLUTION_PRICE_LOW)
         )
         .order_by(
-            desc(MarketEvent.closed_time),
+            desc(MarketEvent.closed_time).nulls_last(),
             desc(MarketContract.volume),
             desc(MarketContract.market_contract_id),
         )
@@ -328,10 +365,65 @@ def run_once(args: argparse.Namespace) -> dict[str, Any]:
     return summary
 
 
+def run_batches(args: argparse.Namespace) -> dict[str, Any]:
+    """Run sequential backfill batches until a bound or target is hit."""
+    started_at = datetime.now(timezone.utc)
+    output_path = Path(args.output_file)
+    batch_summaries: list[dict[str, Any]] = []
+    total_pages = 0
+    total_fetched_trades = 0
+    total_written_trades = 0
+    total_markets = 0
+    stop_reason = "batch_limit_reached"
+
+    for batch_index in range(1, args.batch_count + 1):
+        batch_summary = run_once(args)
+        batch_summary["batch_index"] = batch_index
+        batch_summaries.append(batch_summary)
+        total_pages += int(batch_summary["page_count"])
+        total_fetched_trades += int(batch_summary["fetched_trades"])
+        total_written_trades += int(batch_summary["written_trades"])
+        total_markets += int(batch_summary["market_count"])
+
+        if int(batch_summary["market_count"]) == 0:
+            stop_reason = "no_markets_selected"
+            break
+        if int(batch_summary["written_trades"]) == 0:
+            stop_reason = "no_new_trades_written"
+            break
+        if args.target_written_trades and total_written_trades >= args.target_written_trades:
+            stop_reason = "target_written_trades_reached"
+            break
+        if args.target_markets_processed and total_markets >= args.target_markets_processed:
+            stop_reason = "target_markets_processed_reached"
+            break
+
+    overall_summary = {
+        "started_at": started_at.isoformat(),
+        "finished_at": datetime.now(timezone.utc).isoformat(),
+        "batch_count_requested": args.batch_count,
+        "batch_count_completed": len(batch_summaries),
+        "target_written_trades": args.target_written_trades,
+        "target_markets_processed": args.target_markets_processed,
+        "market_count": total_markets,
+        "page_count": total_pages,
+        "fetched_trades": total_fetched_trades,
+        "written_trades": total_written_trades,
+        "stop_reason": stop_reason,
+        "batches": batch_summaries,
+    }
+    append_jsonl(output_path, {"batch_run_summary": overall_summary})
+    return overall_summary
+
+
 def main() -> int:
     """CLI entrypoint."""
     args = parse_args()
-    summary = run_once(args)
+    summary = (
+        run_batches(args)
+        if args.batch_count > 1 or args.target_written_trades > 0 or args.target_markets_processed > 0
+        else run_once(args)
+    )
     print(json.dumps(summary, sort_keys=True, default=str))
     return 0
 

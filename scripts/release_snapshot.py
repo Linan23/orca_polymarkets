@@ -47,13 +47,18 @@ def resolve_pg_dump() -> str:
     if path:
         return path
     candidates = (
+        "/usr/bin/pg_dump",
+        "/usr/lib/postgresql/16/bin/pg_dump",
+        "/usr/lib/postgresql/15/bin/pg_dump",
+        "/usr/lib/postgresql/14/bin/pg_dump",
+        "/usr/local/bin/pg_dump",
         "/opt/homebrew/opt/postgresql@16/bin/pg_dump",
         "/usr/local/opt/postgresql@16/bin/pg_dump",
     )
     for candidate in candidates:
         if os.path.exists(candidate):
             return candidate
-    raise FileNotFoundError("pg_dump not found in PATH or common Homebrew locations.")
+    raise FileNotFoundError("pg_dump not found in PATH or common Linux/Homebrew locations.")
 
 
 def sha256_file(path: Path) -> str:

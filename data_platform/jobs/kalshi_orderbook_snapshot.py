@@ -29,7 +29,13 @@ from clients import Environment, KalshiHttpClient
 from data_platform.db.session import session_scope
 from data_platform.ingest.kalshi import ingest_orderbook_batch
 from data_platform.ingest.store import parse_datetime
-from data_platform.models import MarketContract, Platform
+from data_platform.models import MarketContract, MarketEvent, Platform
+from data_platform.services.market_scope import (
+    add_focus_domain_argument,
+    build_market_scope_texts,
+    canonicalize_focus_domains,
+    matches_focus_domains,
+)
 
 ZERO = Decimal("0")
 DEFAULT_ENVIRONMENT = "prod"
@@ -41,6 +47,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--database-url", default="", help="Optional database URL override.")
     parser.add_argument("--environment", choices=["demo", "prod"], default=DEFAULT_ENVIRONMENT)
     parser.add_argument("--market-limit", type=int, default=10, help="Number of top Kalshi markets to sample.")
+    add_focus_domain_argument(parser)
     parser.add_argument(
         "--output-file",
         default="kalshi-scraper/kalshi_data/orderbook_snapshots.jsonl",
@@ -59,6 +66,10 @@ def parse_args() -> argparse.Namespace:
         parser.error("--max-requests must be >= 0.")
     if args.timeout_seconds <= 0:
         parser.error("--timeout-seconds must be > 0.")
+    try:
+        args.focus_domains = canonicalize_focus_domains(args.focus_domain)
+    except ValueError as exc:
+        parser.error(str(exc))
     return args
 
 
@@ -86,18 +97,30 @@ def _load_client(environment_name: str) -> KalshiHttpClient:
 
 
 
-def _load_target_markets(session: Session, market_limit: int) -> list[MarketContract]:
+def _load_target_markets(session: Session, market_limit: int, *, focus_domains: list[str]) -> list[MarketContract]:
     """Return top active Kalshi markets already tracked in the normalized DB."""
-    return session.scalars(
-        select(MarketContract)
+    rows = session.execute(
+        select(MarketContract, MarketEvent)
         .join(Platform, Platform.platform_id == MarketContract.platform_id)
+        .join(MarketEvent, MarketEvent.event_id == MarketContract.event_id)
         .where(Platform.platform_name == "kalshi")
         .where(MarketContract.market_slug.is_not(None))
         .where(MarketContract.is_active.is_(True))
         .where(MarketContract.is_closed.is_(False))
         .order_by(desc(MarketContract.volume), desc(MarketContract.updated_at))
-        .limit(market_limit * 5)
+        .limit(market_limit * 12)
     ).all()
+    selected: list[MarketContract] = []
+    for market, event in rows:
+        if focus_domains and not matches_focus_domains(
+            build_market_scope_texts(platform_name="kalshi", event=event, market=market),
+            focus_domains,
+        ):
+            continue
+        selected.append(market)
+        if len(selected) >= market_limit:
+            break
+    return selected
 
 
 
@@ -179,7 +202,7 @@ def append_jsonl(path: Path, record: dict[str, Any]) -> None:
 def run_once(args: argparse.Namespace) -> dict[str, Any]:
     """Run one Kalshi orderbook snapshot cycle."""
     with session_scope(args.database_url or None) as session:
-        markets = _load_target_markets(session, args.market_limit)
+        markets = _load_target_markets(session, args.market_limit, focus_domains=args.focus_domains)
         if not markets:
             summary = {
                 "scraped_at": datetime.now(timezone.utc).isoformat(),
