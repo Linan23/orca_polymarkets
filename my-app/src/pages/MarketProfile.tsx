@@ -73,10 +73,7 @@ export default function MarketProfile() {
           <section className="market-summary-card">
             <div className="market-summary-left">
               <p className="summary-label">Current Yes Probability</p>
-              <div className="summary-main">
-                <h2>{formatPercent(data.price)}</h2>
-                <span className="summary-trend">No {formatOpposingPercent(data.odds ?? data.price)}</span>
-              </div>
+        
 
               <div className="summary-stats">
                 <div className="stat-chip">
@@ -98,16 +95,17 @@ export default function MarketProfile() {
               </div>
             </div>
 
-            <div className="market-summary-right">
-              <button className="trade-btn trade-btn-yes" type="button">
-                <span className="trade-label">Top Whale Traders</span>
-                <strong>{data.whale_market_focus ?? "Broad"}</strong>
-              </button>
-              <button className="trade-btn trade-btn-no" type="button">
-                <span className="trade-label">Snapshot</span>
-                <strong>{data.snapshot_time ?? "--"}</strong>
-              </button>
-            </div>
+<div className="market-summary-right">
+  <button className="trade-btn trade-btn-yes" type="button">
+    <span className="trade-label">Yes Probability</span>
+    <strong>{formatPercent(data.price)}</strong>
+  </button>
+
+  <button className="trade-btn trade-btn-no" type="button">
+    <span className="trade-label">No Probability</span>
+    <strong>{formatOpposingPercent(data.odds ?? data.price)}</strong>
+  </button>
+</div>
           </section>
 
           <section className="card profile-card">

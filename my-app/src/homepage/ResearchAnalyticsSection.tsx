@@ -352,8 +352,11 @@ export default function ResearchAnalyticsSection({
   persistTimeframePreference = false,
 }: ResearchAnalyticsSectionProps) {
   const { isAuthenticated, preferences, updatePreferences } = useAuth();
-  const [publicTimeframe, setPublicTimeframe] = useState<AnalyticsTimeframe>("all");
-  const [userSearch, setUserSearch] = useState("");
+const [publicTimeframe, setPublicTimeframe] = useState<AnalyticsTimeframe>("all");
+const [userSearch, setUserSearch] = useState("");
+const [activeResearchTab, setActiveResearchTab] = useState<
+  "topUsers" | "recentEntries" | "topMarkets" | "entryBehavior"
+>("topUsers");
   const { isUserFollowed, toggleUser, isMarketFollowed, toggleMarket } = useWatchlist();
   const timeframe =
     persistTimeframePreference && isAuthenticated ? preferences.homepage.research_timeframe : publicTimeframe;
@@ -418,196 +421,338 @@ export default function ResearchAnalyticsSection({
 
   return (
     <section className="analytics-section">
-      <div className="summary-section-header">
-        <p className="leaderboard-kicker">Research Views</p>
-        <h2>Whale Behavior Signals</h2>
-        <p className="summary-card-subtext">
-          Conservative resolved-user profitability and latest market concentration, ready for report/dashboard use.
-        </p>
-        {refreshing && <p className="summary-card-subtext">Updating research view...</p>}
-        <div className="analytics-toolbar">
-          <label className="filter-field filter-field-search">
-            <span>Search trader</span>
-            <input
-              value={userSearch}
-              onChange={(event) => setUserSearch(event.target.value)}
-              placeholder="username or wallet"
-              type="search"
-            />
-          </label>
-          <label className="filter-field analytics-timeframe-field">
-            <span>Timeframe</span>
-            <select value={timeframe} onChange={(event) => handleTimeframeChange(event.target.value as AnalyticsTimeframe)}>
-              <option value="7d">Last 7 days</option>
-              <option value="30d">Last 30 days</option>
-              <option value="90d">Last 90 days</option>
-              <option value="all">All time</option>
-            </select>
-          </label>
-        </div>
+<div className="research-search-banner">
+  <div className="research-search-copy">
+    <p className="leaderboard-kicker">Research Views</p>
+
+    <h2>Whale Behavior Signals</h2>
+
+    <p>
+      Search a trader, username, or wallet to explore whale activity,
+      profitability, entry behavior, and market concentration.
+    </p>
+
+    <label className="research-search-field">
+      <span>Search Trader</span>
+
+      <div className="research-search-input-shell">
+        <span className="research-search-icon">⌕</span>
+
+        <input
+          value={userSearch}
+          onChange={(event) => setUserSearch(event.target.value)}
+          placeholder="Search username or wallet..."
+          type="search"
+        />
+
+        {userSearch.trim().length > 0 && (
+          <button
+            type="button"
+            className="research-search-clear"
+            onClick={() => setUserSearch("")}
+            aria-label="Clear trader search"
+          >
+            ×
+          </button>
+        )}
       </div>
+    </label>
+
+    {refreshing && (
+      <p className="research-refresh-note">Updating research view...</p>
+    )}
+  </div>
+</div>
 
       {loading && <div className="status-panel">Loading research analytics...</div>}
       {error && <div className="status-panel error-panel">{error}</div>}
 
       {!loading && !error && data && (
-        <div className="analytics-grid research-analytics-grid">
-          <section className="leaderboard-card">
-            <div className="leaderboard-top">
-              <p className="leaderboard-kicker">Polymarket</p>
-              <h2>Top Profitable Resolved Users</h2>
-              <p className="leaderboard-count">Ranked by conservative realized P&amp;L on resolved markets for {timeframe}.</p>
-              <p className="leaderboard-count">
-                Showing {visibleTopUsers.length} of top {RESEARCH_CARD_LIMIT} traders
-              </p>
-              {showExportControls && visibleTopUsers.length > 0 && (
-                <div className="analytics-export-row">
-                  <button
-                    type="button"
-                    className="analytics-export-btn"
-                    onClick={() => downloadRowsAsCsv(`top_profitable_resolved_users_${timeframe}.csv`, visibleTopUsers)}
-                  >
-                    Export CSV
-                  </button>
-                  <button
-                    type="button"
-                    className="analytics-export-btn"
-                    onClick={() => downloadRowsAsJson(`top_profitable_resolved_users_${timeframe}.json`, visibleTopUsers)}
-                  >
-                    Export JSON
-                  </button>
-                </div>
-              )}
-            </div>
-            {visibleTopUsers.length > 0 ? (
-              <ResearchUserRows items={visibleTopUsers} isUserFollowed={isUserFollowed} onToggleUser={toggleUser} />
-            ) : (
-              <div className="status-panel">
-                {userSearch.trim().length > 0
-                  ? "No profitable traders match that username or wallet."
-                  : "No resolved-user profitability rows are available yet."}
-              </div>
-            )}
-          </section>
+       <div className="research-tabs-wrap">
+  <div className="research-tabs-row">
+    <button
+      type="button"
+      className={`research-tab ${activeResearchTab === "topUsers" ? "active" : ""}`}
+      onClick={() => setActiveResearchTab("topUsers")}
+    >
+      Top Profitable Resolved Users
+    </button>
 
-          <section className="leaderboard-card">
-            <div className="leaderboard-top">
-              <p className="leaderboard-kicker">Live Flow</p>
-              <h2>Recent Whale Entries</h2>
-              <p className="leaderboard-count">Top {RESEARCH_CARD_LIMIT} markets by latest whale buy entry for {timeframe}.</p>
-              <p className="leaderboard-count">
-                Showing {visibleRecentEntries.length} of top {RESEARCH_CARD_LIMIT} markets
-              </p>
-              {showExportControls && visibleRecentEntries.length > 0 && (
-                <div className="analytics-export-row">
-                  <button
-                    type="button"
-                    className="analytics-export-btn"
-                    onClick={() => downloadRowsAsCsv(`recent_whale_entries_${timeframe}.csv`, visibleRecentEntries)}
-                  >
-                    Export CSV
-                  </button>
-                  <button
-                    type="button"
-                    className="analytics-export-btn"
-                    onClick={() => downloadRowsAsJson(`recent_whale_entries_${timeframe}.json`, visibleRecentEntries)}
-                  >
-                    Export JSON
-                  </button>
-                </div>
-              )}
-            </div>
-            {visibleRecentEntries.length > 0 ? (
-              <ResearchRecentEntryRows
-                items={visibleRecentEntries}
-                isMarketFollowed={isMarketFollowed}
-                onToggleMarket={toggleMarket}
-              />
-            ) : (
-              <div className="status-panel">No recent whale entry markets are available for that timeframe.</div>
-            )}
-          </section>
+    <button
+      type="button"
+      className={`research-tab ${activeResearchTab === "recentEntries" ? "active" : ""}`}
+      onClick={() => setActiveResearchTab("recentEntries")}
+    >
+      Recent Whale Entries
+    </button>
 
-          <section className="leaderboard-card">
-            <div className="leaderboard-top">
-              <p className="leaderboard-kicker">Cross-Platform Markets</p>
-              <h2>Whale Concentration by Market</h2>
-              <p className="leaderboard-count">Ranked by trusted-whale count, then whale count, then market volume for {timeframe}.</p>
-              <p className="leaderboard-count">
-                Showing {visibleTopMarkets.length} of top {RESEARCH_CARD_LIMIT} markets
-              </p>
-              {showExportControls && visibleTopMarkets.length > 0 && (
-                <div className="analytics-export-row">
-                  <button
-                    type="button"
-                    className="analytics-export-btn"
-                    onClick={() => downloadRowsAsCsv(`market_whale_concentration_${timeframe}.csv`, visibleTopMarkets)}
-                  >
-                    Export CSV
-                  </button>
-                  <button
-                    type="button"
-                    className="analytics-export-btn"
-                    onClick={() => downloadRowsAsJson(`market_whale_concentration_${timeframe}.json`, visibleTopMarkets)}
-                  >
-                    Export JSON
-                  </button>
-                </div>
-              )}
-            </div>
-            {visibleTopMarkets.length > 0 ? (
-              <ResearchMarketRows
-                items={visibleTopMarkets}
-                isMarketFollowed={isMarketFollowed}
-                onToggleMarket={toggleMarket}
-              />
-            ) : (
-              <div className="status-panel">No market concentration rows are available yet.</div>
-            )}
-          </section>
+    <button
+      type="button"
+      className={`research-tab ${activeResearchTab === "topMarkets" ? "active" : ""}`}
+      onClick={() => setActiveResearchTab("topMarkets")}
+    >
+      Whale Concentration by Market
+    </button>
 
-          <section className="leaderboard-card">
-            <div className="leaderboard-top">
-              <p className="leaderboard-kicker">Polymarket Whales</p>
-              <h2>Whale Entry Behavior</h2>
-              <p className="leaderboard-count">Weighted average buy-entry price and entry size for {timeframe}.</p>
-              <p className="leaderboard-count">
-                Showing {visibleEntryBehavior.length} of top {RESEARCH_CARD_LIMIT} traders
-              </p>
-              {showExportControls && visibleEntryBehavior.length > 0 && (
-                <div className="analytics-export-row">
-                  <button
-                    type="button"
-                    className="analytics-export-btn"
-                    onClick={() => downloadRowsAsCsv(`whale_entry_behavior_${timeframe}.csv`, visibleEntryBehavior)}
-                  >
-                    Export CSV
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => downloadRowsAsJson(`whale_entry_behavior_${timeframe}.json`, visibleEntryBehavior)}
-                    className="analytics-export-btn"
-                  >
-                    Export JSON
-                  </button>
-                </div>
-              )}
+    <button
+      type="button"
+      className={`research-tab ${activeResearchTab === "entryBehavior" ? "active" : ""}`}
+      onClick={() => setActiveResearchTab("entryBehavior")}
+    >
+      Whale Entry Behavior
+    </button>
+
+    <label className="research-tabs-timeframe-field">
+  <span>Timeframe</span>
+
+  <select
+    value={timeframe}
+    onChange={(event) =>
+      handleTimeframeChange(event.target.value as AnalyticsTimeframe)
+    }
+  >
+    <option value="7d">Last 7 days</option>
+    <option value="30d">Last 30 days</option>
+    <option value="90d">Last 90 days</option>
+    <option value="all">All time</option>
+  </select>
+</label>
+  </div>
+
+
+
+  <div className="research-tab-panel">
+    {activeResearchTab === "topUsers" && (
+      <section className="leaderboard-card">
+        <div className="leaderboard-top">
+          <p className="leaderboard-kicker">Polymarket</p>
+          <h2>Top Profitable Resolved Users</h2>
+          <p className="leaderboard-count">
+            Ranked by conservative realized P&amp;L on resolved markets for {timeframe}.
+          </p>
+          <p className="leaderboard-count">
+            Showing {visibleTopUsers.length} of top {RESEARCH_CARD_LIMIT} traders
+          </p>
+
+          {showExportControls && visibleTopUsers.length > 0 && (
+            <div className="analytics-export-row">
+              <button
+                type="button"
+                className="analytics-export-btn"
+                onClick={() =>
+                  downloadRowsAsCsv(
+                    `top_profitable_resolved_users_${timeframe}.csv`,
+                    visibleTopUsers
+                  )
+                }
+              >
+                Export CSV
+              </button>
+
+              <button
+                type="button"
+                className="analytics-export-btn"
+                onClick={() =>
+                  downloadRowsAsJson(
+                    `top_profitable_resolved_users_${timeframe}.json`,
+                    visibleTopUsers
+                  )
+                }
+              >
+                Export JSON
+              </button>
             </div>
-            {visibleEntryBehavior.length > 0 ? (
-              <ResearchEntryRows
-                items={visibleEntryBehavior}
-                isUserFollowed={isUserFollowed}
-                onToggleUser={toggleUser}
-              />
-            ) : (
-              <div className="status-panel">
-                {userSearch.trim().length > 0
-                  ? "No whale entry rows match that username or wallet."
-                  : "No whale entry rows are available yet."}
-              </div>
-            )}
-          </section>
+          )}
         </div>
+
+        {visibleTopUsers.length > 0 ? (
+          <ResearchUserRows
+            items={visibleTopUsers}
+            isUserFollowed={isUserFollowed}
+            onToggleUser={toggleUser}
+          />
+        ) : (
+          <div className="status-panel">
+            {userSearch.trim().length > 0
+              ? "No profitable traders match that username or wallet."
+              : "No resolved-user profitability rows are available yet."}
+          </div>
+        )}
+      </section>
+    )}
+
+    {activeResearchTab === "recentEntries" && (
+      <section className="leaderboard-card">
+        <div className="leaderboard-top">
+          <p className="leaderboard-kicker">Live Flow</p>
+          <h2>Recent Whale Entries</h2>
+          <p className="leaderboard-count">
+            Top {RESEARCH_CARD_LIMIT} markets by latest whale buy entry for {timeframe}.
+          </p>
+          <p className="leaderboard-count">
+            Showing {visibleRecentEntries.length} of top {RESEARCH_CARD_LIMIT} markets
+          </p>
+
+          {showExportControls && visibleRecentEntries.length > 0 && (
+            <div className="analytics-export-row">
+              <button
+                type="button"
+                className="analytics-export-btn"
+                onClick={() =>
+                  downloadRowsAsCsv(
+                    `recent_whale_entries_${timeframe}.csv`,
+                    visibleRecentEntries
+                  )
+                }
+              >
+                Export CSV
+              </button>
+
+              <button
+                type="button"
+                className="analytics-export-btn"
+                onClick={() =>
+                  downloadRowsAsJson(
+                    `recent_whale_entries_${timeframe}.json`,
+                    visibleRecentEntries
+                  )
+                }
+              >
+                Export JSON
+              </button>
+            </div>
+          )}
+        </div>
+
+        {visibleRecentEntries.length > 0 ? (
+          <ResearchRecentEntryRows
+            items={visibleRecentEntries}
+            isMarketFollowed={isMarketFollowed}
+            onToggleMarket={toggleMarket}
+          />
+        ) : (
+          <div className="status-panel">
+            No recent whale entry markets are available for that timeframe.
+          </div>
+        )}
+      </section>
+    )}
+
+    {activeResearchTab === "topMarkets" && (
+      <section className="leaderboard-card">
+        <div className="leaderboard-top">
+          <p className="leaderboard-kicker">Cross-Platform Markets</p>
+          <h2>Whale Concentration by Market</h2>
+          <p className="leaderboard-count">
+            Ranked by trusted-whale count, then whale count, then market volume for {timeframe}.
+          </p>
+          <p className="leaderboard-count">
+            Showing {visibleTopMarkets.length} of top {RESEARCH_CARD_LIMIT} markets
+          </p>
+
+          {showExportControls && visibleTopMarkets.length > 0 && (
+            <div className="analytics-export-row">
+              <button
+                type="button"
+                className="analytics-export-btn"
+                onClick={() =>
+                  downloadRowsAsCsv(
+                    `market_whale_concentration_${timeframe}.csv`,
+                    visibleTopMarkets
+                  )
+                }
+              >
+                Export CSV
+              </button>
+
+              <button
+                type="button"
+                className="analytics-export-btn"
+                onClick={() =>
+                  downloadRowsAsJson(
+                    `market_whale_concentration_${timeframe}.json`,
+                    visibleTopMarkets
+                  )
+                }
+              >
+                Export JSON
+              </button>
+            </div>
+          )}
+        </div>
+
+        {visibleTopMarkets.length > 0 ? (
+          <ResearchMarketRows
+            items={visibleTopMarkets}
+            isMarketFollowed={isMarketFollowed}
+            onToggleMarket={toggleMarket}
+          />
+        ) : (
+          <div className="status-panel">No market concentration rows are available yet.</div>
+        )}
+      </section>
+    )}
+
+    {activeResearchTab === "entryBehavior" && (
+      <section className="leaderboard-card">
+        <div className="leaderboard-top">
+          <p className="leaderboard-kicker">Polymarket Whales</p>
+          <h2>Whale Entry Behavior</h2>
+          <p className="leaderboard-count">
+            Weighted average buy-entry price and entry size for {timeframe}.
+          </p>
+          <p className="leaderboard-count">
+            Showing {visibleEntryBehavior.length} of top {RESEARCH_CARD_LIMIT} traders
+          </p>
+
+          {showExportControls && visibleEntryBehavior.length > 0 && (
+            <div className="analytics-export-row">
+              <button
+                type="button"
+                className="analytics-export-btn"
+                onClick={() =>
+                  downloadRowsAsCsv(
+                    `whale_entry_behavior_${timeframe}.csv`,
+                    visibleEntryBehavior
+                  )
+                }
+              >
+                Export CSV
+              </button>
+
+              <button
+                type="button"
+                className="analytics-export-btn"
+                onClick={() =>
+                  downloadRowsAsJson(
+                    `whale_entry_behavior_${timeframe}.json`,
+                    visibleEntryBehavior
+                  )
+                }
+              >
+                Export JSON
+              </button>
+            </div>
+          )}
+        </div>
+
+        {visibleEntryBehavior.length > 0 ? (
+          <ResearchEntryRows
+            items={visibleEntryBehavior}
+            isUserFollowed={isUserFollowed}
+            onToggleUser={toggleUser}
+          />
+        ) : (
+          <div className="status-panel">
+            {userSearch.trim().length > 0
+              ? "No whale entry rows match that username or wallet."
+              : "No whale entry rows are available yet."}
+          </div>
+        )}
+      </section>
+    )}
+  </div>
+</div>
       )}
     </section>
   );

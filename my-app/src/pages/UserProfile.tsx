@@ -437,7 +437,7 @@ export default function UserProfile() {
   </div>
 
   <div className="metric-card">
-    <span>ROI</span>
+    <span>Return on Investment</span>
     <strong>{formatPercent(resolved?.realized_roi)}</strong>
   </div>
 

@@ -12,11 +12,9 @@ export default function TopNavbar() {
     <header className="topbar">
       <div className="topbar-inner">
         <div className="topbar-left">
-          
           <Link to="/" className="topbar-brand">
-  <img src={logo} alt="Orca logo" className="brand-logo" />
-
-</Link>
+            <img src={logo} alt="Orca logo" className="brand-logo" />
+          </Link>
 
           <nav className="topbar-nav">
             <NavLink to="/" end className={getLinkClass}>
@@ -33,6 +31,10 @@ export default function TopNavbar() {
 
             <NavLink to="/definitions" className={getLinkClass}>
               Definitions
+            </NavLink>
+
+            <NavLink to="/about" className={getLinkClass}>
+              About Us
             </NavLink>
           </nav>
         </div>

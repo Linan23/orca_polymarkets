@@ -32,18 +32,18 @@ export default function HomePage() {
           <h2>Whale Activity</h2>
 
           <div className="signal-line">
-            <span>Trusted whale coverage</span>
-            <strong>2</strong>
+            <span>Number of Trusted Whales</span>
+            <strong>DATA?</strong>
           </div>
 
           <div className="signal-line">
-            <span>Top trust score</span>
-            <strong>9172.690</strong>
+            <span>Total Number of Whales Tracked</span>
+            <strong>DATA?</strong>
           </div>
 
           <div className="signal-line">
-            <span>Tracked trades</span>
-            <strong>77</strong>
+            <span>Total Tracked Trades</span>
+            <strong>DATA?</strong>
           </div>
         </div>
       </section>
