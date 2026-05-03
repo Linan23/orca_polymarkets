@@ -20,7 +20,7 @@ export default function HomepageSummaryCards() {
         <p className="leaderboard-kicker">Live System State</p>
         <h2>Research Summary</h2>
         <p className="summary-card-subtext">
-          Whale identity metrics currently derive from Polymarket user history. Kalshi remains market-level only.
+          Whale identity metrics currently derive from Polymarket user history.
         </p>
       </div>
 
@@ -34,7 +34,7 @@ export default function HomepageSummaryCards() {
             <div className="summary-card-value">{data.whales_detected}</div>
             <p className="summary-card-subtext">
               {data.trusted_whales} trusted whale{data.trusted_whales === 1 ? "" : "s"} in
-              scoring batch {data.scoring_version ?? "--"}.
+              Total Number of Whales Tracked {data.scoring_version ?? "--"}.
             </p>
             <div className="summary-chip-row">
               <span className="meta-pill">Resolved {data.resolved_markets_observed}/{data.resolved_markets_available}</span>
