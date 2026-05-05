@@ -62,8 +62,8 @@ export default function AboutUsPage() {
     <div className="page page-about">
       <TopNavbar />
 
-      <section className="about-hero-dark">
-        <div className="about-hero-inner">
+      <section className="definitions-hero">
+        <div className="definitions-hero-inner">
           <p className="eyebrow">Orca Polymarkets</p>
 
           <h1>About the dashboard behind the whale signals.</h1>
@@ -157,4 +157,5 @@ export default function AboutUsPage() {
       </section>
     </div>
   );
+
 }
