@@ -13,6 +13,7 @@ import argparse
 from datetime import datetime, timedelta, timezone
 import json
 import math
+import os
 from pathlib import Path
 import sys
 from typing import Any
@@ -36,6 +37,7 @@ DEFAULT_MODEL_VERSION = "market_profile_hybrid_whale_trend_v1"
 DEFAULT_FEATURE_SCHEMA_VERSION = "market_profile_prediction_snapshot_v2"
 PREDICTION_WINDOWS = (12, 24)
 DEFAULT_INSERT_BATCH_SIZE = 1000
+DEFAULT_LIVE_FEATURE_MARKET_LIMIT = 1000
 MAX_SIGNAL_DELTA_BY_WINDOW = {12: 6.0, 24: 9.0}
 PHYSICAL_SPORTS_TERMS = (
     "nba", "nfl", "mlb", "nhl", "ufc", "soccer", "football", "tennis", "golf",
@@ -708,6 +710,7 @@ def generate_prediction_snapshots(
     model_version: str,
     feature_schema_version: str,
     create_table: bool,
+    live_feature_market_limit: int,
 ) -> dict[str, Any]:
     """Generate and persist all-market prediction snapshot rows."""
     if create_table:
@@ -742,11 +745,16 @@ def generate_prediction_snapshots(
             continue
         eligible_market_rows.append(row)
 
+    live_feature_market_rows = (
+        eligible_market_rows[:live_feature_market_limit]
+        if live_feature_market_limit > 0
+        else eligible_market_rows
+    )
     live_feature_index = _load_live_whale_signal_index(
         session,
         platform_name=platform_name,
         as_of=generated_at,
-        market_ids=[int(row["market_contract_id"]) for row in eligible_market_rows],
+        market_ids=[int(row["market_contract_id"]) for row in live_feature_market_rows],
     )
 
     local_prediction_count = 0
@@ -819,6 +827,8 @@ def generate_prediction_snapshots(
         "queried_market_count": len(raw_market_rows),
         "excluded_physical_sports_market_count": excluded_sports_count,
         "snapshot_row_count": len(snapshot_rows),
+        "live_feature_market_count": len(live_feature_market_rows),
+        "live_feature_market_limit": live_feature_market_limit,
         "report_prediction_row_count": local_prediction_count,
         "local_prediction_row_count": local_prediction_count,
         "live_model_prediction_row_count": live_prediction_count,
@@ -838,6 +848,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--local-report-path", default=str(WHALE_ANCHORED_DELTA_JSON_PATH))
     parser.add_argument("--model-version", default=DEFAULT_MODEL_VERSION)
     parser.add_argument("--feature-schema-version", default=DEFAULT_FEATURE_SCHEMA_VERSION)
+    parser.add_argument(
+        "--live-feature-market-limit",
+        type=int,
+        default=int(os.getenv("ML_LIVE_FEATURE_MARKET_LIMIT", str(DEFAULT_LIVE_FEATURE_MARKET_LIMIT))),
+        help=(
+            "Maximum newest active markets to include in the expensive recent-whale feature scan. "
+            "Use 0 for no cap; all other markets still get flat current-odds fallback predictions."
+        ),
+    )
     parser.add_argument("--create-table", action="store_true", help="Create the table locally if the migration has not run.")
     return parser.parse_args()
 
@@ -855,6 +874,7 @@ def main() -> int:
             model_version=args.model_version,
             feature_schema_version=args.feature_schema_version,
             create_table=bool(args.create_table),
+            live_feature_market_limit=int(args.live_feature_market_limit),
         )
     print(json.dumps(summary, sort_keys=True))
     return 0 if summary.get("ok") else 1
