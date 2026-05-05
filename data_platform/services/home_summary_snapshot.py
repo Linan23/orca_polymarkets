@@ -174,6 +174,43 @@ _PLATFORM_COVERAGE_SQL = text(
     """
 )
 
+_MARKET_CATEGORY_COVERAGE_SQL = text(
+    """
+    WITH category_counts AS (
+      SELECT
+        COALESCE(NULLIF(BTRIM(me.category), ''), 'Uncategorized') AS category_name,
+        COUNT(*)::integer AS market_count
+      FROM analytics.market_contract mc
+      JOIN analytics.market_event me
+        ON me.event_id = mc.event_id
+      JOIN analytics.platform p
+        ON p.platform_id = mc.platform_id
+      WHERE p.platform_name = 'polymarket'
+      GROUP BY 1
+    ),
+    ranked AS (
+      SELECT
+        category_name,
+        market_count,
+        ROW_NUMBER() OVER (ORDER BY market_count DESC, category_name ASC) AS category_rank
+      FROM category_counts
+    ),
+    grouped AS (
+      SELECT
+        CASE WHEN category_rank <= :limit THEN category_name ELSE 'Other' END AS category_name,
+        SUM(market_count)::integer AS market_count
+      FROM ranked
+      GROUP BY 1
+    )
+    SELECT category_name, market_count
+    FROM grouped
+    ORDER BY
+      CASE WHEN category_name = 'Other' THEN 1 ELSE 0 END,
+      market_count DESC,
+      category_name ASC
+    """
+)
+
 _LATEST_DASHBOARD_TIME_SQL = text(
     """
     SELECT generated_at
@@ -186,6 +223,18 @@ _LATEST_DASHBOARD_TIME_SQL = text(
 
 def _iso(value: datetime | None) -> str | None:
     return value.isoformat() if value is not None else None
+
+
+def market_category_coverage_payload(session: Session, *, limit: int = 7) -> list[dict[str, Any]]:
+    """Return Polymarket market counts grouped by the top event categories."""
+    rows = session.execute(_MARKET_CATEGORY_COVERAGE_SQL, {"limit": limit}).mappings().all()
+    return [
+        {
+            "category_name": row["category_name"],
+            "market_count": int(row["market_count"] or 0),
+        }
+        for row in rows
+    ]
 
 
 def _latest_successful_scrape_time(session: Session) -> datetime | None:
@@ -287,6 +336,7 @@ def compose_home_summary_payload(session: Session) -> dict[str, Any]:
 
     resolved_row = session.execute(_RESOLVED_COVERAGE_SQL).mappings().one()
     platform_rows = session.execute(_PLATFORM_COVERAGE_SQL).mappings().all()
+    market_category_coverage = market_category_coverage_payload(session)
     latest_dashboard_time = session.execute(_LATEST_DASHBOARD_TIME_SQL).scalar_one_or_none()
     payload = {
         "scoring_version": scoring_version,
@@ -298,6 +348,7 @@ def compose_home_summary_payload(session: Session) -> dict[str, Any]:
         "top_trusted_whale": top_trusted_whale,
         "most_whale_concentrated_market": most_whale_concentrated_market,
         "latest_ingestion": _latest_scrape_run_payload(session, last_successful_ingest_at=last_successful_ingest_at),
+        "market_category_coverage": market_category_coverage,
         "platform_coverage": [
             {
                 "platform_name": row["platform_name"],
@@ -366,6 +417,7 @@ def latest_home_summary_snapshot_payload(session: Session) -> dict[str, Any] | N
         session,
         last_successful_ingest_at=last_successful_ingest_at,
     )
+    payload["market_category_coverage"] = market_category_coverage_payload(session)
     payload.update(
         _freshness_metadata(
             observed_at=row.generated_at,

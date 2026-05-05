@@ -322,6 +322,11 @@ export type HomeSummaryPlatformCoverage = {
   orderbook_snapshot_count: number;
 };
 
+export type HomeSummaryMarketCategoryCoverage = {
+  category_name: string;
+  market_count: number;
+};
+
 export type HomeSummary = {
   scoring_version: string | null;
   is_stale?: boolean;
@@ -361,6 +366,7 @@ export type HomeSummary = {
     error_count: number;
     error_summary: string | null;
   } | null;
+  market_category_coverage?: HomeSummaryMarketCategoryCoverage[];
   platform_coverage: HomeSummaryPlatformCoverage[];
 };
 

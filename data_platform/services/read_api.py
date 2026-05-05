@@ -25,7 +25,7 @@ from data_platform.models import (
     UserProfile,
     WhaleScoreSnapshot,
 )
-from data_platform.services.home_summary_snapshot import latest_home_summary_snapshot_payload
+from data_platform.services.home_summary_snapshot import latest_home_summary_snapshot_payload, market_category_coverage_payload
 from data_platform.services.ml_reports import market_profile_ml_trend
 from data_platform.services.research_analytics_snapshot import latest_research_analytics_view
 from data_platform.services.whale_event_sequences import whale_event_sequence_for_market
@@ -1313,6 +1313,7 @@ def _live_home_summary(session: Session) -> dict[str, Any]:
         "top_trusted_whale": top_trusted_whale,
         "most_whale_concentrated_market": most_whale_concentrated_market,
         "latest_ingestion": latest_ingestion,
+        "market_category_coverage": market_category_coverage_payload(session),
         "platform_coverage": platform_coverage,
     }
     latest_dashboard = session.scalars(select(Dashboard).order_by(desc(Dashboard.generated_at)).limit(1)).first()
