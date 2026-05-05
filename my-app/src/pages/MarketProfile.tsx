@@ -180,7 +180,7 @@ function MarketPredictionTrendChart({ cases }: { cases: MarketProfileMlPredictio
 
   return (
     <div className="market-ml-chart-shell">
-      <svg className="market-ml-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Local ML prediction trend">
+      <svg className="market-ml-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="ML prediction trend">
         {[minOdds, Math.round((minOdds + maxOdds) / 2), maxOdds].map((odds) => (
           <g key={`grid-${odds}`}>
             <line x1={left} x2={width - right} y1={yFor(odds)} y2={yFor(odds)} />
@@ -219,10 +219,9 @@ function MarketMlPredictionTrendPanel({ trend }: { trend: MarketProfileMlPredict
           <h2>Prediction Trend</h2>
           <p className="card-subtext">Whale entry time followed by server-backed 12h and 24h trend predictions.</p>
         </div>
-        <span className="market-ml-local-pill">Server snapshot</span>
       </div>
 
-      {!trend?.available || cases.length === 0 ? (
+      {cases.length === 0 ? (
         <>
           <LiveWhaleEntrySummary trend={trend} />
           <div className="market-ml-empty">
@@ -282,7 +281,7 @@ function MarketMlPredictionTrendPanel({ trend }: { trend: MarketProfileMlPredict
                       exits {formatCompactNumber(whaleAnchorValue(item, "recent_exit_count_12h"), 0)}
                     </span>
                     <span>Net pressure {formatCompactNumber(whaleAnchorValue(item, "recent_weighted_net_pressure_12h"), 2)}</span>
-                    <span>{reason || formatLabel(item.prediction_source)}</span>
+                    <span>{reason || formatLabel(item.prediction_status ?? item.prediction_source)}</span>
                   </div>
                 </article>
               );

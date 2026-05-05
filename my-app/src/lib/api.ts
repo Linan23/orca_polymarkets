@@ -100,6 +100,7 @@ export type MarketProfileMlPredictionCase = {
   predicted_delta_pts: number | null;
   predicted_direction: string;
   prediction_source: string;
+  prediction_status?: string;
   display_tier: "show" | "review" | "hidden" | string;
   display_reasons: string[];
   review_reasons: string[];

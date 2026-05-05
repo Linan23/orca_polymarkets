@@ -449,23 +449,30 @@ def _latest_market_prediction_snapshot_payload(session: Session, market_slug: st
         return None
 
     windows: dict[str, list[dict[str, Any]]] = {"12h": [], "24h": []}
-    prediction_available = False
+    model_prediction_available = False
     statuses: set[str] = set()
     for row in rows:
         window_name = f"{int(row.prediction_window_hours)}h"
         payload = dict(row.prediction_payload or {})
+        current_odds_pct = float(row.current_odds_pct) if row.current_odds_pct is not None else None
+        predicted_future_odds_pct = (
+            float(row.predicted_future_odds_pct)
+            if row.predicted_future_odds_pct is not None
+            else current_odds_pct
+        )
         if "window" not in payload:
             payload["window"] = window_name
         if "market_slug" not in payload:
             payload["market_slug"] = row.market_slug
         if "side_label" not in payload:
             payload["side_label"] = row.side_label
-        payload.setdefault("current_odds_pct", float(row.current_odds_pct) if row.current_odds_pct is not None else None)
-        payload.setdefault(
-            "predicted_future_odds_pct",
-            float(row.predicted_future_odds_pct) if row.predicted_future_odds_pct is not None else None,
-        )
-        payload.setdefault("predicted_delta_pts", float(row.predicted_delta_pts) if row.predicted_delta_pts is not None else None)
+        if payload.get("current_odds_pct") is None:
+            payload["current_odds_pct"] = current_odds_pct
+        if payload.get("predicted_future_odds_pct") is None:
+            payload["predicted_future_odds_pct"] = predicted_future_odds_pct
+        if payload.get("predicted_delta_pts") is None:
+            payload["predicted_delta_pts"] = float(row.predicted_delta_pts) if row.predicted_delta_pts is not None else 0.0
+        payload.setdefault("predicted_direction", "flat")
         payload.setdefault("direction_signal_tier", row.signal_tier)
         payload.setdefault("display_tier", row.display_tier)
         payload.setdefault("prediction_status", row.prediction_status)
@@ -476,13 +483,13 @@ def _latest_market_prediction_snapshot_payload(session: Session, market_slug: st
         payload.setdefault("data_freshness_status", row.data_freshness_status)
         statuses.add(row.prediction_status)
         if row.predicted_future_odds_pct is not None:
-            prediction_available = True
-            windows.setdefault(window_name, []).append(payload)
+            model_prediction_available = True
+        windows.setdefault(window_name, []).append(payload)
 
-    primary_status = "snapshot_prediction_available" if prediction_available else sorted(statuses)[0]
+    primary_status = "prediction_available" if model_prediction_available else sorted(statuses)[0]
     return {
-        "available": prediction_available,
-        "reason": None if prediction_available else primary_status,
+        "available": True,
+        "reason": None if model_prediction_available else primary_status,
         "market_slug": normalized_slug,
         "question": rows[0].prediction_payload.get("question") if isinstance(rows[0].prediction_payload, dict) else None,
         "generated_at": latest_generated_at.isoformat(),
@@ -492,6 +499,7 @@ def _latest_market_prediction_snapshot_payload(session: Session, market_slug: st
         "production_use": False,
         "local_backtest_only": False,
         "snapshot_row_count": len(rows),
+        "model_prediction_available": model_prediction_available,
         "prediction_status": primary_status,
         "windows": windows,
     }
@@ -529,10 +537,14 @@ def _market_profile_ml_trend_payload(session: Session, market_slug: str) -> dict
         ]
         windows[str(window_name)] = enriched_rows
 
-    prediction_available = any(windows.get(window_name) for window_name in ("12h", "24h"))
-    if prediction_available and anchor.get("available"):
+    chart_available = any(windows.get(window_name) for window_name in ("12h", "24h"))
+    model_prediction_available = bool(local_prediction.get("model_prediction_available", chart_available))
+    base_prediction_status = str(local_prediction.get("prediction_status") or "")
+    if chart_available and not model_prediction_available and base_prediction_status:
+        prediction_status = base_prediction_status
+    elif chart_available and anchor.get("available"):
         prediction_status = "entry_anchored_prediction_available"
-    elif prediction_available:
+    elif chart_available:
         prediction_status = "prediction_available_without_recent_whale_entry"
     elif anchor.get("available"):
         prediction_status = "waiting_for_ml_prediction_snapshot"
@@ -541,8 +553,8 @@ def _market_profile_ml_trend_payload(session: Session, market_slug: str) -> dict
 
     return {
         **local_prediction,
-        "available": prediction_available,
-        "reason": None if prediction_available else local_prediction.get("reason"),
+        "available": chart_available,
+        "reason": None if chart_available else local_prediction.get("reason"),
         "market_slug": str(market_slug or "").strip().casefold(),
         "production_use": False,
         "local_backtest_only": bool(local_prediction.get("local_backtest_only", True)),
