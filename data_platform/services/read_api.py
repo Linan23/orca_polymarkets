@@ -52,6 +52,24 @@ USER_ACTIVITY_RECENT_TRADE_LIMIT = 15
 settings = get_settings()
 
 
+def _score_whale_status(is_whale: Any, is_trusted_whale: Any) -> bool:
+    """Return the retention whale marker derived from score flags."""
+    return bool(is_whale) or bool(is_trusted_whale)
+
+
+def _with_current_whale_status(payload: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Add the current boolean whale_status field to older cached user-row payloads."""
+    if payload is None:
+        return None
+    items = payload.get("items")
+    if not isinstance(items, list):
+        return payload
+    for item in items:
+        if isinstance(item, dict) and ("is_whale" in item or "is_trusted_whale" in item):
+            item["whale_status"] = _score_whale_status(item.get("is_whale"), item.get("is_trusted_whale"))
+    return payload
+
+
 def _latest_successful_scrape_time(session: Session) -> datetime | None:
     """Return the latest successful scrape completion time."""
     row = session.scalars(
@@ -1341,7 +1359,7 @@ def top_profitable_resolved_users(
         limit=limit,
     )
     if cached_payload is not None:
-        return cached_payload
+        return _with_current_whale_status(cached_payload)
     return _live_top_profitable_resolved_users(session, limit=limit, timeframe=timeframe)
 
 
@@ -1415,6 +1433,7 @@ def _live_top_profitable_resolved_users(
                 "profitability_score": float(row["score"].profitability_score or 0),
                 "is_whale": bool(row["score"].is_whale),
                 "is_trusted_whale": bool(row["score"].is_trusted_whale),
+                "whale_status": _score_whale_status(row["score"].is_whale, row["score"].is_trusted_whale),
             }
         )
 
@@ -1483,7 +1502,7 @@ def market_whale_concentration(
         limit=limit,
     )
     if cached_payload is not None:
-        return cached_payload
+        return _with_current_whale_status(cached_payload)
     return _live_market_whale_concentration(session, limit=limit, timeframe=timeframe)
 
 
@@ -1750,7 +1769,7 @@ def whale_entry_behavior(
         limit=limit,
     )
     if cached_payload is not None:
-        return cached_payload
+        return _with_current_whale_status(cached_payload)
     return _live_whale_entry_behavior(session, limit=limit, timeframe=timeframe)
 
 
@@ -1784,7 +1803,8 @@ def _live_whale_entry_behavior(
                 w.trust_score,
                 w.profitability_score,
                 w.is_whale,
-                w.is_trusted_whale
+                w.is_trusted_whale,
+                (w.is_whale OR w.is_trusted_whale) AS whale_status
               FROM analytics.whale_score_snapshot w
               JOIN analytics.platform p
                 ON p.platform_id = w.platform_id
@@ -1803,6 +1823,7 @@ def _live_whale_entry_behavior(
               ls.profitability_score,
               ls.is_whale,
               ls.is_trusted_whale,
+              ls.whale_status,
               COUNT(tf.transaction_id) AS entry_trade_count,
               COUNT(DISTINCT tf.market_contract_id) AS distinct_markets,
               COALESCE(SUM(tf.shares), 0) AS total_entry_shares,
@@ -1836,7 +1857,8 @@ def _live_whale_entry_behavior(
               ls.trust_score,
               ls.profitability_score,
               ls.is_whale,
-              ls.is_trusted_whale
+              ls.is_trusted_whale,
+              ls.whale_status
             ORDER BY
               entry_trade_count DESC,
               distinct_markets DESC,
@@ -1858,6 +1880,7 @@ def _live_whale_entry_behavior(
             "profitability_score": float(row["profitability_score"] or 0),
             "is_whale": bool(row["is_whale"]),
             "is_trusted_whale": bool(row["is_trusted_whale"]),
+            "whale_status": bool(row["whale_status"]),
             "entry_trade_count": int(row["entry_trade_count"] or 0),
             "distinct_markets": int(row["distinct_markets"] or 0),
             "total_entry_shares": float(row["total_entry_shares"] or 0),
@@ -2665,6 +2688,11 @@ def following_user_cards(
             "preferred_username": account.preferred_username,
             "display_label": account.display_label,
             "is_likely_insider": bool(account.is_likely_insider),
+            "whale_status": (
+                _score_whale_status(score.is_whale, score.is_trusted_whale)
+                if (score := score_by_user.get(user_id)) is not None
+                else False
+            ),
             "latest_whale_score": (
                 {
                     "snapshot_time": score.snapshot_time.isoformat() if score.snapshot_time else None,
@@ -2674,6 +2702,7 @@ def following_user_cards(
                     "sample_trade_count": int(score.sample_trade_count or 0),
                     "is_whale": bool(score.is_whale),
                     "is_trusted_whale": bool(score.is_trusted_whale),
+                    "whale_status": _score_whale_status(score.is_whale, score.is_trusted_whale),
                 }
                 if (score := score_by_user.get(user_id)) is not None
                 else None
@@ -3089,6 +3118,7 @@ def latest_whale_scores(
             "sample_trade_count": int(score.sample_trade_count or 0),
             "is_whale": bool(score.is_whale),
             "is_trusted_whale": bool(score.is_trusted_whale),
+            "whale_status": _score_whale_status(score.is_whale, score.is_trusted_whale),
         }
         for score, account, platform in rows
     ]
@@ -3134,6 +3164,11 @@ def latest_user_whale_profile(session: Session, user_id: int) -> dict[str, Any] 
         "preferred_username": user.preferred_username,
         "display_label": user.display_label,
         "is_likely_insider": bool(user.is_likely_insider),
+        "whale_status": (
+            bool(profile.whale_status)
+            if profile is not None
+            else _score_whale_status(score.is_whale, score.is_trusted_whale) if score is not None else False
+        ),
         "latest_whale_score": (
             {
                 "snapshot_time": score.snapshot_time.isoformat() if score.snapshot_time else None,
@@ -3143,6 +3178,7 @@ def latest_user_whale_profile(session: Session, user_id: int) -> dict[str, Any] 
                 "sample_trade_count": int(score.sample_trade_count or 0),
                 "is_whale": bool(score.is_whale),
                 "is_trusted_whale": bool(score.is_trusted_whale),
+                "whale_status": _score_whale_status(score.is_whale, score.is_trusted_whale),
             }
             if score is not None
             else None
@@ -3157,6 +3193,7 @@ def latest_user_whale_profile(session: Session, user_id: int) -> dict[str, Any] 
                 "dashboard_id": profile.dashboard_id,
                 "historical_actions_summary": profile.historical_actions_summary,
                 "insider_stats": profile.insider_stats,
+                "whale_status": bool(profile.whale_status),
                 "trusted_traders_summary": profile.trusted_traders_summary,
                 "total_volume": float(profile.total_volume or 0),
                 "total_shares": float(profile.total_shares or 0),

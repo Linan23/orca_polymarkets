@@ -371,7 +371,6 @@ export default function UserProfile() {
 
   const score = data?.latest_whale_score;
   const resolved = data?.resolved_performance;
-  const dashboard = data?.dashboard_profile;
   const { primary, secondary } = deriveUserIdentity(data ?? {});
   const traderTierSource = {
     is_likely_insider: data?.is_likely_insider,

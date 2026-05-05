@@ -14,6 +14,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -753,6 +754,7 @@ class UserProfile(Base):
     primary_market_ref: Mapped[str | None] = mapped_column(String(255))
     historical_actions_summary: Mapped[dict | None] = mapped_column(JSON_VARIANT)
     insider_stats: Mapped[dict | None] = mapped_column(JSON_VARIANT)
+    whale_status: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"), nullable=False)
     profit_loss: Mapped[float] = mapped_column(MONEY, nullable=False, default=0)
     wallet_balance: Mapped[float | None] = mapped_column(MONEY)
     wallet_transactions_summary: Mapped[dict | None] = mapped_column(JSON_VARIANT)

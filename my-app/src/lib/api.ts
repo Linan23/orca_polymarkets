@@ -244,6 +244,7 @@ export type WhaleScoreRow = {
   sample_trade_count: number;
   is_whale: boolean;
   is_trusted_whale: boolean;
+  whale_status: boolean;
 };
 
 export type LeaderboardRow = {
@@ -263,6 +264,7 @@ export type WhaleProfile = {
   preferred_username: string | null;
   display_label: string | null;
   is_likely_insider: boolean;
+  whale_status: boolean;
   latest_whale_score: {
     snapshot_time: string | null;
     scoring_version: string;
@@ -271,6 +273,7 @@ export type WhaleProfile = {
     sample_trade_count: number;
     is_whale: boolean;
     is_trusted_whale: boolean;
+    whale_status: boolean;
   } | null;
   resolved_performance: {
     resolved_market_count: number;
@@ -284,6 +287,7 @@ export type WhaleProfile = {
     dashboard_id: number;
     historical_actions_summary: Record<string, unknown> | null;
     insider_stats: Record<string, unknown> | null;
+    whale_status: boolean;
     trusted_traders_summary: Record<string, unknown> | null;
     total_volume: number;
     total_shares: number;
@@ -378,6 +382,7 @@ export type TopProfitableUserRow = {
   latest_trade_time: string | null;
   is_whale: boolean;
   is_trusted_whale: boolean;
+  whale_status: boolean;
 };
 
 export type MarketConcentrationRow = {
@@ -428,6 +433,7 @@ export type WhaleEntryBehaviorRow = {
   profitability_score: number;
   is_whale: boolean;
   is_trusted_whale: boolean;
+  whale_status: boolean;
   entry_trade_count: number;
   distinct_markets: number;
   total_entry_shares: number;
@@ -582,6 +588,7 @@ export type FollowingUserCard = {
   preferred_username: string | null;
   display_label: string | null;
   is_likely_insider: boolean;
+  whale_status: boolean;
   latest_whale_score: WhaleProfile["latest_whale_score"];
 };
 

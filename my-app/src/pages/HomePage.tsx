@@ -1,9 +1,22 @@
+import { useCallback } from "react";
 import HomepageSummaryCards from "../homepage/HomepageSummaryCards";
 import PolymarketNewsGallery from "../homepage/PolymarketNewsGallery";
 import ResearchAnalyticsSection from "../homepage/ResearchAnalyticsSection";
 import TopNavbar from "../homepage/TopNavbar";
+import { useApiData } from "../hooks/useApiData";
+import { fetchHomeSummary } from "../lib/api";
+
+function formatSignalValue(value: number | null) {
+  if (value === null) return "--";
+  return new Intl.NumberFormat("en-US").format(value);
+}
 
 export default function HomePage() {
+  const loadSummary = useCallback(() => fetchHomeSummary(), []);
+  const { data } = useApiData(loadSummary, { keepPreviousData: true });
+  const totalTrackedTrades =
+    data?.platform_coverage.reduce((sum, platform) => sum + platform.transaction_count, 0) ?? null;
+
   return (
     <div className="page page-home home-dashboard">
       <TopNavbar />
@@ -33,17 +46,17 @@ export default function HomePage() {
 
           <div className="signal-line">
             <span>Number of Trusted Whales</span>
-            <strong>DATA?</strong>
+            <strong>{formatSignalValue(data?.trusted_whales ?? null)}</strong>
           </div>
 
           <div className="signal-line">
             <span>Total Number of Whales Tracked</span>
-            <strong>DATA?</strong>
+            <strong>{formatSignalValue(data?.whales_detected ?? null)}</strong>
           </div>
 
           <div className="signal-line">
             <span>Total Tracked Trades</span>
-            <strong>DATA?</strong>
+            <strong>{formatSignalValue(totalTrackedTrades)}</strong>
           </div>
         </div>
       </section>

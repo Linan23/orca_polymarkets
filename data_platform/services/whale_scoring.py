@@ -28,7 +28,6 @@ TRUSTED_MIN_WIN_RATE = 0.60
 RESOLUTION_PRICE_HIGH = 0.98
 RESOLUTION_PRICE_LOW = 0.02
 INSIDER_PENALTY = 0.25
-WHALE_TOP_FRACTION = 0.30
 TRUSTED_TOP_FRACTION = 0.05
 
 
@@ -677,6 +676,7 @@ def _compute_platform_scores(
         and item.metric.total_notional >= WHALE_MIN_NOTIONAL
         and not item.metric.is_likely_insider
     ]
+    whale_ids = {item.metric.user_id for item in eligible_whales}
     eligible_whales.sort(
         key=lambda item: (
             item.trust_score,
@@ -685,7 +685,6 @@ def _compute_platform_scores(
         ),
         reverse=True,
     )
-    whale_ids = {item.metric.user_id for item in eligible_whales[: _top_count(len(eligible_whales), WHALE_TOP_FRACTION)]}
 
     eligible_trusted = [
         item

@@ -86,6 +86,7 @@ function buildFallbackFollowingUser(userId: number): FollowingUserCard {
     preferred_username: null,
     display_label: null,
     is_likely_insider: false,
+    whale_status: false,
     latest_whale_score: null,
   };
 }
