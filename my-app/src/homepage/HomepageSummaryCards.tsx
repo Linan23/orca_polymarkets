@@ -98,7 +98,6 @@ export default function HomepageSummaryCards() {
                 <p className="summary-card-label">Last Updated</p>
 
                 <div className="last-updated-card">
-                  <h3>Database last updated:</h3>
                   <p>{formatLastUpdated(lastUpdated)}</p>
                 </div>
               </article>
