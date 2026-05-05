@@ -125,14 +125,14 @@ def _resolve_market_tokens(session: Session, market: MarketContract) -> list[str
     """Resolve the CLOB token ids for a market from its stored raw event payload."""
     event = session.get(MarketEvent, market.event_id)
     if event is None or event.raw_payload_id is None:
-        return []
+        return _fallback_market_token_ids(market)
     payload_row = session.get(ApiPayload, event.raw_payload_id)
     if payload_row is None or not isinstance(payload_row.payload, dict):
-        return []
+        return _fallback_market_token_ids(market)
 
     markets_payload = payload_row.payload.get("markets")
     if not isinstance(markets_payload, list):
-        return []
+        return _fallback_market_token_ids(market)
 
     fallback_tokens: list[str] = []
     if len(markets_payload) == 1 and isinstance(markets_payload[0], dict):
@@ -143,7 +143,13 @@ def _resolve_market_tokens(session: Session, market: MarketContract) -> list[str
             continue
         if _market_matches_payload(market, market_payload):
             return _parse_token_ids(market_payload.get("clobTokenIds"))
-    return fallback_tokens
+    return fallback_tokens or _fallback_market_token_ids(market)
+
+
+def _fallback_market_token_ids(market: MarketContract) -> list[str]:
+    """Return contract-level CLOB token ids when market metadata payloads are unavailable."""
+    token = str(market.external_market_ref or "").strip()
+    return [token] if token.isdigit() else []
 
 
 
