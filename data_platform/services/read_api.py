@@ -234,6 +234,7 @@ def _serialize_market_profile(
     market: DashboardMarket | None,
     contract: MarketContract,
     profile: MarketProfile | None,
+    observed_volume: float | None = None,
     orderbook_depth: int | None = None,
 ) -> dict[str, Any]:
     """Serialize a market profile response from dashboard-backed or fallback market data."""
@@ -242,7 +243,7 @@ def _serialize_market_profile(
         float(contract.last_trade_price) if contract.last_trade_price is not None else None
     )
     volume = float(market.volume) if market and market.volume is not None else (
-        float(contract.volume) if contract.volume is not None else None
+        float(contract.volume) if contract.volume is not None else observed_volume
     )
     odds = float(market.odds) if market and market.odds is not None else price
     resolved_orderbook_depth = (
@@ -284,6 +285,42 @@ def _serialize_market_profile(
             }
         ),
     }
+
+def _observed_trade_volume_for_market(session: Session, *, contract: MarketContract, market_slug: str | None) -> float | None:
+    """Return observed market volume from ingested trades when source market volume is unavailable."""
+    if market_slug:
+        market_ids = select(MarketContract.market_contract_id).where(MarketContract.market_slug == market_slug)
+        volume = session.scalar(
+            select(func.sum(TransactionFact.notional_value)).where(TransactionFact.market_contract_id.in_(market_ids))
+        )
+    else:
+        volume = session.scalar(
+            select(func.sum(TransactionFact.notional_value)).where(
+                TransactionFact.market_contract_id == contract.market_contract_id
+            )
+        )
+    return float(volume) if volume is not None else None
+
+
+def _latest_orderbook_depth_for_market(session: Session, *, contract: MarketContract, market_slug: str | None) -> int | None:
+    """Return the newest orderbook depth for this market or any same-slug outcome row."""
+    if market_slug:
+        market_ids = select(MarketContract.market_contract_id).where(MarketContract.market_slug == market_slug)
+        depth = session.scalar(
+            select(OrderbookSnapshot.depth_levels)
+            .where(OrderbookSnapshot.market_contract_id.in_(market_ids))
+            .order_by(desc(OrderbookSnapshot.snapshot_time), desc(OrderbookSnapshot.orderbook_snapshot_id))
+            .limit(1)
+        )
+    else:
+        depth = session.scalar(
+            select(OrderbookSnapshot.depth_levels)
+            .where(OrderbookSnapshot.market_contract_id == contract.market_contract_id)
+            .order_by(desc(OrderbookSnapshot.snapshot_time), desc(OrderbookSnapshot.orderbook_snapshot_id))
+            .limit(1)
+        )
+    return int(depth) if depth is not None else None
+
 
 def _parse_iso_datetime(value: str | None) -> datetime | None:
     """Return a timezone-aware datetime from an ISO string when possible."""
@@ -2678,12 +2715,23 @@ def latest_market_profile(session: Session, market_slug: str) -> dict[str, Any] 
         ).first()
         if latest_row is not None:
             market, contract, profile = latest_row
+            market_slug_value = market.market_slug or contract.market_slug
             payload = _serialize_market_profile(
                 dashboard_id=dashboard.dashboard_id,
                 market_id=market.market_id,
                 market=market,
                 contract=contract,
                 profile=profile,
+                observed_volume=_observed_trade_volume_for_market(
+                    session,
+                    contract=contract,
+                    market_slug=market_slug_value,
+                ),
+                orderbook_depth=_latest_orderbook_depth_for_market(
+                    session,
+                    contract=contract,
+                    market_slug=market_slug_value,
+                ),
             )
             payload["whale_market_focus"] = _normalize_whale_market_focus(session, payload["whale_market_focus"])
             payload["ml_prediction_trend"] = _market_profile_ml_trend_payload(
@@ -2721,12 +2769,23 @@ def latest_market_profile(session: Session, market_slug: str) -> dict[str, Any] 
     ).first()
     if historical_row is not None:
         market, historical_dashboard, contract, profile = historical_row
+        market_slug_value = market.market_slug or contract.market_slug
         payload = _serialize_market_profile(
             dashboard_id=historical_dashboard.dashboard_id,
             market_id=market.market_id,
             market=market,
             contract=contract,
             profile=profile,
+            observed_volume=_observed_trade_volume_for_market(
+                session,
+                contract=contract,
+                market_slug=market_slug_value,
+            ),
+            orderbook_depth=_latest_orderbook_depth_for_market(
+                session,
+                contract=contract,
+                market_slug=market_slug_value,
+            ),
         )
         payload["whale_market_focus"] = _normalize_whale_market_focus(session, payload["whale_market_focus"])
         payload["ml_prediction_trend"] = _market_profile_ml_trend_payload(
@@ -2765,7 +2824,16 @@ def latest_market_profile(session: Session, market_slug: str) -> dict[str, Any] 
         market=None,
         contract=contract,
         profile=None,
-        orderbook_depth=int(latest_orderbook.depth_levels) if latest_orderbook is not None else None,
+        observed_volume=_observed_trade_volume_for_market(
+            session,
+            contract=contract,
+            market_slug=contract.market_slug,
+        ),
+        orderbook_depth=_latest_orderbook_depth_for_market(
+            session,
+            contract=contract,
+            market_slug=contract.market_slug,
+        ),
     )
     payload["whale_market_focus"] = _normalize_whale_market_focus(session, payload["whale_market_focus"])
     payload["ml_prediction_trend"] = _market_profile_ml_trend_payload(
