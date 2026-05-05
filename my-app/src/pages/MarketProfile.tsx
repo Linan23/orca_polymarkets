@@ -384,16 +384,16 @@ export default function MarketProfile() {
                   <strong>{data.orderbook_depth?.toLocaleString() ?? "--"}</strong>
                 </div>
                 <div className="stat-chip">
-                  <span className="stat-chip-label">Read Time</span>
-                  <strong>{formatDateTime(data.read_time)}</strong>
-                </div>
-                <div className="stat-chip">
                   <span className="stat-chip-label">Whale Traders</span>
                   <strong>{data.whale_count}</strong>
                 </div>
                 <div className="stat-chip">
                   <span className="stat-chip-label">Trusted Whales</span>
                   <strong>{data.trusted_whale_count}</strong>
+                </div>
+                <div className="stat-chip stat-chip-wide">
+                  <span className="stat-chip-label">Read Time</span>
+                  <strong>{formatDateTime(data.read_time)}</strong>
                 </div>
               </div>
             </div>
