@@ -57,6 +57,7 @@ from data_platform.services.read_api import (
     list_positions,
     list_transactions,
     list_users,
+    market_profile_ml_trend_payload,
     market_profile_top_whales,
     top_profitable_resolved_users,
     user_activity_insights,
@@ -87,6 +88,7 @@ HOME_SUMMARY_CACHE_TTL_SECONDS = 60.0
 ANALYTICS_CACHE_TTL_SECONDS = 60.0
 LATEST_WHALES_CACHE_TTL_SECONDS = 60.0
 MARKET_PROFILE_CACHE_TTL_SECONDS = 30.0
+MARKET_PROFILE_ML_TREND_CACHE_TTL_SECONDS = 30.0
 MARKET_PROFILE_TOP_WHALES_CACHE_TTL_SECONDS = 60.0
 USER_WHALE_PROFILE_CACHE_TTL_SECONDS = 30.0
 USER_ACTIVITY_INSIGHTS_CACHE_TTL_SECONDS = 20.0
@@ -112,6 +114,8 @@ _latest_whales_cache: dict[tuple[int, bool, bool, str], tuple[float, dict[str, o
 _latest_whales_cache_lock = Lock()
 _market_profile_cache: dict[str, tuple[float, dict[str, object]]] = {}
 _market_profile_cache_lock = Lock()
+_market_profile_ml_trend_cache: dict[str, tuple[float, dict[str, object]]] = {}
+_market_profile_ml_trend_cache_lock = Lock()
 _market_profile_top_whales_cache: dict[tuple[str, int], tuple[float, dict[str, object]]] = {}
 _market_profile_top_whales_cache_lock = Lock()
 _user_whale_profile_cache: dict[int, tuple[float, dict[str, object]]] = {}
@@ -419,6 +423,33 @@ def get_market_profile_top_whales(market_slug: str, limit: int = Query(5, ge=1, 
                 lock=_market_profile_top_whales_cache_lock,
             )
             return {"top_whales": payload}
+    except (OSError, SQLAlchemyError) as exc:
+        raise _service_error(exc) from exc
+
+
+@app.get("/api/markets/{market_slug}/ml-trend")
+def get_market_profile_ml_trend(market_slug: str) -> dict[str, object]:
+    """Return ML trend data for the market-profile prediction tab."""
+    normalized_market_slug = market_slug.strip().lower()
+    cached_payload = _cache_get(
+        _market_profile_ml_trend_cache,
+        cache_key=normalized_market_slug,
+        ttl_seconds=MARKET_PROFILE_ML_TREND_CACHE_TTL_SECONDS,
+        lock=_market_profile_ml_trend_cache_lock,
+    )
+    if cached_payload is not None:
+        return {"ml_prediction_trend": cached_payload}
+
+    try:
+        with session_scope() as session:
+            payload = market_profile_ml_trend_payload(session, market_slug=normalized_market_slug)
+            _cache_set(
+                _market_profile_ml_trend_cache,
+                cache_key=normalized_market_slug,
+                payload=payload,
+                lock=_market_profile_ml_trend_cache_lock,
+            )
+            return {"ml_prediction_trend": payload}
     except (OSError, SQLAlchemyError) as exc:
         raise _service_error(exc) from exc
 

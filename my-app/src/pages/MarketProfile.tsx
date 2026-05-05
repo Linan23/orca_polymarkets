@@ -4,6 +4,7 @@ import FollowButton from "../components/FollowButton";
 import { useWatchlist } from "../hooks/useWatchlist";
 import {
   fetchMarketProfile,
+  fetchMarketProfileMlTrend,
   fetchMarketProfileTopWhales,
   type MarketProfileMlPredictionCase,
   type MarketProfileMlPredictionTrend,
@@ -284,6 +285,15 @@ function emptyTopWhales(marketSlug: string): MarketProfileTopWhales {
   };
 }
 
+function emptyMlTrend(marketSlug: string): MarketProfileMlPredictionTrend {
+  return {
+    available: false,
+    reason: "missing_market_slug",
+    market_slug: marketSlug,
+    windows: { "12h": [], "24h": [] },
+  };
+}
+
 function TopMarketWhalesPanel({ marketSlug }: { marketSlug: string }) {
   const loadTopWhales = useCallback(
     () => (marketSlug ? fetchMarketProfileTopWhales(marketSlug, 5) : Promise.resolve(emptyTopWhales(marketSlug))),
@@ -330,13 +340,13 @@ function TopMarketWhalesPanel({ marketSlug }: { marketSlug: string }) {
   );
 }
 
-function MarketMlPredictionTrendPanel({
-  trend,
-  marketSlug,
-}: {
-  trend: MarketProfileMlPredictionTrend | undefined;
-  marketSlug: string;
-}) {
+function MarketMlPredictionTrendPanel({ marketSlug }: { marketSlug: string }) {
+  const loadTrend = useCallback(
+    () => (marketSlug ? fetchMarketProfileMlTrend(marketSlug) : Promise.resolve(emptyMlTrend(marketSlug))),
+    [marketSlug],
+  );
+  const { data: trendPayload, loading: trendLoading, error: trendError } = useApiData(loadTrend);
+  const trend = trendPayload ?? undefined;
   const cases = profileTrendCases(trend);
   const primaryCases = primaryTrendCases(cases);
   const anchor = trend?.prediction_anchor;
@@ -378,6 +388,10 @@ function MarketMlPredictionTrendPanel({
 
       {activeTab === "whales" ? (
         <TopMarketWhalesPanel marketSlug={marketSlug} />
+      ) : trendLoading ? (
+        <div className="market-ml-empty">Loading prediction trend...</div>
+      ) : trendError ? (
+        <div className="market-ml-empty">Unable to load prediction trend: {trendError}</div>
       ) : cases.length === 0 ? (
         <>
           <LiveWhaleEntrySummary trend={trend} />
@@ -536,7 +550,7 @@ export default function MarketProfile() {
 </div>
           </section>
 
-          <MarketMlPredictionTrendPanel trend={data.ml_prediction_trend} marketSlug={data.market_slug} />
+          <MarketMlPredictionTrendPanel marketSlug={data.market_slug} />
         </>
       )}
     </div>

@@ -866,6 +866,17 @@ def _market_profile_ml_trend_payload(
     }
 
 
+def market_profile_ml_trend_payload(session: Session, *, market_slug: str) -> dict[str, Any]:
+    """Return ML trend data for the market-profile prediction tab."""
+    contract = session.scalars(
+        select(MarketContract)
+        .where(MarketContract.market_slug == market_slug)
+        .order_by(desc(MarketContract.updated_at), desc(MarketContract.market_contract_id))
+        .limit(1)
+    ).first()
+    return _market_profile_ml_trend_payload(session, market_slug, contract=contract)
+
+
 def _normalize_watchlist_user_ids(values: list[int] | None) -> list[int]:
     """Return unique positive integer user ids in stable order."""
     seen: set[int] = set()
@@ -2902,11 +2913,6 @@ def latest_market_profile(session: Session, market_slug: str) -> dict[str, Any] 
                 ),
             )
             payload["whale_market_focus"] = _normalize_whale_market_focus(session, payload["whale_market_focus"])
-            payload["ml_prediction_trend"] = _market_profile_ml_trend_payload(
-                session,
-                str(payload["market_slug"] or ""),
-                contract=contract,
-            )
             payload.update(
                 _freshness_metadata(
                     observed_at=profile.snapshot_time if profile and profile.snapshot_time else market.read_time,
@@ -2956,11 +2962,6 @@ def latest_market_profile(session: Session, market_slug: str) -> dict[str, Any] 
             ),
         )
         payload["whale_market_focus"] = _normalize_whale_market_focus(session, payload["whale_market_focus"])
-        payload["ml_prediction_trend"] = _market_profile_ml_trend_payload(
-            session,
-            str(payload["market_slug"] or ""),
-            contract=contract,
-        )
         payload.update(
             _freshness_metadata(
                 observed_at=profile.snapshot_time if profile and profile.snapshot_time else market.read_time,
@@ -3004,11 +3005,6 @@ def latest_market_profile(session: Session, market_slug: str) -> dict[str, Any] 
         ),
     )
     payload["whale_market_focus"] = _normalize_whale_market_focus(session, payload["whale_market_focus"])
-    payload["ml_prediction_trend"] = _market_profile_ml_trend_payload(
-        session,
-        str(payload["market_slug"] or ""),
-        contract=contract,
-    )
     payload.update(
         _freshness_metadata(
             observed_at=latest_orderbook.snapshot_time if latest_orderbook is not None else contract.updated_at,

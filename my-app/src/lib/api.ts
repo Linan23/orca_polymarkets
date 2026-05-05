@@ -791,6 +791,13 @@ export async function fetchMarketProfile(marketSlug: string): Promise<MarketProf
   return payload.profile;
 }
 
+export async function fetchMarketProfileMlTrend(marketSlug: string): Promise<MarketProfileMlPredictionTrend> {
+  const payload = await fetchCachedJson<{ ml_prediction_trend: MarketProfileMlPredictionTrend }>(
+    `/api/markets/${encodeURIComponent(marketSlug)}/ml-trend`,
+  );
+  return payload.ml_prediction_trend;
+}
+
 export async function fetchMarketProfileTopWhales(marketSlug: string, limit = 5): Promise<MarketProfileTopWhales> {
   const params = new URLSearchParams();
   params.set("limit", String(limit));
