@@ -1,6 +1,6 @@
 import { useCallback } from "react";
 import { useApiData } from "../hooks/useApiData";
-import { fetchHomeSummary } from "../lib/api";
+import { fetchHomeSummary, type HomeSummary } from "../lib/api";
 
 function formatCompact(value: number) {
   return new Intl.NumberFormat("en-US", {
@@ -27,6 +27,25 @@ function formatLastUpdated(value?: string | number | Date | null) {
   }).format(date);
 }
 
+function getDatabaseLastUpdated(summary: HomeSummary) {
+  const timestampSource = summary as HomeSummary & {
+    last_updated_at?: string | null;
+    last_updated?: string | null;
+    updated_at?: string | null;
+    generated_at?: string | null;
+  };
+
+  return (
+    summary.last_successful_ingest_at ??
+    summary.latest_ingestion?.finished_at ??
+    summary.latest_ingestion?.started_at ??
+    timestampSource.last_updated_at ??
+    timestampSource.last_updated ??
+    timestampSource.updated_at ??
+    timestampSource.generated_at
+  );
+}
+
 export default function HomepageSummaryCards() {
   const loadSummary = useCallback(() => fetchHomeSummary(), []);
   const { data, loading, error } = useApiData(loadSummary);
@@ -48,18 +67,7 @@ export default function HomepageSummaryCards() {
         !error &&
         data &&
         (() => {
-          const timestampSource = data as typeof data & {
-            last_updated_at?: string | null;
-            last_updated?: string | null;
-            updated_at?: string | null;
-            generated_at?: string | null;
-          };
-
-          const lastUpdated =
-            timestampSource.last_updated_at ??
-            timestampSource.last_updated ??
-            timestampSource.updated_at ??
-            timestampSource.generated_at;
+          const lastUpdated = getDatabaseLastUpdated(data);
 
           const coverageCharts = [
             {
@@ -90,7 +98,7 @@ export default function HomepageSummaryCards() {
                 <p className="summary-card-label">Last Updated</p>
 
                 <div className="last-updated-card">
-                  <h3>Last updated:</h3>
+                  <h3>Database last updated:</h3>
                   <p>{formatLastUpdated(lastUpdated)}</p>
                 </div>
               </article>
