@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import FollowButton from "../components/FollowButton";
 import { useWatchlist } from "../hooks/useWatchlist";
@@ -6,8 +6,12 @@ import {
   fetchMarketProfile,
   type MarketProfileMlPredictionCase,
   type MarketProfileMlPredictionTrend,
+  type MarketProfileTopWhale,
+  type MarketProfileTopWhales,
 } from "../lib/api";
 import { useApiData } from "../hooks/useApiData";
+import { formatTrustScorePercent } from "../lib/scoreFormatting";
+import { deriveUserIdentity, deriveWhaleTierLabel } from "../lib/userIdentity";
 
 const PREDICTION_WINDOWS = ["12h", "24h"] as const;
 
@@ -238,22 +242,119 @@ function MarketPredictionTrendChart({ cases }: { cases: MarketProfileMlPredictio
   );
 }
 
-function MarketMlPredictionTrendPanel({ trend }: { trend: MarketProfileMlPredictionTrend | undefined }) {
+function TopMarketWhaleRow({ whale, rank }: { whale: MarketProfileTopWhale; rank: number }) {
+  const identity = deriveUserIdentity(whale);
+  const latestAction = [whale.latest_side, whale.latest_outcome_label].filter(Boolean).map(formatLabel).join(" ");
+
+  return (
+    <article className="market-ml-whale-row">
+      <div className="market-ml-whale-rank">#{rank}</div>
+      <div className="market-ml-whale-main">
+        <div className="market-ml-whale-title">
+          <Link to={`/users/${whale.user_id}`}>{identity.primary}</Link>
+          <span>{deriveWhaleTierLabel(whale)}</span>
+        </div>
+        <p>{identity.secondary}</p>
+        <div className="market-ml-summary-row">
+          <span>Trust {formatTrustScorePercent(whale.trust_score)}</span>
+          <span>Market volume {formatCurrency(whale.total_notional)}</span>
+          <span>Trades {formatCompactNumber(whale.trade_count, 0)}</span>
+          <span>
+            Buys {formatCompactNumber(whale.buy_trade_count, 0)} | Sells {formatCompactNumber(whale.sell_trade_count, 0)}
+          </span>
+        </div>
+      </div>
+      <div className="market-ml-whale-meta">
+        <span>Latest {latestAction || "Trade"}</span>
+        <span>{formatDateTime(whale.latest_trade_time)}</span>
+        <span>Avg price {formatPercent(whale.avg_trade_price)}</span>
+      </div>
+    </article>
+  );
+}
+
+function TopMarketWhalesPanel({ topWhales }: { topWhales: MarketProfileTopWhales | undefined }) {
+  const whales = topWhales?.items ?? [];
+
+  if (whales.length === 0) {
+    return (
+      <div className="market-ml-empty">
+        <strong>No ranked whales found for this market yet.</strong>
+        <span>Top-whale ranking appears after scored whale wallets have trades in this market.</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="market-ml-whales-panel">
+      <div className="market-ml-whales-summary">
+        <div>
+          <p className="market-ml-side-label">Market whale ranking</p>
+          <h3>Top 5 whales by trust score</h3>
+        </div>
+        <div className="market-ml-live-stats">
+          <span>{formatCompactNumber(topWhales?.count, 0)} ranked whales</span>
+          <span>Scores {formatDateTime(topWhales?.snapshot_time)}</span>
+        </div>
+      </div>
+      <div className="market-ml-whale-list">
+        {whales.map((whale, index) => (
+          <TopMarketWhaleRow key={whale.user_id} whale={whale} rank={index + 1} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function MarketMlPredictionTrendPanel({
+  trend,
+  topWhales,
+}: {
+  trend: MarketProfileMlPredictionTrend | undefined;
+  topWhales: MarketProfileTopWhales | undefined;
+}) {
   const cases = profileTrendCases(trend);
   const primaryCases = primaryTrendCases(cases);
   const anchor = trend?.prediction_anchor;
+  const [activeTab, setActiveTab] = useState<"trend" | "whales">("trend");
 
   return (
     <section className="card profile-card market-ml-trend-card">
       <div className="card-header market-ml-header">
         <div>
           <p className="card-label">ML Trend</p>
-          <h2>Prediction Trend</h2>
-          <p className="card-subtext">Whale entry time followed by server-backed 12h and 24h trend predictions.</p>
+          <h2>{activeTab === "whales" ? "Top Market Whales" : "Prediction Trend"}</h2>
+          <p className="card-subtext">
+            {activeTab === "whales"
+              ? "Top 5 whales active in this market, ranked by latest trust score."
+              : "Whale entry time followed by server-backed 12h and 24h trend predictions."}
+          </p>
+        </div>
+        <div className="market-ml-tabs" role="tablist" aria-label="Market ML profile views">
+          <button
+            type="button"
+            className={activeTab === "trend" ? "active" : ""}
+            onClick={() => setActiveTab("trend")}
+            role="tab"
+            aria-selected={activeTab === "trend"}
+          >
+            Prediction Trend
+          </button>
+          <button
+            type="button"
+            className={activeTab === "whales" ? "active" : ""}
+            onClick={() => setActiveTab("whales")}
+            role="tab"
+            aria-selected={activeTab === "whales"}
+          >
+            Top Whales
+          </button>
         </div>
       </div>
 
-      {cases.length === 0 ? (
+      {activeTab === "whales" ? (
+        <TopMarketWhalesPanel topWhales={topWhales} />
+      ) : cases.length === 0 ? (
         <>
           <LiveWhaleEntrySummary trend={trend} />
           <div className="market-ml-empty">
@@ -411,7 +512,7 @@ export default function MarketProfile() {
 </div>
           </section>
 
-          <MarketMlPredictionTrendPanel trend={data.ml_prediction_trend} />
+          <MarketMlPredictionTrendPanel trend={data.ml_prediction_trend} topWhales={data.top_whales} />
         </>
       )}
     </div>

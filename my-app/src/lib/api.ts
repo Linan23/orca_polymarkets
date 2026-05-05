@@ -199,6 +199,37 @@ export type MarketProfileMlPredictionTrend = {
   };
 };
 
+export type MarketProfileTopWhale = {
+  user_id: number;
+  external_user_ref: string;
+  wallet_address: string | null;
+  preferred_username: string | null;
+  display_label: string | null;
+  trust_score: number;
+  profitability_score: number;
+  sample_trade_count: number;
+  is_whale: boolean;
+  is_trusted_whale: boolean;
+  trade_count: number;
+  buy_trade_count: number;
+  sell_trade_count: number;
+  total_notional: number;
+  total_shares: number;
+  avg_trade_price: number;
+  latest_trade_time: string | null;
+  latest_side: string | null;
+  latest_outcome_label: string | null;
+  latest_trade_price: number | null;
+};
+
+export type MarketProfileTopWhales = {
+  market_slug: string;
+  snapshot_time: string | null;
+  scoring_version: string | null;
+  count: number;
+  items: MarketProfileTopWhale[];
+};
+
 export type WhaleScoreRow = {
   user_id: number;
   external_user_ref: string;
@@ -280,6 +311,7 @@ export type MarketProfile = {
   snapshot_time: string | null;
   realtime_payload: Record<string, unknown>;
   ml_prediction_trend?: MarketProfileMlPredictionTrend;
+  top_whales?: MarketProfileTopWhales;
 };
 
 export type HomeSummaryPlatformCoverage = {

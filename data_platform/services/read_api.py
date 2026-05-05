@@ -322,6 +322,150 @@ def _latest_orderbook_depth_for_market(session: Session, *, contract: MarketCont
     return int(depth) if depth is not None else None
 
 
+def _top_market_whales_by_trust_score(session: Session, *, market_slug: str, limit: int = 5) -> dict[str, Any]:
+    """Return the top whales active in one market, ranked by latest trust score."""
+    latest_batch = _latest_whale_batch(session)
+    if latest_batch is None:
+        return {
+            "market_slug": market_slug,
+            "snapshot_time": None,
+            "scoring_version": None,
+            "count": 0,
+            "items": [],
+        }
+
+    rows = session.execute(
+        text(
+            """
+            WITH latest_scores AS (
+              SELECT
+                w.user_id,
+                w.trust_score,
+                w.profitability_score,
+                w.sample_trade_count,
+                w.is_whale,
+                w.is_trusted_whale,
+                w.snapshot_time,
+                w.scoring_version
+              FROM analytics.whale_score_snapshot w
+              JOIN analytics.platform p
+                ON p.platform_id = w.platform_id
+              WHERE w.snapshot_time = :snapshot_time
+                AND w.scoring_version = :scoring_version
+                AND p.platform_name = 'polymarket'
+                AND (w.is_whale = TRUE OR w.is_trusted_whale = TRUE)
+            ),
+            market_contracts AS (
+              SELECT market_contract_id
+              FROM analytics.market_contract
+              WHERE market_slug = :market_slug
+            ),
+            market_trades AS (
+              SELECT tf.*
+              FROM analytics.transaction_fact tf
+              JOIN market_contracts mc
+                ON mc.market_contract_id = tf.market_contract_id
+            ),
+            whale_market_stats AS (
+              SELECT
+                mt.user_id,
+                COUNT(mt.transaction_id) AS trade_count,
+                COUNT(mt.transaction_id) FILTER (WHERE LOWER(COALESCE(mt.side, '')) = 'buy') AS buy_trade_count,
+                COUNT(mt.transaction_id) FILTER (WHERE LOWER(COALESCE(mt.side, '')) = 'sell') AS sell_trade_count,
+                COALESCE(SUM(mt.notional_value), 0) AS total_notional,
+                COALESCE(SUM(mt.shares), 0) AS total_shares,
+                COALESCE(SUM(mt.notional_value) / NULLIF(SUM(mt.shares), 0), 0) AS avg_trade_price,
+                MAX(mt.transaction_time) AS latest_trade_time
+              FROM market_trades mt
+              GROUP BY mt.user_id
+            ),
+            latest_market_trade AS (
+              SELECT DISTINCT ON (mt.user_id)
+                mt.user_id,
+                mt.side AS latest_side,
+                mt.outcome_label AS latest_outcome_label,
+                mt.price AS latest_trade_price,
+                mt.transaction_time AS latest_trade_time
+              FROM market_trades mt
+              ORDER BY mt.user_id, mt.transaction_time DESC, mt.transaction_id DESC
+            )
+            SELECT
+              ua.user_id,
+              ua.external_user_ref,
+              ua.wallet_address,
+              ua.preferred_username,
+              ua.display_label,
+              ls.trust_score,
+              ls.profitability_score,
+              ls.sample_trade_count,
+              ls.is_whale,
+              ls.is_trusted_whale,
+              wms.trade_count,
+              wms.buy_trade_count,
+              wms.sell_trade_count,
+              wms.total_notional,
+              wms.total_shares,
+              wms.avg_trade_price,
+              wms.latest_trade_time,
+              lmt.latest_side,
+              lmt.latest_outcome_label,
+              lmt.latest_trade_price
+            FROM whale_market_stats wms
+            JOIN latest_scores ls
+              ON ls.user_id = wms.user_id
+            JOIN analytics.user_account ua
+              ON ua.user_id = wms.user_id
+            LEFT JOIN latest_market_trade lmt
+              ON lmt.user_id = wms.user_id
+            ORDER BY
+              ls.trust_score DESC,
+              wms.total_notional DESC,
+              wms.trade_count DESC,
+              ua.user_id ASC
+            LIMIT :limit
+            """
+        ),
+        {
+            "market_slug": market_slug,
+            "snapshot_time": latest_batch.snapshot_time,
+            "scoring_version": latest_batch.scoring_version,
+            "limit": limit,
+        },
+    ).mappings().all()
+    items = [
+        {
+            "user_id": int(row["user_id"]),
+            "external_user_ref": row["external_user_ref"],
+            "wallet_address": row["wallet_address"],
+            "preferred_username": row["preferred_username"],
+            "display_label": row["display_label"],
+            "trust_score": float(row["trust_score"] or 0),
+            "profitability_score": float(row["profitability_score"] or 0),
+            "sample_trade_count": int(row["sample_trade_count"] or 0),
+            "is_whale": bool(row["is_whale"]),
+            "is_trusted_whale": bool(row["is_trusted_whale"]),
+            "trade_count": int(row["trade_count"] or 0),
+            "buy_trade_count": int(row["buy_trade_count"] or 0),
+            "sell_trade_count": int(row["sell_trade_count"] or 0),
+            "total_notional": float(row["total_notional"] or 0),
+            "total_shares": float(row["total_shares"] or 0),
+            "avg_trade_price": float(row["avg_trade_price"] or 0),
+            "latest_trade_time": row["latest_trade_time"].isoformat() if row["latest_trade_time"] else None,
+            "latest_side": row["latest_side"],
+            "latest_outcome_label": row["latest_outcome_label"],
+            "latest_trade_price": float(row["latest_trade_price"]) if row["latest_trade_price"] is not None else None,
+        }
+        for row in rows
+    ]
+    return {
+        "market_slug": market_slug,
+        "snapshot_time": latest_batch.snapshot_time.isoformat() if latest_batch.snapshot_time else None,
+        "scoring_version": latest_batch.scoring_version,
+        "count": len(items),
+        "items": items,
+    }
+
+
 def _parse_iso_datetime(value: str | None) -> datetime | None:
     """Return a timezone-aware datetime from an ISO string when possible."""
     if not value:
@@ -2758,6 +2902,11 @@ def latest_market_profile(session: Session, market_slug: str) -> dict[str, Any] 
                 str(payload["market_slug"] or ""),
                 contract=contract,
             )
+            payload["top_whales"] = _top_market_whales_by_trust_score(
+                session,
+                market_slug=str(payload["market_slug"] or ""),
+                limit=5,
+            )
             payload.update(
                 _freshness_metadata(
                     observed_at=profile.snapshot_time if profile and profile.snapshot_time else market.read_time,
@@ -2812,6 +2961,11 @@ def latest_market_profile(session: Session, market_slug: str) -> dict[str, Any] 
             str(payload["market_slug"] or ""),
             contract=contract,
         )
+        payload["top_whales"] = _top_market_whales_by_trust_score(
+            session,
+            market_slug=str(payload["market_slug"] or ""),
+            limit=5,
+        )
         payload.update(
             _freshness_metadata(
                 observed_at=profile.snapshot_time if profile and profile.snapshot_time else market.read_time,
@@ -2859,6 +3013,11 @@ def latest_market_profile(session: Session, market_slug: str) -> dict[str, Any] 
         session,
         str(payload["market_slug"] or ""),
         contract=contract,
+    )
+    payload["top_whales"] = _top_market_whales_by_trust_score(
+        session,
+        market_slug=str(payload["market_slug"] or ""),
+        limit=5,
     )
     payload.update(
         _freshness_metadata(
