@@ -124,6 +124,7 @@ LIVE_WHALE_SIGNAL_SQL = text(
       JOIN analytics.platform p
         ON p.platform_id = tf.platform_id
       WHERE p.platform_name = :platform_name
+        AND tf.market_contract_id = ANY(CAST(:market_ids AS INTEGER[]))
         AND tf.transaction_time >= CAST(:as_of AS TIMESTAMPTZ) - INTERVAL '24 hours'
         AND tf.transaction_time <= CAST(:as_of AS TIMESTAMPTZ) + INTERVAL '5 minutes'
     )
@@ -281,13 +282,17 @@ def _load_live_whale_signal_index(
     *,
     platform_name: str,
     as_of: datetime,
+    market_ids: list[int],
 ) -> dict[int, dict[str, dict[str, Any]]]:
     """Return recent whale pressure features grouped by market and side label."""
+    if not market_ids:
+        return {}
     rows = session.execute(
         LIVE_WHALE_SIGNAL_SQL,
         {
             "platform_name": platform_name,
             "as_of": as_of,
+            "market_ids": market_ids,
         },
     ).mappings().all()
     by_market: dict[int, dict[str, dict[str, Any]]] = {}
@@ -724,17 +729,9 @@ def generate_prediction_snapshots(
             "limit": None if limit <= 0 else limit,
         },
     ).mappings().all()
-    live_feature_index = _load_live_whale_signal_index(
-        session,
-        platform_name=platform_name,
-        as_of=generated_at,
-    )
-
     snapshot_rows: list[dict[str, Any]] = []
+    eligible_market_rows: list[dict[str, Any]] = []
     excluded_sports_count = 0
-    local_prediction_count = 0
-    live_prediction_count = 0
-    pending_prediction_count = 0
     for market_row in raw_market_rows:
         row = dict(market_row)
         if is_physical_sports_market(
@@ -743,6 +740,19 @@ def generate_prediction_snapshots(
         ):
             excluded_sports_count += 1
             continue
+        eligible_market_rows.append(row)
+
+    live_feature_index = _load_live_whale_signal_index(
+        session,
+        platform_name=platform_name,
+        as_of=generated_at,
+        market_ids=[int(row["market_contract_id"]) for row in eligible_market_rows],
+    )
+
+    local_prediction_count = 0
+    live_prediction_count = 0
+    pending_prediction_count = 0
+    for row in eligible_market_rows:
         local_market = local_index.get(str(row["market_slug"]))
         for side_label in _side_labels(row):
             for window_hours in PREDICTION_WINDOWS:
