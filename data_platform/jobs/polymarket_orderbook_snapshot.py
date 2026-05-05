@@ -30,6 +30,8 @@ from data_platform.ingest.polymarket import ingest_orderbook_batch
 from data_platform.ingest.store import parse_datetime
 from data_platform.models import (
     ApiPayload,
+    Dashboard,
+    DashboardMarket,
     MarketContract,
     MarketEvent,
     MarketTag,
@@ -177,7 +179,29 @@ def _load_target_markets(session: Session, market_limit: int, *, focus_domains: 
         .correlate(MarketContract)
         .scalar_subquery()
     )
-    rows = session.execute(
+
+    latest_dashboard = session.scalars(select(Dashboard).order_by(desc(Dashboard.generated_at)).limit(1)).first()
+    dashboard_rows = []
+    if latest_dashboard is not None:
+        dashboard_rows = session.execute(
+            select(MarketContract, MarketEvent)
+            .join(Platform, Platform.platform_id == MarketContract.platform_id)
+            .join(MarketEvent, MarketEvent.event_id == MarketContract.event_id)
+            .join(DashboardMarket, DashboardMarket.market_contract_id == MarketContract.market_contract_id)
+            .where(DashboardMarket.dashboard_id == latest_dashboard.dashboard_id)
+            .where(Platform.platform_name == "polymarket")
+            .where(MarketContract.is_active.is_(True))
+            .where(MarketContract.is_closed.is_(False))
+            .order_by(
+                desc(DashboardMarket.trusted_whale_count),
+                desc(DashboardMarket.whale_count),
+                desc(func.coalesce(DashboardMarket.volume, MarketContract.volume, observed_volume)),
+                DashboardMarket.market_id.asc(),
+            )
+            .limit(market_limit)
+        ).all()
+
+    volume_rows = session.execute(
         select(MarketContract, MarketEvent)
         .join(Platform, Platform.platform_id == MarketContract.platform_id)
         .join(MarketEvent, MarketEvent.event_id == MarketContract.event_id)
@@ -191,6 +215,7 @@ def _load_target_markets(session: Session, market_limit: int, *, focus_domains: 
         )
         .limit(market_limit * 12)
     ).all()
+    rows = [*dashboard_rows, *volume_rows]
 
     event_tags = _load_event_tags(session, {event.event_id for _, event in rows})
     selected: list[tuple[MarketContract, list[str]]] = []
