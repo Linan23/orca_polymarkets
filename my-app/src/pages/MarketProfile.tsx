@@ -116,6 +116,9 @@ function forecastSourceTag(item: MarketProfileMlPredictionCase) {
   if (source === "live_whale_signal_model") {
     return "Live whale model";
   }
+  if (source === "current_odds_baseline") {
+    return "Current odds baseline";
+  }
   return "ML forecast";
 }
 

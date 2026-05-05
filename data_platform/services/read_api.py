@@ -505,7 +505,101 @@ def _latest_market_prediction_snapshot_payload(session: Session, market_slug: st
     }
 
 
-def _market_profile_ml_trend_payload(session: Session, market_slug: str) -> dict[str, Any]:
+def _baseline_side_labels(contract: MarketContract | None) -> list[str]:
+    """Return side labels for a current-odds ML fallback chart."""
+    if contract is None:
+        return []
+    labels = [str(contract.outcome_a_label or "").strip(), str(contract.outcome_b_label or "").strip()]
+    labels = [label for label in labels if label]
+    return labels or ["Yes", "No"]
+
+
+def _baseline_current_odds_pct(contract: MarketContract | None, side_label: str) -> float | None:
+    """Return current side odds in percentage points for a current-odds fallback chart."""
+    if contract is None or contract.last_trade_price is None:
+        return None
+    try:
+        price_pct = max(0.0, min(float(contract.last_trade_price) * 100.0, 100.0))
+    except (TypeError, ValueError):
+        return None
+    outcome_a = str(contract.outcome_a_label or "Yes").strip().casefold()
+    if str(side_label or "").strip().casefold() == outcome_a:
+        return round(price_pct, 4)
+    return round(100.0 - price_pct, 4)
+
+
+def _current_odds_baseline_windows(
+    *,
+    contract: MarketContract | None,
+    market_slug: str,
+    anchor: dict[str, Any],
+) -> dict[str, list[dict[str, Any]]]:
+    """Return flat 12h/24h fallback rows when no ML snapshot exists."""
+    if contract is None:
+        return {"12h": [], "24h": []}
+    observation_time = contract.updated_at or datetime.now(timezone.utc)
+    event_category = "uncategorized"
+    windows: dict[str, list[dict[str, Any]]] = {"12h": [], "24h": []}
+    for side_label in _baseline_side_labels(contract):
+        current_odds_pct = _baseline_current_odds_pct(contract, side_label)
+        if current_odds_pct is None:
+            continue
+        for window_hours in (12, 24):
+            window_name = f"{window_hours}h"
+            target_time = observation_time + timedelta(hours=window_hours)
+            row = {
+                "window": window_name,
+                "market_slug": str(market_slug or contract.market_slug or "").strip().casefold(),
+                "question": contract.question,
+                "side_label": side_label,
+                "observation_time": observation_time.isoformat(),
+                "event_category": event_category,
+                "focus_category": event_category,
+                "focused_fit_category": event_category,
+                "market_family": event_category,
+                "current_odds_pct": current_odds_pct,
+                "predicted_future_odds_pct": current_odds_pct,
+                "predicted_delta_pts": 0.0,
+                "predicted_direction": "flat",
+                "prediction_source": "current_odds_baseline",
+                "display_tier": "review",
+                "display_reasons": ["current_odds_baseline"],
+                "review_reasons": ["missing_ml_prediction_snapshot"],
+                "direction_signal_tier": "abstain",
+                "direction_signal_tier_reason": "no saved ML snapshot; showing current odds baseline",
+                "direction_signal_predicted_direction": "flat",
+                "direction_signal_confidence": 0.0,
+                "reliability_warnings": ["missing_ml_prediction_snapshot", "no_recent_whale_signal_for_side"],
+                "overlay_future_odds_pct": current_odds_pct,
+                "overlay_delta_pts": 0.0,
+                "overlay_direction": "flat",
+                "interval_low_future_odds_pct": current_odds_pct,
+                "interval_high_future_odds_pct": current_odds_pct,
+                "trend_fit_error_type": "current_odds_baseline",
+                "trend_shape_score": 0.0,
+                "whale_anchor": {},
+                "local_backtest_only": False,
+                "prediction_start_time": observation_time.isoformat(),
+                "prediction_target_time": target_time.isoformat(),
+                "prediction_window_hours": window_hours,
+                "prediction_timeline_source": "current_market_contract_snapshot",
+                "prediction_status": "current_odds_baseline_available",
+            }
+            windows[window_name].append(
+                _attach_entry_anchor_to_prediction_case(
+                    row,
+                    side_sequence=None,
+                    fallback_anchor=anchor,
+                )
+            )
+    return windows
+
+
+def _market_profile_ml_trend_payload(
+    session: Session,
+    market_slug: str,
+    contract: MarketContract | None = None,
+) -> dict[str, Any]:
     """Return server-shaped whale entry plus 12h/24h trend predictions."""
     persisted_prediction = _latest_market_prediction_snapshot_payload(session, market_slug)
     local_prediction = persisted_prediction or market_profile_ml_trend(market_slug)
@@ -538,9 +632,17 @@ def _market_profile_ml_trend_payload(session: Session, market_slug: str) -> dict
         windows[str(window_name)] = enriched_rows
 
     chart_available = any(windows.get(window_name) for window_name in ("12h", "24h"))
+    baseline_available = False
+    if not chart_available:
+        windows = _current_odds_baseline_windows(contract=contract, market_slug=market_slug, anchor=anchor)
+        baseline_available = any(windows.get(window_name) for window_name in ("12h", "24h"))
+        chart_available = baseline_available
     model_prediction_available = bool(local_prediction.get("model_prediction_available", chart_available))
     base_prediction_status = str(local_prediction.get("prediction_status") or "")
-    if chart_available and not model_prediction_available and base_prediction_status:
+    if baseline_available:
+        model_prediction_available = False
+        prediction_status = "current_odds_baseline_available"
+    elif chart_available and not model_prediction_available and base_prediction_status:
         prediction_status = base_prediction_status
     elif chart_available and anchor.get("available"):
         prediction_status = "entry_anchored_prediction_available"
@@ -557,8 +659,9 @@ def _market_profile_ml_trend_payload(session: Session, market_slug: str) -> dict
         "reason": None if chart_available else local_prediction.get("reason"),
         "market_slug": str(market_slug or "").strip().casefold(),
         "production_use": False,
-        "local_backtest_only": bool(local_prediction.get("local_backtest_only", True)),
+        "local_backtest_only": False if baseline_available else bool(local_prediction.get("local_backtest_only", True)),
         "server_ready_shape": True,
+        "model_prediction_available": model_prediction_available,
         "prediction_status": prediction_status,
         "prediction_anchor": anchor,
         "live_whale_sequence": {
@@ -2583,7 +2686,11 @@ def latest_market_profile(session: Session, market_slug: str) -> dict[str, Any] 
                 profile=profile,
             )
             payload["whale_market_focus"] = _normalize_whale_market_focus(session, payload["whale_market_focus"])
-            payload["ml_prediction_trend"] = _market_profile_ml_trend_payload(session, str(payload["market_slug"] or ""))
+            payload["ml_prediction_trend"] = _market_profile_ml_trend_payload(
+                session,
+                str(payload["market_slug"] or ""),
+                contract=contract,
+            )
             payload.update(
                 _freshness_metadata(
                     observed_at=profile.snapshot_time if profile and profile.snapshot_time else market.read_time,
@@ -2622,7 +2729,11 @@ def latest_market_profile(session: Session, market_slug: str) -> dict[str, Any] 
             profile=profile,
         )
         payload["whale_market_focus"] = _normalize_whale_market_focus(session, payload["whale_market_focus"])
-        payload["ml_prediction_trend"] = _market_profile_ml_trend_payload(session, str(payload["market_slug"] or ""))
+        payload["ml_prediction_trend"] = _market_profile_ml_trend_payload(
+            session,
+            str(payload["market_slug"] or ""),
+            contract=contract,
+        )
         payload.update(
             _freshness_metadata(
                 observed_at=profile.snapshot_time if profile and profile.snapshot_time else market.read_time,
@@ -2657,7 +2768,11 @@ def latest_market_profile(session: Session, market_slug: str) -> dict[str, Any] 
         orderbook_depth=int(latest_orderbook.depth_levels) if latest_orderbook is not None else None,
     )
     payload["whale_market_focus"] = _normalize_whale_market_focus(session, payload["whale_market_focus"])
-    payload["ml_prediction_trend"] = _market_profile_ml_trend_payload(session, str(payload["market_slug"] or ""))
+    payload["ml_prediction_trend"] = _market_profile_ml_trend_payload(
+        session,
+        str(payload["market_slug"] or ""),
+        contract=contract,
+    )
     payload.update(
         _freshness_metadata(
             observed_at=latest_orderbook.snapshot_time if latest_orderbook is not None else contract.updated_at,
