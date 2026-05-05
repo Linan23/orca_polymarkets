@@ -4,6 +4,7 @@ import FollowButton from "../components/FollowButton";
 import { useWatchlist } from "../hooks/useWatchlist";
 import {
   fetchMarketProfile,
+  fetchMarketProfileTopWhales,
   type MarketProfileMlPredictionCase,
   type MarketProfileMlPredictionTrend,
   type MarketProfileTopWhale,
@@ -273,8 +274,31 @@ function TopMarketWhaleRow({ whale, rank }: { whale: MarketProfileTopWhale; rank
   );
 }
 
-function TopMarketWhalesPanel({ topWhales }: { topWhales: MarketProfileTopWhales | undefined }) {
+function emptyTopWhales(marketSlug: string): MarketProfileTopWhales {
+  return {
+    market_slug: marketSlug,
+    snapshot_time: null,
+    scoring_version: null,
+    count: 0,
+    items: [],
+  };
+}
+
+function TopMarketWhalesPanel({ marketSlug }: { marketSlug: string }) {
+  const loadTopWhales = useCallback(
+    () => (marketSlug ? fetchMarketProfileTopWhales(marketSlug, 5) : Promise.resolve(emptyTopWhales(marketSlug))),
+    [marketSlug],
+  );
+  const { data: topWhales, loading, error } = useApiData(loadTopWhales);
   const whales = topWhales?.items ?? [];
+
+  if (loading) {
+    return <div className="market-ml-empty">Loading top whales...</div>;
+  }
+
+  if (error) {
+    return <div className="market-ml-empty">Unable to load top whales: {error}</div>;
+  }
 
   if (whales.length === 0) {
     return (
@@ -308,10 +332,10 @@ function TopMarketWhalesPanel({ topWhales }: { topWhales: MarketProfileTopWhales
 
 function MarketMlPredictionTrendPanel({
   trend,
-  topWhales,
+  marketSlug,
 }: {
   trend: MarketProfileMlPredictionTrend | undefined;
-  topWhales: MarketProfileTopWhales | undefined;
+  marketSlug: string;
 }) {
   const cases = profileTrendCases(trend);
   const primaryCases = primaryTrendCases(cases);
@@ -353,7 +377,7 @@ function MarketMlPredictionTrendPanel({
       </div>
 
       {activeTab === "whales" ? (
-        <TopMarketWhalesPanel topWhales={topWhales} />
+        <TopMarketWhalesPanel marketSlug={marketSlug} />
       ) : cases.length === 0 ? (
         <>
           <LiveWhaleEntrySummary trend={trend} />
@@ -512,7 +536,7 @@ export default function MarketProfile() {
 </div>
           </section>
 
-          <MarketMlPredictionTrendPanel trend={data.ml_prediction_trend} topWhales={data.top_whales} />
+          <MarketMlPredictionTrendPanel trend={data.ml_prediction_trend} marketSlug={data.market_slug} />
         </>
       )}
     </div>

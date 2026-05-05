@@ -791,6 +791,15 @@ export async function fetchMarketProfile(marketSlug: string): Promise<MarketProf
   return payload.profile;
 }
 
+export async function fetchMarketProfileTopWhales(marketSlug: string, limit = 5): Promise<MarketProfileTopWhales> {
+  const params = new URLSearchParams();
+  params.set("limit", String(limit));
+  const payload = await fetchCachedJson<{ top_whales: MarketProfileTopWhales }>(
+    `/api/markets/${encodeURIComponent(marketSlug)}/top-whales?${params.toString()}`,
+  );
+  return payload.top_whales;
+}
+
 export async function fetchHomeSummary(): Promise<HomeSummary> {
   const now = Date.now();
   if (homeSummaryClientCache && homeSummaryClientCache.expiresAt > now) {

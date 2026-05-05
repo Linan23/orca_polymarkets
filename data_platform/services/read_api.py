@@ -466,6 +466,11 @@ def _top_market_whales_by_trust_score(session: Session, *, market_slug: str, lim
     }
 
 
+def market_profile_top_whales(session: Session, *, market_slug: str, limit: int = 5) -> dict[str, Any]:
+    """Return top market whales for the market-profile top-whales tab."""
+    return _top_market_whales_by_trust_score(session, market_slug=market_slug, limit=limit)
+
+
 def _parse_iso_datetime(value: str | None) -> datetime | None:
     """Return a timezone-aware datetime from an ISO string when possible."""
     if not value:
@@ -2902,11 +2907,6 @@ def latest_market_profile(session: Session, market_slug: str) -> dict[str, Any] 
                 str(payload["market_slug"] or ""),
                 contract=contract,
             )
-            payload["top_whales"] = _top_market_whales_by_trust_score(
-                session,
-                market_slug=str(payload["market_slug"] or ""),
-                limit=5,
-            )
             payload.update(
                 _freshness_metadata(
                     observed_at=profile.snapshot_time if profile and profile.snapshot_time else market.read_time,
@@ -2961,11 +2961,6 @@ def latest_market_profile(session: Session, market_slug: str) -> dict[str, Any] 
             str(payload["market_slug"] or ""),
             contract=contract,
         )
-        payload["top_whales"] = _top_market_whales_by_trust_score(
-            session,
-            market_slug=str(payload["market_slug"] or ""),
-            limit=5,
-        )
         payload.update(
             _freshness_metadata(
                 observed_at=profile.snapshot_time if profile and profile.snapshot_time else market.read_time,
@@ -3013,11 +3008,6 @@ def latest_market_profile(session: Session, market_slug: str) -> dict[str, Any] 
         session,
         str(payload["market_slug"] or ""),
         contract=contract,
-    )
-    payload["top_whales"] = _top_market_whales_by_trust_score(
-        session,
-        market_slug=str(payload["market_slug"] or ""),
-        limit=5,
     )
     payload.update(
         _freshness_metadata(
