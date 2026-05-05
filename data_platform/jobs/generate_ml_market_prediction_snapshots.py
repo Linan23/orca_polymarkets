@@ -33,6 +33,7 @@ from data_platform.services.ml_reports import WHALE_ANCHORED_DELTA_JSON_PATH
 DEFAULT_MODEL_VERSION = "whale_anchored_delta_snapshot_v0"
 DEFAULT_FEATURE_SCHEMA_VERSION = "market_profile_prediction_snapshot_v1"
 PREDICTION_WINDOWS = (12, 24)
+DEFAULT_INSERT_BATCH_SIZE = 1000
 PHYSICAL_SPORTS_TERMS = (
     "nba", "nfl", "mlb", "nhl", "ufc", "soccer", "football", "tennis", "golf",
     "cricket", "rugby", "baseball", "basketball", "hockey", "formula 1", "f1",
@@ -338,8 +339,9 @@ def generate_prediction_snapshots(
                     )
                 )
 
-    if snapshot_rows:
-        statement = pg_insert(MlMarketPredictionSnapshot).values(snapshot_rows)
+    for start_index in range(0, len(snapshot_rows), DEFAULT_INSERT_BATCH_SIZE):
+        snapshot_batch = snapshot_rows[start_index : start_index + DEFAULT_INSERT_BATCH_SIZE]
+        statement = pg_insert(MlMarketPredictionSnapshot).values(snapshot_batch)
         statement = statement.on_conflict_do_update(
             constraint="uq_ml_market_prediction_snapshot_market_side_window_generated",
             set_={
