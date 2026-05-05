@@ -108,6 +108,39 @@ function tierClass(value: string | undefined) {
   return "market-ml-muted";
 }
 
+function forecastSourceTag(item: MarketProfileMlPredictionCase) {
+  const source = item.prediction_source ?? "";
+  if (source === "whale_anchored_report" || source === "local_whale_anchored_report") {
+    return "Trained trend model";
+  }
+  if (source === "live_whale_signal_model") {
+    return "Live whale model";
+  }
+  return "ML forecast";
+}
+
+function signalTag(item: MarketProfileMlPredictionCase) {
+  if (item.direction_signal_tier === "strong") return "Strong signal";
+  if (item.direction_signal_tier === "watch") return "Watch signal";
+  if (item.reliability_warnings?.includes("no_recent_whale_signal_for_side")) return "No whale signal";
+  return "No clear signal";
+}
+
+function forecastDirectionTag(item: MarketProfileMlPredictionCase) {
+  if (item.predicted_direction === "up") return "Up forecast";
+  if (item.predicted_direction === "down") return "Down forecast";
+  return "Flat forecast";
+}
+
+function confidenceTag(item: MarketProfileMlPredictionCase) {
+  if (item.direction_signal_tier === "strong") return "High confidence";
+  if (item.direction_signal_tier === "watch") return "Watch closely";
+  if (item.reliability_warnings?.includes("no_recent_whale_signal_for_side")) return "Current odds baseline";
+  if (item.review_reasons?.includes("insufficient_watch_confidence")) return "Low confidence";
+  if (item.display_tier === "show") return "Forecast ready";
+  return "Review only";
+}
+
 function whaleAnchorValue(item: MarketProfileMlPredictionCase, key: string) {
   return item.whale_anchor?.[key];
 }
@@ -251,6 +284,7 @@ function MarketMlPredictionTrendPanel({ trend }: { trend: MarketProfileMlPredict
                 .slice(0, 2)
                 .map(formatLabel)
                 .join(", ");
+              const confidence = confidenceTag(item);
               return (
                 <article className="market-ml-prediction-row" key={`${item.window}-${item.side_label}`}>
                   <div>
@@ -266,11 +300,9 @@ function MarketMlPredictionTrendPanel({ trend }: { trend: MarketProfileMlPredict
                     </p>
                   </div>
                   <div className="market-ml-row-metrics">
-                    <span className={tierClass(item.display_tier)}>{formatLabel(item.display_tier)}</span>
-                    <span className={tierClass(item.direction_signal_tier)}>
-                      {formatLabel(item.direction_signal_tier)} signal
-                    </span>
-                    <span>{formatLabel(item.predicted_direction)}</span>
+                    <span className={tierClass(item.display_tier)}>{forecastSourceTag(item)}</span>
+                    <span className={tierClass(item.direction_signal_tier)}>{signalTag(item)}</span>
+                    <span>{forecastDirectionTag(item)}</span>
                   </div>
                   <div className="market-ml-row-detail">
                     <span>
@@ -281,7 +313,7 @@ function MarketMlPredictionTrendPanel({ trend }: { trend: MarketProfileMlPredict
                       exits {formatCompactNumber(whaleAnchorValue(item, "recent_exit_count_12h"), 0)}
                     </span>
                     <span>Net pressure {formatCompactNumber(whaleAnchorValue(item, "recent_weighted_net_pressure_12h"), 2)}</span>
-                    <span>{reason || formatLabel(item.prediction_status ?? item.prediction_source)}</span>
+                    <span>{confidence || reason || formatLabel(item.prediction_status ?? item.prediction_source)}</span>
                   </div>
                 </article>
               );
