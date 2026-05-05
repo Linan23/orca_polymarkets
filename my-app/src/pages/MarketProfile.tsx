@@ -215,11 +215,11 @@ function MarketMlPredictionTrendPanel({ trend }: { trend: MarketProfileMlPredict
     <section className="card profile-card market-ml-trend-card">
       <div className="card-header market-ml-header">
         <div>
-          <p className="card-label">Local ML Trend</p>
+          <p className="card-label">ML Trend</p>
           <h2>Prediction Trend</h2>
-          <p className="card-subtext">Whale entry time followed by local 12h and 24h trend predictions.</p>
+          <p className="card-subtext">Whale entry time followed by server-backed 12h and 24h trend predictions.</p>
         </div>
-        <span className="market-ml-local-pill">Local only</span>
+        <span className="market-ml-local-pill">Server snapshot</span>
       </div>
 
       {!trend?.available || cases.length === 0 ? (
@@ -227,7 +227,7 @@ function MarketMlPredictionTrendPanel({ trend }: { trend: MarketProfileMlPredict
           <LiveWhaleEntrySummary trend={trend} />
           <div className="market-ml-empty">
             <strong>No 12h/24h ML prediction snapshot for this market yet.</strong>
-            <span>{formatLabel(trend?.prediction_status ?? trend?.reason ?? "market_not_in_local_ml_prediction_index")}</span>
+            <span>{formatLabel(trend?.prediction_status ?? trend?.reason ?? "market_not_in_ml_prediction_snapshot")}</span>
           </div>
         </>
       ) : (

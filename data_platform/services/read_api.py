@@ -378,7 +378,7 @@ def _attach_entry_anchor_to_prediction_case(
     side_sequence: dict[str, Any] | None,
     fallback_anchor: dict[str, Any],
 ) -> dict[str, Any]:
-    """Attach live whale entry timing to one local ML prediction case."""
+    """Attach live whale entry timing to one ML prediction case."""
     item = dict(prediction)
     entry_anchor = (
         side_sequence.get("entry_anchor")
@@ -498,7 +498,7 @@ def _latest_market_prediction_snapshot_payload(session: Session, market_slug: st
 
 
 def _market_profile_ml_trend_payload(session: Session, market_slug: str) -> dict[str, Any]:
-    """Return server-shaped whale entry plus local 12h/24h trend predictions."""
+    """Return server-shaped whale entry plus 12h/24h trend predictions."""
     persisted_prediction = _latest_market_prediction_snapshot_payload(session, market_slug)
     local_prediction = persisted_prediction or market_profile_ml_trend(market_slug)
     live_sequence = whale_event_sequence_for_market(

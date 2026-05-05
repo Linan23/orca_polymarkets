@@ -79,7 +79,7 @@ def _comparison_summary(payload: dict[str, Any] | None) -> dict[str, Any]:
     }
 
 def market_profile_ml_trend(market_slug: str) -> dict[str, Any]:
-    """Return local-only whale-anchored trend predictions for one market profile."""
+    """Return whale-anchored trend predictions for one market profile."""
     normalized_slug = market_slug.strip().lower()
     if not normalized_slug:
         return {
@@ -93,7 +93,7 @@ def market_profile_ml_trend(market_slug: str) -> dict[str, Any]:
     if not report:
         return {
             "available": False,
-            "reason": "local_whale_anchored_report_missing",
+            "reason": "whale_anchored_report_missing",
             "production_use": False,
             "local_backtest_only": True,
             "source_path": str(WHALE_ANCHORED_DELTA_JSON_PATH),
@@ -105,7 +105,7 @@ def market_profile_ml_trend(market_slug: str) -> dict[str, Any]:
     if not isinstance(profile_payload, dict):
         return {
             "available": False,
-            "reason": "market_not_in_local_ml_prediction_index",
+            "reason": "market_not_in_ml_prediction_index",
             "market_slug": normalized_slug,
             "generated_at": report.get("generated_at"),
             "production_use": False,
