@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 import { useCallback } from "react";
 import { useApiData } from "../hooks/useApiData";
 import { fetchHomeSummary } from "../lib/api";

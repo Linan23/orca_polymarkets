@@ -1203,6 +1203,15 @@ a {
   font-weight: 800;
 }
 
+.market-title a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.market-title a:hover {
+  color: #bfdbfe;
+}
+
 .hero-text {
   margin-top: 14px;
   max-width: 720px;
