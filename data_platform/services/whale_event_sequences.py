@@ -43,6 +43,19 @@ AS_OF_SQL = text(
     """
 )
 
+MARKET_AS_OF_SQL = text(
+    """
+    SELECT MAX(tf.transaction_time) AS as_of
+    FROM analytics.transaction_fact tf
+    JOIN analytics.market_contract mc
+      ON mc.market_contract_id = tf.market_contract_id
+    JOIN analytics.platform p
+      ON p.platform_id = tf.platform_id
+    WHERE p.platform_name = :platform_name
+      AND LOWER(COALESCE(mc.market_slug, '')) = :market_slug
+    """
+)
+
 LATEST_WHALE_BATCH_SQL = text(
     """
     SELECT
@@ -539,7 +552,13 @@ def whale_event_sequence_for_market(
             "items": [],
         }
 
-    as_of_row = session.execute(AS_OF_SQL, {"platform_name": clean_platform}).mappings().first()
+    as_of_row = session.execute(
+        MARKET_AS_OF_SQL,
+        {
+            "platform_name": clean_platform,
+            "market_slug": normalized_market_slug,
+        },
+    ).mappings().first()
     as_of = as_of_row.get("as_of") if as_of_row else None
     if as_of is None:
         return {
