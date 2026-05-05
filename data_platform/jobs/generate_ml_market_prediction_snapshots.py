@@ -1,9 +1,10 @@
 """Generate server-side ML market prediction snapshots for profile pages.
 
-This first server snapshot pass covers every active Polymarket market with a
-stable prediction status row. Markets present in the whale-anchored local report
-receive 12h/24h prediction values; the rest are marked as waiting for live model
-inference while still allowing profile pages to attach semi-live whale entries.
+The market profile snapshot covers every active Polymarket market. Markets
+present in the tuned whale-anchored report keep those report predictions; all
+other markets receive a live whale-signal prediction from current odds plus
+recent trusted-whale entry/exit pressure so each profile can render 12h/24h
+trend forecasts.
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ from __future__ import annotations
 import argparse
 from datetime import datetime, timedelta, timezone
 import json
+import math
 from pathlib import Path
 import sys
 from typing import Any
@@ -30,10 +32,11 @@ from data_platform.models.base import utc_now
 from data_platform.services.ml_reports import WHALE_ANCHORED_DELTA_JSON_PATH
 
 
-DEFAULT_MODEL_VERSION = "whale_anchored_delta_snapshot_v0"
-DEFAULT_FEATURE_SCHEMA_VERSION = "market_profile_prediction_snapshot_v1"
+DEFAULT_MODEL_VERSION = "market_profile_hybrid_whale_trend_v1"
+DEFAULT_FEATURE_SCHEMA_VERSION = "market_profile_prediction_snapshot_v2"
 PREDICTION_WINDOWS = (12, 24)
 DEFAULT_INSERT_BATCH_SIZE = 1000
+MAX_SIGNAL_DELTA_BY_WINDOW = {12: 6.0, 24: 9.0}
 PHYSICAL_SPORTS_TERMS = (
     "nba", "nfl", "mlb", "nhl", "ufc", "soccer", "football", "tennis", "golf",
     "cricket", "rugby", "baseball", "basketball", "hockey", "formula 1", "f1",
@@ -76,6 +79,106 @@ ACTIVE_MARKETS_SQL = text(
     """
 )
 
+LIVE_WHALE_SIGNAL_SQL = text(
+    """
+    WITH latest_batch AS (
+      SELECT
+        w.snapshot_time,
+        w.scoring_version
+      FROM analytics.whale_score_snapshot w
+      JOIN analytics.platform p
+        ON p.platform_id = w.platform_id
+      WHERE p.platform_name = :platform_name
+      ORDER BY w.snapshot_time DESC, w.created_at DESC, w.whale_score_snapshot_id DESC
+      LIMIT 1
+    ),
+    latest_scores AS (
+      SELECT
+        w.user_id,
+        w.platform_id,
+        w.trust_score,
+        w.is_trusted_whale,
+        w.is_whale
+      FROM analytics.whale_score_snapshot w
+      JOIN analytics.platform p
+        ON p.platform_id = w.platform_id
+      JOIN latest_batch lb
+        ON lb.snapshot_time = w.snapshot_time
+       AND lb.scoring_version = w.scoring_version
+      WHERE p.platform_name = :platform_name
+        AND (w.is_trusted_whale = TRUE OR w.is_whale = TRUE OR w.trust_score >= 1.08)
+    ),
+    recent_trades AS (
+      SELECT
+        tf.market_contract_id,
+        LOWER(COALESCE(NULLIF(TRIM(tf.outcome_label), ''), '')) AS outcome_label,
+        LOWER(COALESCE(NULLIF(TRIM(tf.side), ''), tf.transaction_type, '')) AS trade_side,
+        tf.transaction_time,
+        ABS(COALESCE(tf.notional_value, tf.price * tf.shares, 0)) AS notional_value,
+        GREATEST(COALESCE(ls.trust_score, 1), 0) AS trust_score,
+        ls.is_trusted_whale
+      FROM analytics.transaction_fact tf
+      JOIN latest_scores ls
+        ON ls.user_id = tf.user_id
+       AND ls.platform_id = tf.platform_id
+      JOIN analytics.platform p
+        ON p.platform_id = tf.platform_id
+      WHERE p.platform_name = :platform_name
+        AND tf.transaction_time >= CAST(:as_of AS TIMESTAMPTZ) - INTERVAL '24 hours'
+        AND tf.transaction_time <= CAST(:as_of AS TIMESTAMPTZ) + INTERVAL '5 minutes'
+    )
+    SELECT
+      market_contract_id,
+      outcome_label,
+      COUNT(*) FILTER (WHERE transaction_time >= CAST(:as_of AS TIMESTAMPTZ) - INTERVAL '12 hours') AS event_count_12h,
+      COUNT(*) FILTER (WHERE transaction_time >= CAST(:as_of AS TIMESTAMPTZ) - INTERVAL '24 hours') AS event_count_24h,
+      COUNT(*) FILTER (
+        WHERE trade_side = 'buy' AND transaction_time >= CAST(:as_of AS TIMESTAMPTZ) - INTERVAL '12 hours'
+      ) AS entry_count_12h,
+      COUNT(*) FILTER (
+        WHERE trade_side = 'sell' AND transaction_time >= CAST(:as_of AS TIMESTAMPTZ) - INTERVAL '12 hours'
+      ) AS exit_count_12h,
+      COUNT(*) FILTER (
+        WHERE trade_side = 'buy' AND transaction_time >= CAST(:as_of AS TIMESTAMPTZ) - INTERVAL '24 hours'
+      ) AS entry_count_24h,
+      COUNT(*) FILTER (
+        WHERE trade_side = 'sell' AND transaction_time >= CAST(:as_of AS TIMESTAMPTZ) - INTERVAL '24 hours'
+      ) AS exit_count_24h,
+      COALESCE(SUM(notional_value * trust_score) FILTER (
+        WHERE trade_side = 'buy' AND transaction_time >= CAST(:as_of AS TIMESTAMPTZ) - INTERVAL '12 hours'
+      ), 0) AS weighted_entry_12h,
+      COALESCE(SUM(notional_value * trust_score) FILTER (
+        WHERE trade_side = 'sell' AND transaction_time >= CAST(:as_of AS TIMESTAMPTZ) - INTERVAL '12 hours'
+      ), 0) AS weighted_exit_12h,
+      COALESCE(SUM(notional_value * trust_score) FILTER (
+        WHERE trade_side = 'buy' AND transaction_time >= CAST(:as_of AS TIMESTAMPTZ) - INTERVAL '24 hours'
+      ), 0) AS weighted_entry_24h,
+      COALESCE(SUM(notional_value * trust_score) FILTER (
+        WHERE trade_side = 'sell' AND transaction_time >= CAST(:as_of AS TIMESTAMPTZ) - INTERVAL '24 hours'
+      ), 0) AS weighted_exit_24h,
+      COUNT(*) FILTER (
+        WHERE is_trusted_whale = TRUE AND transaction_time >= CAST(:as_of AS TIMESTAMPTZ) - INTERVAL '12 hours'
+      ) AS trusted_event_count_12h,
+      COUNT(*) FILTER (
+        WHERE is_trusted_whale = TRUE AND transaction_time >= CAST(:as_of AS TIMESTAMPTZ) - INTERVAL '24 hours'
+      ) AS trusted_event_count_24h,
+      MAX(transaction_time) FILTER (
+        WHERE trade_side = 'buy' AND transaction_time >= CAST(:as_of AS TIMESTAMPTZ) - INTERVAL '12 hours'
+      ) AS latest_entry_time_12h,
+      MAX(transaction_time) FILTER (
+        WHERE trade_side = 'sell' AND transaction_time >= CAST(:as_of AS TIMESTAMPTZ) - INTERVAL '12 hours'
+      ) AS latest_exit_time_12h,
+      MAX(transaction_time) FILTER (
+        WHERE trade_side = 'buy' AND transaction_time >= CAST(:as_of AS TIMESTAMPTZ) - INTERVAL '24 hours'
+      ) AS latest_entry_time_24h,
+      MAX(transaction_time) FILTER (
+        WHERE trade_side = 'sell' AND transaction_time >= CAST(:as_of AS TIMESTAMPTZ) - INTERVAL '24 hours'
+      ) AS latest_exit_time_24h
+    FROM recent_trades
+    GROUP BY market_contract_id, outcome_label
+    """
+)
+
 
 def _read_local_prediction_index(path: Path) -> dict[str, Any]:
     """Return the local whale-anchored market profile prediction index."""
@@ -102,6 +205,38 @@ def _parse_iso(value: str | None) -> datetime | None:
 def _normalize_label(value: str | None) -> str:
     """Normalize outcome labels for joining local predictions to markets."""
     return str(value or "").strip().casefold()
+
+
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    """Return a finite float for DB numeric values."""
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if math.isfinite(parsed) else default
+
+
+def _safe_int(value: Any, default: int = 0) -> int:
+    """Return an int for DB aggregate values."""
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return default
+
+
+def _clamp(value: float, low: float, high: float) -> float:
+    """Clamp a float to a closed interval."""
+    return max(low, min(value, high))
+
+
+def _iso(value: Any) -> str | None:
+    """Return an ISO datetime string for JSON payloads."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        parsed = value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+        return parsed.isoformat()
+    return str(value)
 
 
 def _side_labels(row: dict[str, Any]) -> list[str]:
@@ -139,6 +274,280 @@ def _local_prediction_for(
         if isinstance(case, dict) and _normalize_label(str(case.get("side_label") or "")) == _normalize_label(side_label):
             return case
     return None
+
+
+def _load_live_whale_signal_index(
+    session: Session,
+    *,
+    platform_name: str,
+    as_of: datetime,
+) -> dict[int, dict[str, dict[str, Any]]]:
+    """Return recent whale pressure features grouped by market and side label."""
+    rows = session.execute(
+        LIVE_WHALE_SIGNAL_SQL,
+        {
+            "platform_name": platform_name,
+            "as_of": as_of,
+        },
+    ).mappings().all()
+    by_market: dict[int, dict[str, dict[str, Any]]] = {}
+    for raw_row in rows:
+        row = dict(raw_row)
+        market_id = _safe_int(row.get("market_contract_id"))
+        if not market_id:
+            continue
+        label = _normalize_label(str(row.get("outcome_label") or ""))
+        by_market.setdefault(market_id, {})[label] = {
+            "event_count_12h": _safe_int(row.get("event_count_12h")),
+            "event_count_24h": _safe_int(row.get("event_count_24h")),
+            "entry_count_12h": _safe_int(row.get("entry_count_12h")),
+            "exit_count_12h": _safe_int(row.get("exit_count_12h")),
+            "entry_count_24h": _safe_int(row.get("entry_count_24h")),
+            "exit_count_24h": _safe_int(row.get("exit_count_24h")),
+            "weighted_entry_12h": _safe_float(row.get("weighted_entry_12h")),
+            "weighted_exit_12h": _safe_float(row.get("weighted_exit_12h")),
+            "weighted_entry_24h": _safe_float(row.get("weighted_entry_24h")),
+            "weighted_exit_24h": _safe_float(row.get("weighted_exit_24h")),
+            "trusted_event_count_12h": _safe_int(row.get("trusted_event_count_12h")),
+            "trusted_event_count_24h": _safe_int(row.get("trusted_event_count_24h")),
+            "latest_entry_time_12h": _iso(row.get("latest_entry_time_12h")),
+            "latest_exit_time_12h": _iso(row.get("latest_exit_time_12h")),
+            "latest_entry_time_24h": _iso(row.get("latest_entry_time_24h")),
+            "latest_exit_time_24h": _iso(row.get("latest_exit_time_24h")),
+        }
+    return by_market
+
+
+def _empty_live_side_features() -> dict[str, Any]:
+    """Return empty feature values for markets without recent whale pressure."""
+    return {
+        "event_count_12h": 0,
+        "event_count_24h": 0,
+        "entry_count_12h": 0,
+        "exit_count_12h": 0,
+        "entry_count_24h": 0,
+        "exit_count_24h": 0,
+        "weighted_entry_12h": 0.0,
+        "weighted_exit_12h": 0.0,
+        "weighted_entry_24h": 0.0,
+        "weighted_exit_24h": 0.0,
+        "trusted_event_count_12h": 0,
+        "trusted_event_count_24h": 0,
+        "latest_entry_time_12h": None,
+        "latest_exit_time_12h": None,
+        "latest_entry_time_24h": None,
+        "latest_exit_time_24h": None,
+    }
+
+
+def _combine_live_side_features(
+    feature_index: dict[int, dict[str, dict[str, Any]]],
+    *,
+    market_contract_id: int,
+    side_label: str,
+    window_hours: int,
+) -> dict[str, Any]:
+    """Return side-relative whale pressure, using opposite-side trades for binary markets."""
+    by_label = feature_index.get(market_contract_id) or {}
+    normalized_side = _normalize_label(side_label)
+    same = by_label.get(normalized_side) or _empty_live_side_features()
+    opposite_rows = [
+        features
+        for label, features in by_label.items()
+        if label and label != normalized_side
+    ]
+    entry_key = f"weighted_entry_{window_hours}h"
+    exit_key = f"weighted_exit_{window_hours}h"
+    count_key = f"event_count_{window_hours}h"
+    entry_count_key = f"entry_count_{window_hours}h"
+    exit_count_key = f"exit_count_{window_hours}h"
+    trusted_count_key = f"trusted_event_count_{window_hours}h"
+
+    same_entry = _safe_float(same.get(entry_key))
+    same_exit = _safe_float(same.get(exit_key))
+    opposite_entry = sum(_safe_float(features.get(entry_key)) for features in opposite_rows)
+    opposite_exit = sum(_safe_float(features.get(exit_key)) for features in opposite_rows)
+    side_entry_pressure = same_entry + opposite_exit
+    side_exit_pressure = same_exit + opposite_entry
+    total_pressure = side_entry_pressure + side_exit_pressure
+
+    latest_entry_candidates = [
+        same.get(f"latest_entry_time_{window_hours}h"),
+        *[features.get(f"latest_exit_time_{window_hours}h") for features in opposite_rows],
+    ]
+    latest_exit_candidates = [
+        same.get(f"latest_exit_time_{window_hours}h"),
+        *[features.get(f"latest_entry_time_{window_hours}h") for features in opposite_rows],
+    ]
+    latest_entry_time = max((str(value) for value in latest_entry_candidates if value), default=None)
+    latest_exit_time = max((str(value) for value in latest_exit_candidates if value), default=None)
+
+    same_12h = {
+        "recent_entry_count_12h": _safe_int(same.get("entry_count_12h")),
+        "recent_exit_count_12h": _safe_int(same.get("exit_count_12h")),
+        "recent_weighted_entry_12h": round(_safe_float(same.get("weighted_entry_12h")), 6),
+        "recent_weighted_exit_12h": round(_safe_float(same.get("weighted_exit_12h")), 6),
+        "recent_weighted_net_pressure_12h": round(
+            _safe_float(same.get("weighted_entry_12h")) - _safe_float(same.get("weighted_exit_12h")),
+            6,
+        ),
+    }
+    return {
+        "window_hours": window_hours,
+        "event_count": _safe_int(same.get(count_key)) + sum(_safe_int(features.get(count_key)) for features in opposite_rows),
+        "entry_count": _safe_int(same.get(entry_count_key)) + sum(_safe_int(features.get(exit_count_key)) for features in opposite_rows),
+        "exit_count": _safe_int(same.get(exit_count_key)) + sum(_safe_int(features.get(entry_count_key)) for features in opposite_rows),
+        "trusted_event_count": _safe_int(same.get(trusted_count_key))
+        + sum(_safe_int(features.get(trusted_count_key)) for features in opposite_rows),
+        "side_entry_pressure": round(side_entry_pressure, 6),
+        "side_exit_pressure": round(side_exit_pressure, 6),
+        "side_net_pressure": round(side_entry_pressure - side_exit_pressure, 6),
+        "side_total_pressure": round(total_pressure, 6),
+        "pressure_ratio": round((side_entry_pressure - side_exit_pressure) / max(total_pressure, 1.0), 6),
+        "latest_entry_time": latest_entry_time,
+        "latest_exit_time": latest_exit_time,
+        **same_12h,
+    }
+
+
+def _live_prediction_for(
+    row: dict[str, Any],
+    *,
+    side_label: str,
+    window_hours: int,
+    generated_at: datetime,
+    live_feature_index: dict[int, dict[str, dict[str, Any]]],
+) -> dict[str, Any]:
+    """Return a live whale-signal prediction payload for one market side/window."""
+    current_odds_pct = _side_current_odds_pct(row, side_label)
+    if current_odds_pct is None:
+        current_odds_pct = 50.0
+
+    market_id = int(row["market_contract_id"])
+    features = _combine_live_side_features(
+        live_feature_index,
+        market_contract_id=market_id,
+        side_label=side_label,
+        window_hours=window_hours,
+    )
+    total_pressure = _safe_float(features.get("side_total_pressure"))
+    pressure_ratio = _safe_float(features.get("pressure_ratio"))
+    event_count = _safe_int(features.get("event_count"))
+    trusted_event_count = _safe_int(features.get("trusted_event_count"))
+    has_whale_signal = total_pressure > 0 and event_count > 0
+
+    activity_score = _clamp(math.log1p(total_pressure) / math.log1p(50000.0), 0.0, 1.0) if has_whale_signal else 0.0
+    count_score = _clamp(math.log1p(event_count) / math.log1p(50.0), 0.0, 1.0) if has_whale_signal else 0.0
+    trusted_share = _clamp(trusted_event_count / max(event_count, 1), 0.0, 1.0) if has_whale_signal else 0.0
+    horizon_scale = 1.0 if window_hours == 12 else 1.35
+    if has_whale_signal:
+        whale_delta = pressure_ratio * (2.25 + 4.75 * activity_score) * horizon_scale
+        mean_reversion_delta = (50.0 - current_odds_pct) * 0.0125 * horizon_scale
+        raw_delta = whale_delta + mean_reversion_delta
+    else:
+        raw_delta = 0.0
+    max_delta = MAX_SIGNAL_DELTA_BY_WINDOW.get(window_hours, 6.0)
+    predicted_delta_pts = round(_clamp(raw_delta, -max_delta, max_delta), 4)
+    if has_whale_signal:
+        predicted_future_odds_pct = round(_clamp(current_odds_pct + predicted_delta_pts, 1.0, 99.0), 4)
+        predicted_delta_pts = round(predicted_future_odds_pct - current_odds_pct, 4)
+    else:
+        predicted_future_odds_pct = round(current_odds_pct, 4)
+        predicted_delta_pts = 0.0
+    if predicted_delta_pts > 0.25:
+        predicted_direction = "up"
+    elif predicted_delta_pts < -0.25:
+        predicted_direction = "down"
+    else:
+        predicted_direction = "flat"
+
+    confidence = 0.22
+    if has_whale_signal:
+        confidence = _clamp(
+            0.32 + 0.38 * activity_score + 0.18 * count_score + 0.12 * trusted_share,
+            0.0,
+            0.92,
+        )
+    if predicted_direction == "flat":
+        signal_tier = "abstain"
+        display_tier = "review"
+        tier_reason = "live model expects no material 12-24h move"
+    elif confidence >= 0.7 and abs(predicted_delta_pts) >= 1.0:
+        signal_tier = "watch"
+        display_tier = "review"
+        tier_reason = "recent whale pressure supports a directional watch signal"
+    else:
+        signal_tier = "abstain"
+        display_tier = "review"
+        tier_reason = "live signal is below the dashboard watch threshold"
+
+    interval_width = max(2.5, 8.0 * (1.0 - confidence) + (1.5 if not has_whale_signal else 0.0))
+    interval_low = round(_clamp(predicted_future_odds_pct - interval_width, 0.0, 100.0), 4)
+    interval_high = round(_clamp(predicted_future_odds_pct + interval_width, 0.0, 100.0), 4)
+    target_time = generated_at + timedelta(hours=window_hours)
+    event_category = str(row.get("event_category") or "uncategorized")
+    display_reasons = ["live_whale_signal_model"]
+    review_reasons = [] if signal_tier == "watch" else ["insufficient_watch_confidence"]
+    reliability_warnings = [] if has_whale_signal else ["no_recent_whale_signal_for_side"]
+    latest_entry_time = features.get("latest_entry_time")
+
+    whale_anchor = {
+        "recent_entry_count_12h": _safe_int(features.get("recent_entry_count_12h")),
+        "recent_exit_count_12h": _safe_int(features.get("recent_exit_count_12h")),
+        "recent_weighted_entry_12h": _safe_float(features.get("recent_weighted_entry_12h")),
+        "recent_weighted_exit_12h": _safe_float(features.get("recent_weighted_exit_12h")),
+        "recent_weighted_net_pressure_12h": _safe_float(features.get("recent_weighted_net_pressure_12h")),
+        "side_entry_pressure": _safe_float(features.get("side_entry_pressure")),
+        "side_exit_pressure": _safe_float(features.get("side_exit_pressure")),
+        "side_net_pressure": _safe_float(features.get("side_net_pressure")),
+        "side_total_pressure": _safe_float(features.get("side_total_pressure")),
+        "pressure_ratio": pressure_ratio,
+        "event_count": event_count,
+        "trusted_event_count": trusted_event_count,
+        "latest_entry_time": latest_entry_time,
+        "latest_exit_time": features.get("latest_exit_time"),
+    }
+
+    return {
+        "window": f"{window_hours}h",
+        "market_slug": str(row["market_slug"]),
+        "question": str(row.get("question") or ""),
+        "side_label": side_label,
+        "observation_time": generated_at.isoformat(),
+        "event_category": event_category,
+        "focus_category": event_category,
+        "focused_fit_category": event_category,
+        "market_family": event_category,
+        "current_odds_pct": round(current_odds_pct, 4),
+        "predicted_future_odds_pct": predicted_future_odds_pct,
+        "predicted_delta_pts": predicted_delta_pts,
+        "predicted_direction": predicted_direction,
+        "prediction_source": "live_whale_signal_model",
+        "display_tier": display_tier,
+        "display_reasons": display_reasons,
+        "review_reasons": review_reasons,
+        "direction_signal_tier": signal_tier,
+        "direction_signal_tier_reason": tier_reason,
+        "direction_signal_predicted_direction": predicted_direction,
+        "direction_signal_confidence": round(confidence, 4),
+        "reliability_warnings": reliability_warnings,
+        "overlay_future_odds_pct": predicted_future_odds_pct,
+        "overlay_delta_pts": predicted_delta_pts,
+        "overlay_direction": predicted_direction,
+        "interval_low_future_odds_pct": interval_low,
+        "interval_high_future_odds_pct": interval_high,
+        "trend_fit_error_type": "live_profile_inference",
+        "trend_shape_score": round(confidence if has_whale_signal else 0.0, 4),
+        "whale_anchor": whale_anchor,
+        "live_window_features": features,
+        "local_backtest_only": False,
+        "whale_entry_time": latest_entry_time,
+        "prediction_start_time": generated_at.isoformat(),
+        "prediction_target_time": target_time.isoformat(),
+        "prediction_window_hours": window_hours,
+        "prediction_timeline_source": "live_whale_signal_snapshot",
+        "prediction_status": "prediction_available",
+    }
 
 
 def _pending_payload(
@@ -198,15 +607,20 @@ def _snapshot_row(
     window_hours: int,
     generated_at: datetime,
     local_prediction: dict[str, Any] | None,
+    live_prediction: dict[str, Any] | None,
     model_version: str,
     feature_schema_version: str,
 ) -> dict[str, Any]:
     """Return one database row for a market side/window prediction snapshot."""
-    payload = dict(local_prediction) if local_prediction else _pending_payload(
-        market_row,
-        side_label=side_label,
-        window_hours=window_hours,
-        generated_at=generated_at,
+    payload = dict(
+        local_prediction
+        or live_prediction
+        or _pending_payload(
+            market_row,
+            side_label=side_label,
+            window_hours=window_hours,
+            generated_at=generated_at,
+        )
     )
     payload.setdefault("window", f"{window_hours}h")
     payload.setdefault("market_slug", str(market_row["market_slug"]))
@@ -229,10 +643,14 @@ def _snapshot_row(
         else str(payload.get("prediction_status") or "waiting_for_live_model_inference")
     )
     prediction_source = (
-        "local_whale_anchored_report"
+        "whale_anchored_report"
         if local_prediction
-        else "pending_live_model_inference"
+        else str(payload.get("prediction_source") or "pending_live_model_inference")
     )
+    internal_prediction_source = payload.get("prediction_source")
+    if internal_prediction_source and internal_prediction_source != prediction_source:
+        payload["model_signal_source"] = internal_prediction_source
+    payload["prediction_source"] = prediction_source
     reliability_payload = {
         "display_reasons": payload.get("display_reasons") or [],
         "review_reasons": payload.get("review_reasons") or [],
@@ -306,10 +724,16 @@ def generate_prediction_snapshots(
             "limit": None if limit <= 0 else limit,
         },
     ).mappings().all()
+    live_feature_index = _load_live_whale_signal_index(
+        session,
+        platform_name=platform_name,
+        as_of=generated_at,
+    )
 
     snapshot_rows: list[dict[str, Any]] = []
     excluded_sports_count = 0
     local_prediction_count = 0
+    live_prediction_count = 0
     pending_prediction_count = 0
     for market_row in raw_market_rows:
         row = dict(market_row)
@@ -325,8 +749,19 @@ def generate_prediction_snapshots(
                 local_prediction = _local_prediction_for(local_market, side_label=side_label, window_hours=window_hours)
                 if local_prediction:
                     local_prediction_count += 1
+                    live_prediction = None
                 else:
-                    pending_prediction_count += 1
+                    live_prediction = _live_prediction_for(
+                        row,
+                        side_label=side_label,
+                        window_hours=window_hours,
+                        generated_at=generated_at,
+                        live_feature_index=live_feature_index,
+                    )
+                    if live_prediction.get("predicted_future_odds_pct") is not None:
+                        live_prediction_count += 1
+                    else:
+                        pending_prediction_count += 1
                 snapshot_rows.append(
                     _snapshot_row(
                         row,
@@ -334,6 +769,7 @@ def generate_prediction_snapshots(
                         window_hours=window_hours,
                         generated_at=generated_at,
                         local_prediction=local_prediction,
+                        live_prediction=live_prediction,
                         model_version=model_version,
                         feature_schema_version=feature_schema_version,
                     )
@@ -373,7 +809,9 @@ def generate_prediction_snapshots(
         "queried_market_count": len(raw_market_rows),
         "excluded_physical_sports_market_count": excluded_sports_count,
         "snapshot_row_count": len(snapshot_rows),
+        "report_prediction_row_count": local_prediction_count,
         "local_prediction_row_count": local_prediction_count,
+        "live_model_prediction_row_count": live_prediction_count,
         "pending_prediction_row_count": pending_prediction_count,
         "model_version": model_version,
         "feature_schema_version": feature_schema_version,
