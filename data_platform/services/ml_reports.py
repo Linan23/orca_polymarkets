@@ -15,6 +15,8 @@ FINAL_COMPARISON_JSON_PATH = Path(
 FINAL_COMPARISON_MARKDOWN_PATH = Path(
     "data_platform/runtime/ml/final_week10_11_residual_model_comparison_polymarket_trade_covered.md"
 )
+WHALE_ANCHORED_DELTA_JSON_PATH = Path("data_platform/ml/ML_WHALE_ANCHORED_DELTA_CURRENT_DB_ASOF.json")
+
 
 
 def _read_text(path: Path) -> str | None:
@@ -74,6 +76,52 @@ def _comparison_summary(payload: dict[str, Any] | None) -> dict[str, Any]:
             for model_name, model_payload in models.items()
             if isinstance(model_payload, dict)
         },
+    }
+
+def market_profile_ml_trend(market_slug: str) -> dict[str, Any]:
+    """Return local-only whale-anchored trend predictions for one market profile."""
+    normalized_slug = market_slug.strip().lower()
+    if not normalized_slug:
+        return {
+            "available": False,
+            "reason": "missing_market_slug",
+            "production_use": False,
+            "local_backtest_only": True,
+        }
+
+    report = _read_json(WHALE_ANCHORED_DELTA_JSON_PATH)
+    if not report:
+        return {
+            "available": False,
+            "reason": "local_whale_anchored_report_missing",
+            "production_use": False,
+            "local_backtest_only": True,
+            "source_path": str(WHALE_ANCHORED_DELTA_JSON_PATH),
+        }
+
+    index = report.get("market_profile_predictions", {})
+    by_market = index.get("by_market_slug", {}) if isinstance(index, dict) else {}
+    profile_payload = by_market.get(normalized_slug) if isinstance(by_market, dict) else None
+    if not isinstance(profile_payload, dict):
+        return {
+            "available": False,
+            "reason": "market_not_in_local_ml_prediction_index",
+            "market_slug": normalized_slug,
+            "generated_at": report.get("generated_at"),
+            "production_use": False,
+            "local_backtest_only": True,
+            "source_path": str(WHALE_ANCHORED_DELTA_JSON_PATH),
+        }
+
+    return {
+        **profile_payload,
+        "available": True,
+        "generated_at": report.get("generated_at"),
+        "report_status": report.get("status"),
+        "model_name": report.get("model_name"),
+        "source_path": str(WHALE_ANCHORED_DELTA_JSON_PATH),
+        "production_use": False,
+        "local_backtest_only": True,
     }
 
 

@@ -782,6 +782,54 @@ class MarketProfile(Base):
     realtime_payload: Mapped[dict] = mapped_column(JSON_VARIANT, nullable=False)
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
 
+class MlMarketPredictionSnapshot(Base):
+    __tablename__ = "ml_market_prediction_snapshot"
+    __table_args__ = (
+        UniqueConstraint(
+            "market_contract_id",
+            "side_label",
+            "prediction_window_hours",
+            "prediction_generated_at",
+            name="uq_ml_market_prediction_snapshot_market_side_window_generated",
+        ),
+        Index("ix_ml_market_prediction_snapshot_market_latest", "market_slug", "prediction_generated_at"),
+        Index(
+            "ix_ml_market_prediction_snapshot_market_side_window",
+            "market_contract_id",
+            "side_label",
+            "prediction_window_hours",
+        ),
+        {"schema": "analytics"},
+    )
+
+    ml_market_prediction_snapshot_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    platform_id: Mapped[int] = mapped_column(ForeignKey("analytics.platform.platform_id"), nullable=False)
+    market_contract_id: Mapped[int] = mapped_column(
+        ForeignKey("analytics.market_contract.market_contract_id"),
+        nullable=False,
+    )
+    market_slug: Mapped[str] = mapped_column(String(255), nullable=False)
+    side_label: Mapped[str] = mapped_column(String(128), nullable=False)
+    prediction_window_hours: Mapped[int] = mapped_column(Integer, nullable=False)
+    observation_time: Mapped[DateTime] = mapped_column(DateTime(timezone=True), nullable=False)
+    whale_entry_time: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True))
+    prediction_target_time: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True))
+    current_odds_pct: Mapped[float | None] = mapped_column(MONEY)
+    predicted_future_odds_pct: Mapped[float | None] = mapped_column(MONEY)
+    predicted_delta_pts: Mapped[float | None] = mapped_column(MONEY)
+    signal_tier: Mapped[str] = mapped_column(String(32), nullable=False, default="unavailable")
+    display_tier: Mapped[str] = mapped_column(String(32), nullable=False, default="unavailable")
+    prediction_status: Mapped[str] = mapped_column(String(64), nullable=False)
+    model_version: Mapped[str] = mapped_column(String(128), nullable=False)
+    feature_schema_version: Mapped[str] = mapped_column(String(128), nullable=False)
+    trained_as_of: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True))
+    prediction_generated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), nullable=False)
+    data_freshness_status: Mapped[str] = mapped_column(String(64), nullable=False, default="unknown")
+    prediction_source: Mapped[str] = mapped_column(String(128), nullable=False)
+    reliability_payload: Mapped[dict] = mapped_column(JSON_VARIANT, nullable=False, default=dict)
+    prediction_payload: Mapped[dict] = mapped_column(JSON_VARIANT, nullable=False, default=dict)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+
 
 class UserLeaderboard(Base):
     __tablename__ = "user_leaderboard"

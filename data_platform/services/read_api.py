@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import desc, func, select, text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from data_platform.models import (
@@ -13,6 +14,7 @@ from data_platform.models import (
     DashboardMarket,
     MarketContract,
     MarketProfile,
+    MlMarketPredictionSnapshot,
     OrderbookSnapshot,
     Platform,
     PositionSnapshot,
@@ -24,7 +26,9 @@ from data_platform.models import (
     WhaleScoreSnapshot,
 )
 from data_platform.services.home_summary_snapshot import latest_home_summary_snapshot_payload
+from data_platform.services.ml_reports import market_profile_ml_trend
 from data_platform.services.research_analytics_snapshot import latest_research_analytics_view
+from data_platform.services.whale_event_sequences import whale_event_sequence_for_market
 from data_platform.services.whale_scoring import load_resolved_market_outcomes, load_resolved_user_performance
 from data_platform.settings import get_settings
 
@@ -279,6 +283,285 @@ def _serialize_market_profile(
                 "updated_at": contract.updated_at.isoformat() if contract.updated_at else None,
             }
         ),
+    }
+
+def _parse_iso_datetime(value: str | None) -> datetime | None:
+    """Return a timezone-aware datetime from an ISO string when possible."""
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def _add_hours_iso(value: str | None, hours: int) -> str | None:
+    """Return an ISO timestamp offset from an anchor timestamp."""
+    parsed = _parse_iso_datetime(value)
+    if parsed is None:
+        return None
+    return (parsed + timedelta(hours=hours)).isoformat()
+
+
+def _prediction_window_hours(window_name: str) -> int:
+    """Return integer hours from a prediction window label."""
+    try:
+        return int(str(window_name).strip().lower().replace("h", ""))
+    except ValueError:
+        return 0
+
+
+def _normalize_side_label(value: str | None) -> str:
+    """Return a normalized side label for joining live whale sequences to ML rows."""
+    return str(value or "").strip().casefold()
+
+
+def _compact_sequence_item(item: dict[str, Any]) -> dict[str, Any]:
+    """Return the market-profile-safe subset of a semi-live whale sequence."""
+    windows = item.get("window_features") or {}
+    return {
+        "market_slug": item.get("market_slug"),
+        "side_label": item.get("side_label"),
+        "market_status": item.get("market_status"),
+        "current_market_price_pct": item.get("current_market_price_pct"),
+        "signal": item.get("signal") or {},
+        "entry_anchor": item.get("entry_anchor"),
+        "exit_anchor": item.get("exit_anchor"),
+        "window_features": {
+            key: windows.get(key)
+            for key in ("1h", "6h", "12h", "24h")
+            if key in windows
+        },
+    }
+
+
+def _primary_whale_entry_anchor(sequence: dict[str, Any]) -> dict[str, Any]:
+    """Return the most recent live whale entry anchor across market sides."""
+    items = sequence.get("items") or []
+    anchors = [
+        {
+            **(item.get("entry_anchor") or {}),
+            "side_label": item.get("side_label"),
+            "market_slug": item.get("market_slug"),
+        }
+        for item in items
+        if isinstance(item, dict) and isinstance(item.get("entry_anchor"), dict)
+    ]
+    if not anchors:
+        return {
+            "available": False,
+            "reason": sequence.get("reason") or "no_recent_whale_entry_anchor",
+        }
+    selected = max(anchors, key=lambda item: str(item.get("event_time") or ""))
+    return {
+        "available": True,
+        "event_type": selected.get("event_type") or "entry",
+        "event_time": selected.get("event_time"),
+        "age_hours": selected.get("age_hours"),
+        "odds_pct": selected.get("odds_pct"),
+        "notional_value": selected.get("notional_value"),
+        "weighted_notional": selected.get("weighted_notional"),
+        "trust_score": selected.get("trust_score"),
+        "is_trusted_whale": selected.get("is_trusted_whale"),
+        "side_label": selected.get("side_label"),
+        "market_slug": selected.get("market_slug"),
+        "source": "semi_live_whale_entry_sequence",
+    }
+
+
+def _attach_entry_anchor_to_prediction_case(
+    prediction: dict[str, Any],
+    *,
+    side_sequence: dict[str, Any] | None,
+    fallback_anchor: dict[str, Any],
+) -> dict[str, Any]:
+    """Attach live whale entry timing to one local ML prediction case."""
+    item = dict(prediction)
+    entry_anchor = (
+        side_sequence.get("entry_anchor")
+        if isinstance(side_sequence, dict) and isinstance(side_sequence.get("entry_anchor"), dict)
+        else None
+    )
+    selected_anchor = entry_anchor or (fallback_anchor if fallback_anchor.get("available") else {})
+    anchor_time = str(selected_anchor.get("event_time") or item.get("observation_time") or "")
+    window_hours = _prediction_window_hours(str(item.get("window") or ""))
+    item["whale_entry_time"] = selected_anchor.get("event_time")
+    item["whale_entry_age_hours"] = selected_anchor.get("age_hours")
+    item["whale_entry_odds_pct"] = selected_anchor.get("odds_pct")
+    item["whale_entry_notional"] = selected_anchor.get("notional_value")
+    item["whale_entry_weighted_notional"] = selected_anchor.get("weighted_notional")
+    item["whale_entry_trust_score"] = selected_anchor.get("trust_score")
+    item["whale_entry_is_trusted"] = selected_anchor.get("is_trusted_whale")
+    item["prediction_start_time"] = anchor_time or item.get("observation_time")
+    item["prediction_target_time"] = _add_hours_iso(anchor_time or str(item.get("observation_time") or ""), window_hours)
+    item["prediction_window_hours"] = window_hours
+    item["prediction_timeline_source"] = (
+        "semi_live_whale_entry_time"
+        if selected_anchor.get("event_time")
+        else "local_backtest_observation_time"
+    )
+    if isinstance(side_sequence, dict):
+        item["live_window_features"] = side_sequence.get("window_features") or {}
+    return item
+
+
+def _ml_prediction_snapshot_table_exists(session: Session) -> bool:
+    """Return whether the persistent ML snapshot table is installed."""
+    try:
+        row = session.execute(
+            text("SELECT to_regclass('analytics.ml_market_prediction_snapshot') IS NOT NULL AS table_exists")
+        ).mappings().first()
+    except SQLAlchemyError:
+        return False
+    return bool(row and row.get("table_exists"))
+
+
+def _latest_market_prediction_snapshot_payload(session: Session, market_slug: str) -> dict[str, Any] | None:
+    """Return the latest persisted ML prediction snapshot payload for one market."""
+    normalized_slug = str(market_slug or "").strip().casefold()
+    if not normalized_slug or not _ml_prediction_snapshot_table_exists(session):
+        return None
+    latest_generated_at = session.scalar(
+        select(func.max(MlMarketPredictionSnapshot.prediction_generated_at)).where(
+            func.lower(MlMarketPredictionSnapshot.market_slug) == normalized_slug
+        )
+    )
+    if latest_generated_at is None:
+        return None
+    rows = list(
+        session.scalars(
+            select(MlMarketPredictionSnapshot)
+            .where(
+                func.lower(MlMarketPredictionSnapshot.market_slug) == normalized_slug,
+                MlMarketPredictionSnapshot.prediction_generated_at == latest_generated_at,
+            )
+            .order_by(
+                MlMarketPredictionSnapshot.prediction_window_hours,
+                MlMarketPredictionSnapshot.side_label,
+                MlMarketPredictionSnapshot.ml_market_prediction_snapshot_id,
+            )
+        )
+    )
+    if not rows:
+        return None
+
+    windows: dict[str, list[dict[str, Any]]] = {"12h": [], "24h": []}
+    prediction_available = False
+    statuses: set[str] = set()
+    for row in rows:
+        window_name = f"{int(row.prediction_window_hours)}h"
+        payload = dict(row.prediction_payload or {})
+        if "window" not in payload:
+            payload["window"] = window_name
+        if "market_slug" not in payload:
+            payload["market_slug"] = row.market_slug
+        if "side_label" not in payload:
+            payload["side_label"] = row.side_label
+        payload.setdefault("current_odds_pct", float(row.current_odds_pct) if row.current_odds_pct is not None else None)
+        payload.setdefault(
+            "predicted_future_odds_pct",
+            float(row.predicted_future_odds_pct) if row.predicted_future_odds_pct is not None else None,
+        )
+        payload.setdefault("predicted_delta_pts", float(row.predicted_delta_pts) if row.predicted_delta_pts is not None else None)
+        payload.setdefault("direction_signal_tier", row.signal_tier)
+        payload.setdefault("display_tier", row.display_tier)
+        payload.setdefault("prediction_status", row.prediction_status)
+        payload.setdefault("prediction_source", row.prediction_source)
+        payload.setdefault("prediction_generated_at", row.prediction_generated_at.isoformat())
+        payload.setdefault("model_version", row.model_version)
+        payload.setdefault("feature_schema_version", row.feature_schema_version)
+        payload.setdefault("data_freshness_status", row.data_freshness_status)
+        statuses.add(row.prediction_status)
+        if row.predicted_future_odds_pct is not None:
+            prediction_available = True
+            windows.setdefault(window_name, []).append(payload)
+
+    primary_status = "snapshot_prediction_available" if prediction_available else sorted(statuses)[0]
+    return {
+        "available": prediction_available,
+        "reason": None if prediction_available else primary_status,
+        "market_slug": normalized_slug,
+        "question": rows[0].prediction_payload.get("question") if isinstance(rows[0].prediction_payload, dict) else None,
+        "generated_at": latest_generated_at.isoformat(),
+        "report_status": "persisted_prediction_snapshot",
+        "model_name": rows[0].model_version,
+        "source": "analytics.ml_market_prediction_snapshot",
+        "production_use": False,
+        "local_backtest_only": False,
+        "snapshot_row_count": len(rows),
+        "prediction_status": primary_status,
+        "windows": windows,
+    }
+
+
+def _market_profile_ml_trend_payload(session: Session, market_slug: str) -> dict[str, Any]:
+    """Return server-shaped whale entry plus local 12h/24h trend predictions."""
+    persisted_prediction = _latest_market_prediction_snapshot_payload(session, market_slug)
+    local_prediction = persisted_prediction or market_profile_ml_trend(market_slug)
+    live_sequence = whale_event_sequence_for_market(
+        session,
+        market_slug=market_slug,
+        lookback_hours=72,
+        bucket_hours=1,
+        trusted_only=False,
+        platform_name="polymarket",
+    )
+    compact_items = [_compact_sequence_item(item) for item in live_sequence.get("items") or [] if isinstance(item, dict)]
+    sequence_by_side = {
+        _normalize_side_label(str(item.get("side_label") or "")): item
+        for item in compact_items
+    }
+    anchor = _primary_whale_entry_anchor({"items": compact_items, "reason": live_sequence.get("reason")})
+
+    windows: dict[str, list[dict[str, Any]]] = {"12h": [], "24h": []}
+    for window_name, rows in ((local_prediction.get("windows") or {}).items() if local_prediction.get("available") else []):
+        enriched_rows = [
+            _attach_entry_anchor_to_prediction_case(
+                row,
+                side_sequence=sequence_by_side.get(_normalize_side_label(str(row.get("side_label") or ""))),
+                fallback_anchor=anchor,
+            )
+            for row in rows or []
+            if isinstance(row, dict)
+        ]
+        windows[str(window_name)] = enriched_rows
+
+    prediction_available = any(windows.get(window_name) for window_name in ("12h", "24h"))
+    if prediction_available and anchor.get("available"):
+        prediction_status = "entry_anchored_prediction_available"
+    elif prediction_available:
+        prediction_status = "prediction_available_without_recent_whale_entry"
+    elif anchor.get("available"):
+        prediction_status = "waiting_for_ml_prediction_snapshot"
+    else:
+        prediction_status = "waiting_for_whale_entry_and_prediction_snapshot"
+
+    return {
+        **local_prediction,
+        "available": prediction_available,
+        "reason": None if prediction_available else local_prediction.get("reason"),
+        "market_slug": str(market_slug or "").strip().casefold(),
+        "production_use": False,
+        "local_backtest_only": bool(local_prediction.get("local_backtest_only", True)),
+        "server_ready_shape": True,
+        "prediction_status": prediction_status,
+        "prediction_anchor": anchor,
+        "live_whale_sequence": {
+            "available": bool(live_sequence.get("available")),
+            "reason": live_sequence.get("reason"),
+            "semi_live": bool(live_sequence.get("semi_live")),
+            "as_of": live_sequence.get("as_of"),
+            "generated_at": live_sequence.get("generated_at"),
+            "lookback_hours": live_sequence.get("lookback_hours"),
+            "sequence_count": live_sequence.get("sequence_count"),
+            "queried_event_rows": live_sequence.get("queried_event_rows"),
+            "source": live_sequence.get("source"),
+            "items": compact_items,
+        },
+        "windows": windows,
     }
 
 
@@ -2288,6 +2571,7 @@ def latest_market_profile(session: Session, market_slug: str) -> dict[str, Any] 
                 profile=profile,
             )
             payload["whale_market_focus"] = _normalize_whale_market_focus(session, payload["whale_market_focus"])
+            payload["ml_prediction_trend"] = _market_profile_ml_trend_payload(session, str(payload["market_slug"] or ""))
             payload.update(
                 _freshness_metadata(
                     observed_at=profile.snapshot_time if profile and profile.snapshot_time else market.read_time,
@@ -2326,6 +2610,7 @@ def latest_market_profile(session: Session, market_slug: str) -> dict[str, Any] 
             profile=profile,
         )
         payload["whale_market_focus"] = _normalize_whale_market_focus(session, payload["whale_market_focus"])
+        payload["ml_prediction_trend"] = _market_profile_ml_trend_payload(session, str(payload["market_slug"] or ""))
         payload.update(
             _freshness_metadata(
                 observed_at=profile.snapshot_time if profile and profile.snapshot_time else market.read_time,
@@ -2360,6 +2645,7 @@ def latest_market_profile(session: Session, market_slug: str) -> dict[str, Any] 
         orderbook_depth=int(latest_orderbook.depth_levels) if latest_orderbook is not None else None,
     )
     payload["whale_market_focus"] = _normalize_whale_market_focus(session, payload["whale_market_focus"])
+    payload["ml_prediction_trend"] = _market_profile_ml_trend_payload(session, str(payload["market_slug"] or ""))
     payload.update(
         _freshness_metadata(
             observed_at=latest_orderbook.snapshot_time if latest_orderbook is not None else contract.updated_at,

@@ -2,12 +2,57 @@ import { useCallback } from "react";
 import { Link, useParams } from "react-router-dom";
 import FollowButton from "../components/FollowButton";
 import { useWatchlist } from "../hooks/useWatchlist";
-import { fetchMarketProfile } from "../lib/api";
+import {
+  fetchMarketProfile,
+  type MarketProfileMlPredictionCase,
+  type MarketProfileMlPredictionTrend,
+} from "../lib/api";
 import { useApiData } from "../hooks/useApiData";
+
+const PREDICTION_WINDOWS = ["12h", "24h"] as const;
 
 function formatPercent(value: number | null) {
   if (value === null) return "--";
   return `${Math.round(value * 100)}%`;
+}
+
+function formatOddsPercent(value: number | null | undefined, digits = 1) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "--";
+  return `${value.toFixed(digits)}%`;
+}
+
+function formatSignedPoints(value: number | null | undefined, digits = 1) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "--";
+  const sign = value > 0 ? "+" : "";
+  return `${sign}${value.toFixed(digits)} pts`;
+}
+
+function formatCompactNumber(value: number | string | null | undefined, digits = 1) {
+  if (value === null || typeof value === "undefined" || value === "") return "--";
+  const numeric = typeof value === "number" ? value : Number(value ?? 0);
+  if (!Number.isFinite(numeric)) return "--";
+  return numeric.toFixed(digits);
+}
+
+function formatDateTime(value: string | null | undefined) {
+  if (!value) return "--";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function formatLabel(value: string | null | undefined) {
+  if (!value) return "Unknown";
+  return value
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 function formatOpposingPercent(value: number | null) {
@@ -23,6 +68,230 @@ function formatCurrency(value: number | null) {
 
 function renderJson(value: unknown) {
   return JSON.stringify(value, null, 2);
+}
+
+function profileTrendCases(trend: MarketProfileMlPredictionTrend | undefined) {
+  if (!trend?.available || !trend.windows) return [];
+  return PREDICTION_WINDOWS.flatMap((windowName) =>
+    (trend.windows?.[windowName] ?? []).map((item) => ({
+      ...item,
+      window: windowName,
+    })),
+  );
+}
+
+function windowHours(windowName: string) {
+  return windowName === "12h" ? 12 : 24;
+}
+
+function predictionRank(item: MarketProfileMlPredictionCase) {
+  const tierRank: Record<string, number> = { show: 0, review: 1, hidden: 2 };
+  const signalRank: Record<string, number> = { strong: 0, watch: 1, abstain: 2 };
+  return (
+    (tierRank[item.display_tier] ?? 3) * 1000 +
+    (signalRank[item.direction_signal_tier] ?? 3) * 100 -
+    Math.abs(item.predicted_delta_pts ?? 0)
+  );
+}
+
+function primaryTrendCases(cases: MarketProfileMlPredictionCase[]) {
+  const primary = [...cases].sort((left, right) => predictionRank(left) - predictionRank(right))[0];
+  if (!primary) return [];
+  return cases
+    .filter((item) => item.side_label === primary.side_label)
+    .sort((left, right) => windowHours(left.window) - windowHours(right.window));
+}
+
+function tierClass(value: string | undefined) {
+  if (value === "show" || value === "strong") return "market-ml-good";
+  if (value === "review" || value === "watch") return "market-ml-watch";
+  return "market-ml-muted";
+}
+
+function whaleAnchorValue(item: MarketProfileMlPredictionCase, key: string) {
+  return item.whale_anchor?.[key];
+}
+
+function LiveWhaleEntrySummary({ trend }: { trend: MarketProfileMlPredictionTrend | undefined }) {
+  const anchor = trend?.prediction_anchor;
+  const sequence = trend?.live_whale_sequence;
+  if (!anchor?.available && !sequence?.available) return null;
+
+  return (
+    <div className="market-ml-live-entry">
+      <div>
+        <p className="market-ml-side-label">Whale entry anchor</p>
+        <h3>{anchor?.available ? formatLabel(anchor.side_label) : "Recent whale activity"}</h3>
+        <div className="market-ml-summary-row">
+          <span>Entry {formatDateTime(anchor?.event_time)}</span>
+          <span>Entry odds {formatOddsPercent(anchor?.odds_pct)}</span>
+          <span>Notional {formatCurrency(anchor?.notional_value ?? null)}</span>
+          <span>{anchor?.is_trusted_whale ? "Trusted whale" : "Whale"}</span>
+        </div>
+      </div>
+      <div className="market-ml-live-stats">
+        <span>{formatCompactNumber(sequence?.sequence_count, 0)} market-side sequences</span>
+        <span>{formatCompactNumber(sequence?.queried_event_rows, 0)} whale events</span>
+        <span>as of {formatDateTime(sequence?.as_of)}</span>
+      </div>
+    </div>
+  );
+}
+
+function MarketPredictionTrendChart({ cases }: { cases: MarketProfileMlPredictionCase[] }) {
+  if (cases.length === 0) return null;
+
+  const base = cases[0];
+  const entryOdds = base.whale_entry_odds_pct ?? base.current_odds_pct ?? 50;
+  const points = [
+    { hour: 0, odds: entryOdds, label: "entry" },
+    ...cases
+      .filter((item) => typeof item.predicted_future_odds_pct === "number")
+      .map((item) => ({
+        hour: item.prediction_window_hours ?? windowHours(item.window),
+        odds: item.predicted_future_odds_pct ?? entryOdds,
+        label: item.window,
+      })),
+  ];
+  const intervalValues = cases.flatMap((item) => [
+    item.interval_low_future_odds_pct,
+    item.interval_high_future_odds_pct,
+  ]);
+  const values = [...points.map((point) => point.odds), ...intervalValues].filter(
+    (value): value is number => typeof value === "number" && Number.isFinite(value),
+  );
+  const rawMin = Math.min(...values);
+  const rawMax = Math.max(...values);
+  const paddedMin = Math.max(0, Math.floor(rawMin - 8));
+  const paddedMax = Math.min(100, Math.ceil(rawMax + 8));
+  const minOdds = paddedMax - paddedMin < 20 ? Math.max(0, paddedMin - 10) : paddedMin;
+  const maxOdds = paddedMax - paddedMin < 20 ? Math.min(100, paddedMax + 10) : paddedMax;
+  const width = 520;
+  const height = 230;
+  const left = 46;
+  const right = 32;
+  const top = 24;
+  const bottom = 38;
+  const plotWidth = width - left - right;
+  const plotHeight = height - top - bottom;
+  const yFor = (odds: number) => top + ((maxOdds - odds) / Math.max(maxOdds - minOdds, 1)) * plotHeight;
+  const xFor = (hour: number) => left + (Math.min(Math.max(hour, 0), 24) / 24) * plotWidth;
+  const linePoints = points.map((point) => `${xFor(point.hour)},${yFor(point.odds)}`).join(" ");
+
+  return (
+    <div className="market-ml-chart-shell">
+      <svg className="market-ml-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Local ML prediction trend">
+        {[minOdds, Math.round((minOdds + maxOdds) / 2), maxOdds].map((odds) => (
+          <g key={`grid-${odds}`}>
+            <line x1={left} x2={width - right} y1={yFor(odds)} y2={yFor(odds)} />
+            <text x={8} y={yFor(odds) + 4}>{odds}%</text>
+          </g>
+        ))}
+        {[0, 12, 24].map((hour) => (
+          <text className="market-ml-axis-label" key={`axis-${hour}`} x={xFor(hour)} y={height - 10} textAnchor="middle">
+            {hour === 0 ? "entry" : `+${hour}h`}
+          </text>
+        ))}
+        <polyline className="market-ml-chart-line" points={linePoints} />
+        {points.map((point) => (
+          <g key={`${point.label}-${point.hour}`}>
+            <circle cx={xFor(point.hour)} cy={yFor(point.odds)} r={point.hour === 0 ? 4 : 6} />
+            <text x={xFor(point.hour) + 8} y={yFor(point.odds) - 8}>
+              {formatOddsPercent(point.odds)}
+            </text>
+          </g>
+        ))}
+      </svg>
+    </div>
+  );
+}
+
+function MarketMlPredictionTrendPanel({ trend }: { trend: MarketProfileMlPredictionTrend | undefined }) {
+  const cases = profileTrendCases(trend);
+  const primaryCases = primaryTrendCases(cases);
+  const anchor = trend?.prediction_anchor;
+
+  return (
+    <section className="card profile-card market-ml-trend-card">
+      <div className="card-header market-ml-header">
+        <div>
+          <p className="card-label">Local ML Trend</p>
+          <h2>Prediction Trend</h2>
+          <p className="card-subtext">Whale entry time followed by local 12h and 24h trend predictions.</p>
+        </div>
+        <span className="market-ml-local-pill">Local only</span>
+      </div>
+
+      {!trend?.available || cases.length === 0 ? (
+        <>
+          <LiveWhaleEntrySummary trend={trend} />
+          <div className="market-ml-empty">
+            <strong>No 12h/24h ML prediction snapshot for this market yet.</strong>
+            <span>{formatLabel(trend?.prediction_status ?? trend?.reason ?? "market_not_in_local_ml_prediction_index")}</span>
+          </div>
+        </>
+      ) : (
+        <>
+          <LiveWhaleEntrySummary trend={trend} />
+          <div className="market-ml-chart-layout">
+            <div>
+              <p className="market-ml-side-label">Prediction anchor</p>
+              <h3>{formatLabel(primaryCases[0]?.side_label)}</h3>
+              <div className="market-ml-summary-row">
+                <span>Entry {formatDateTime(primaryCases[0]?.whale_entry_time ?? anchor?.event_time)}</span>
+                <span>{formatLabel(primaryCases[0]?.focused_fit_category)}</span>
+                <span>{formatLabel(primaryCases[0]?.display_tier)}</span>
+              </div>
+            </div>
+            <MarketPredictionTrendChart cases={primaryCases} />
+          </div>
+
+          <div className="market-ml-prediction-grid">
+            {cases.map((item) => {
+              const reason = [...(item.display_reasons ?? []), ...(item.review_reasons ?? [])]
+                .slice(0, 2)
+                .map(formatLabel)
+                .join(", ");
+              return (
+                <article className="market-ml-prediction-row" key={`${item.window}-${item.side_label}`}>
+                  <div>
+                    <div className="market-ml-row-title">
+                      <strong>{item.window}</strong>
+                      <span>{formatLabel(item.side_label)}</span>
+                    </div>
+                    <p>
+                      {formatOddsPercent(item.current_odds_pct)} to {formatOddsPercent(item.predicted_future_odds_pct)}
+                      <span className={(item.predicted_delta_pts ?? 0) >= 0 ? "market-ml-up" : "market-ml-down"}>
+                        {formatSignedPoints(item.predicted_delta_pts)}
+                      </span>
+                    </p>
+                  </div>
+                  <div className="market-ml-row-metrics">
+                    <span className={tierClass(item.display_tier)}>{formatLabel(item.display_tier)}</span>
+                    <span className={tierClass(item.direction_signal_tier)}>
+                      {formatLabel(item.direction_signal_tier)} signal
+                    </span>
+                    <span>{formatLabel(item.predicted_direction)}</span>
+                  </div>
+                  <div className="market-ml-row-detail">
+                    <span>
+                      Entry {formatDateTime(item.whale_entry_time)} to target {formatDateTime(item.prediction_target_time)}
+                    </span>
+                    <span>
+                      Whale entries 12h {formatCompactNumber(whaleAnchorValue(item, "recent_entry_count_12h"), 0)} |
+                      exits {formatCompactNumber(whaleAnchorValue(item, "recent_exit_count_12h"), 0)}
+                    </span>
+                    <span>Net pressure {formatCompactNumber(whaleAnchorValue(item, "recent_weighted_net_pressure_12h"), 2)}</span>
+                    <span>{reason || formatLabel(item.prediction_source)}</span>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </section>
+  );
 }
 
 export default function MarketProfile() {
@@ -107,6 +376,8 @@ export default function MarketProfile() {
   </button>
 </div>
           </section>
+
+          <MarketMlPredictionTrendPanel trend={data.ml_prediction_trend} />
 
           <section className="card profile-card">
             <div className="card-header">

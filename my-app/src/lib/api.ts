@@ -85,6 +85,119 @@ export type DashboardMarketRow = {
   read_time: string | null;
 };
 
+export type MarketProfileMlPredictionCase = {
+  window: "12h" | "24h" | string;
+  market_slug: string;
+  question: string;
+  side_label: string;
+  observation_time: string;
+  event_category: string;
+  focus_category: string;
+  focused_fit_category: string;
+  market_family: string;
+  current_odds_pct: number | null;
+  predicted_future_odds_pct: number | null;
+  predicted_delta_pts: number | null;
+  predicted_direction: string;
+  prediction_source: string;
+  display_tier: "show" | "review" | "hidden" | string;
+  display_reasons: string[];
+  review_reasons: string[];
+  direction_signal_tier: "strong" | "watch" | "abstain" | string;
+  direction_signal_tier_reason: string;
+  direction_signal_predicted_direction: string;
+  direction_signal_confidence: number;
+  reliability_warnings: string[];
+  overlay_future_odds_pct: number | null;
+  overlay_delta_pts: number | null;
+  overlay_direction: string;
+  interval_low_future_odds_pct: number | null;
+  interval_high_future_odds_pct: number | null;
+  whale_entry_time?: string | null;
+  whale_entry_age_hours?: number | null;
+  whale_entry_odds_pct?: number | null;
+  whale_entry_notional?: number | null;
+  whale_entry_weighted_notional?: number | null;
+  whale_entry_trust_score?: number | null;
+  whale_entry_is_trusted?: boolean | null;
+  prediction_start_time?: string | null;
+  prediction_target_time?: string | null;
+  prediction_window_hours?: number;
+  prediction_timeline_source?: string;
+  live_window_features?: Record<string, Record<string, number | string | null> | undefined>;
+  actual_future_odds_pct?: number;
+  actual_delta_pts?: number;
+  actual_direction?: string;
+  trend_fit_error_type: string;
+  trend_shape_score: number;
+  whale_anchor: Record<string, number | string | null>;
+  crypto_segment_direction_gate_tier?: string;
+  crypto_segment_direction_gate_reason?: string;
+  crypto_direction_source_selector_reason?: string;
+  local_backtest_only?: boolean;
+};
+
+export type MarketProfileWhaleEntryAnchor = {
+  available?: boolean;
+  reason?: string;
+  event_type?: string;
+  event_time?: string | null;
+  age_hours?: number | null;
+  odds_pct?: number | null;
+  notional_value?: number | null;
+  weighted_notional?: number | null;
+  trust_score?: number | null;
+  is_trusted_whale?: boolean | null;
+  side_label?: string | null;
+  market_slug?: string | null;
+  source?: string;
+};
+
+export type MarketProfileLiveWhaleSequenceItem = {
+  market_slug?: string;
+  side_label?: string;
+  market_status?: string;
+  current_market_price_pct?: number | null;
+  signal?: Record<string, number | string | boolean | null>;
+  entry_anchor?: MarketProfileWhaleEntryAnchor | null;
+  exit_anchor?: MarketProfileWhaleEntryAnchor | null;
+  window_features?: Record<string, Record<string, number | string | null> | undefined>;
+};
+
+export type MarketProfileMlPredictionTrend = {
+  available: boolean;
+  reason?: string;
+  market_slug?: string;
+  question?: string;
+  generated_at?: string | null;
+  report_status?: string | null;
+  model_name?: string | null;
+  source?: string;
+  source_path?: string;
+  production_use?: boolean;
+  local_backtest_only?: boolean;
+  server_ready_shape?: boolean;
+  prediction_status?: string;
+  prediction_anchor?: MarketProfileWhaleEntryAnchor;
+  live_whale_sequence?: {
+    available?: boolean;
+    reason?: string;
+    semi_live?: boolean;
+    as_of?: string | null;
+    generated_at?: string | null;
+    lookback_hours?: number;
+    sequence_count?: number;
+    queried_event_rows?: number;
+    source?: string;
+    items?: MarketProfileLiveWhaleSequenceItem[];
+  };
+  windows?: {
+    "12h"?: MarketProfileMlPredictionCase[];
+    "24h"?: MarketProfileMlPredictionCase[];
+    [key: string]: MarketProfileMlPredictionCase[] | undefined;
+  };
+};
+
 export type WhaleScoreRow = {
   user_id: number;
   external_user_ref: string;
@@ -165,6 +278,7 @@ export type MarketProfile = {
   realtime_source: string;
   snapshot_time: string | null;
   realtime_payload: Record<string, unknown>;
+  ml_prediction_trend?: MarketProfileMlPredictionTrend;
 };
 
 export type HomeSummaryPlatformCoverage = {

@@ -22,6 +22,22 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--interval-seconds", type=float, default=900.0)
     parser.add_argument("--summary-log-file", default=str(RUNTIME_DIR / "analytics_refresh_runs.jsonl"))
     parser.add_argument("--max-cycles", type=int, default=0)
+    parser.add_argument(
+        "--skip-ml-prediction-snapshots",
+        action="store_true",
+        help="Skip server-side market-profile ML prediction snapshot generation.",
+    )
+    parser.add_argument(
+        "--ml-prediction-snapshot-limit",
+        type=int,
+        default=int(os.getenv("ML_PREDICTION_SNAPSHOT_LIMIT", "0")),
+        help="Maximum active Polymarket markets to snapshot per analytics refresh cycle. Use 0 for no cap.",
+    )
+    parser.add_argument(
+        "--ml-prediction-snapshot-platform",
+        default=os.getenv("ML_PREDICTION_SNAPSHOT_PLATFORM", "polymarket"),
+        help="Platform name to snapshot for market-profile ML predictions.",
+    )
     return parser.parse_args()
 
 
@@ -44,13 +60,29 @@ def main() -> int:
         cycle += 1
         started_at = datetime.now(timezone.utc)
         steps: list[dict[str, object]] = []
-        for name, command in (
+        commands: list[tuple[str, list[str]]] = [
             ("refresh_resolved_conditions", [py, "refresh_resolved_conditions.py"]),
             ("build_whale_scores", [py, "build_whale_scores.py"]),
             ("build_dashboard_snapshot", [py, "build_dashboard_snapshot.py"]),
             ("build_home_summary_snapshot", [py, "build_home_summary_snapshot.py"]),
             ("build_research_analytics_snapshot", [py, "build_research_analytics_snapshot.py"]),
-        ):
+        ]
+        if not args.skip_ml_prediction_snapshots:
+            commands.append(
+                (
+                    "generate_ml_market_prediction_snapshots",
+                    [
+                        py,
+                        "data_platform/jobs/generate_ml_market_prediction_snapshots.py",
+                        "--platform-name",
+                        args.ml_prediction_snapshot_platform,
+                        "--limit",
+                        str(int(args.ml_prediction_snapshot_limit)),
+                    ],
+                )
+            )
+
+        for name, command in commands:
             started = time.monotonic()
             completed = subprocess.run(command, cwd=ROOT_DIR, env=env, text=True, capture_output=True)
             steps.append(
