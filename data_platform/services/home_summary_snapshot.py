@@ -9,7 +9,6 @@ from sqlalchemy import desc, select, text
 from sqlalchemy.orm import Session
 
 from data_platform.models import HomeSummarySnapshot
-from data_platform.services.market_scope import matched_focus_domains
 from data_platform.settings import get_settings
 
 
@@ -177,51 +176,54 @@ _PLATFORM_COVERAGE_SQL = text(
 
 _MARKET_CATEGORY_COVERAGE_SQL = text(
     """
-    SELECT
-      me.title AS event_title,
-      me.slug AS event_slug,
-      me.category AS event_category,
-      mc.question,
-      mc.market_slug,
-      mc.outcome_a_label,
-      mc.outcome_b_label
-    FROM analytics.market_contract mc
-    JOIN analytics.market_event me
-      ON me.event_id = mc.event_id
-    JOIN analytics.platform p
-      ON p.platform_id = mc.platform_id
-    WHERE p.platform_name = 'polymarket'
+    WITH market_text AS (
+      SELECT LOWER(CONCAT_WS(
+        ' ',
+        me.title,
+        me.slug,
+        me.category,
+        mc.question,
+        mc.market_slug,
+        mc.outcome_a_label,
+        mc.outcome_b_label
+      )) AS haystack
+      FROM analytics.market_contract mc
+      JOIN analytics.market_event me
+        ON me.event_id = mc.event_id
+      JOIN analytics.platform p
+        ON p.platform_id = mc.platform_id
+      WHERE p.platform_name = 'polymarket'
+    ),
+    classified AS (
+      SELECT
+        CASE
+          WHEN haystack ~ '(video[ -]?games?|videogames?|gaming|gta|grand theft auto|nintendo|playstation|xbox|steam|esports?|counter[ -]?strike|cs2|fortnite|call of duty|rockstar|rocket league|league of legends|valorant|dota)'
+            THEN 'Video Game'
+          WHEN haystack ~ '(crypto|cryptocurrenc|bitcoin|ethereum|solana|doge|dogecoin|xrp|btc|eth|token|airdrop|coinbase|kraken|stablecoin|microstrategy|mstr|blockchain|defi)'
+            THEN 'Crypto'
+          WHEN haystack ~ '(technology|tech|openai|gpt|llm|artificial intelligence|\\bai\\b|nvidia|amd|microsoft|google|alphabet|meta|apple|anthropic|sam altman|semiconductor|chips?|software|hardware)'
+            THEN 'Technology'
+          WHEN haystack ~ '(geopolit|world affairs|foreign policy|diplom|ceasefire|military|nato|ukraine|russia|putin|zelensky|china|taiwan|iran|israel|gaza|syria|middle east|\\bwar\\b)'
+            THEN 'Geopolitics'
+          WHEN haystack ~ '(politic|elections?|government|president|presidential|prime minister|congress|senate|parliament|cabinet|minister|tariff|trump|biden|starmer|macron|supreme court|us government)'
+            THEN 'Politics'
+          ELSE 'Other'
+        END AS category_name
+      FROM market_text
+    )
+    SELECT category_name, COUNT(*)::integer AS market_count
+    FROM classified
+    GROUP BY category_name
+    ORDER BY
+      CASE category_name
+        WHEN 'Video Game' THEN 1
+        WHEN 'Technology' THEN 2
+        WHEN 'Crypto' THEN 3
+        WHEN 'Geopolitics' THEN 4
+        WHEN 'Politics' THEN 5
+        ELSE 6
+      END
     """
-)
-
-FOCUSED_MARKET_CATEGORY_ORDER: tuple[str, ...] = (
-    "Video Game",
-    "Technology",
-    "Crypto",
-    "Geopolitics",
-    "Politics",
-)
-
-GEOPOLITICS_TERMS: tuple[str, ...] = (
-    "geopolit",
-    "world affairs",
-    "foreign policy",
-    "diplom",
-    "ceasefire",
-    "military",
-    "nato",
-    "ukraine",
-    "russia",
-    "putin",
-    "zelensky",
-    "china",
-    "taiwan",
-    "iran",
-    "israel",
-    "gaza",
-    "syria",
-    "middle east",
-    "war",
 )
 
 _LATEST_DASHBOARD_TIME_SQL = text(
@@ -238,51 +240,16 @@ def _iso(value: datetime | None) -> str | None:
     return value.isoformat() if value is not None else None
 
 
-def _focused_market_category(row: Any) -> str:
-    texts = [
-        row["event_title"],
-        row["event_slug"],
-        row["event_category"],
-        row["question"],
-        row["market_slug"],
-        row["outcome_a_label"],
-        row["outcome_b_label"],
-    ]
-    domains = matched_focus_domains(texts, ("video-games", "crypto", "technology", "politics"))
-    if "video-games" in domains:
-        return "Video Game"
-    if "crypto" in domains:
-        return "Crypto"
-    if "technology" in domains:
-        return "Technology"
-    if "politics" in domains:
-        haystack = "\n".join(str(value or "").casefold() for value in texts)
-        if any(term in haystack for term in GEOPOLITICS_TERMS):
-            return "Geopolitics"
-        return "Politics"
-    return "Other"
-
-
 def market_category_coverage_payload(session: Session) -> list[dict[str, Any]]:
     """Return Polymarket market counts grouped by the project focus categories."""
     rows = session.execute(_MARKET_CATEGORY_COVERAGE_SQL).mappings().all()
-    counts = {category: 0 for category in FOCUSED_MARKET_CATEGORY_ORDER}
-    other_count = 0
-    for row in rows:
-        category = _focused_market_category(row)
-        if category in counts:
-            counts[category] += 1
-        else:
-            other_count += 1
-
-    payload = [
-        {"category_name": category, "market_count": count}
-        for category in FOCUSED_MARKET_CATEGORY_ORDER
-        if count > 0
+    return [
+        {
+            "category_name": row["category_name"],
+            "market_count": int(row["market_count"] or 0),
+        }
+        for row in rows
     ]
-    if other_count > 0:
-        payload.append({"category_name": "Other", "market_count": other_count})
-    return payload
 
 
 def _latest_successful_scrape_time(session: Session) -> datetime | None:
