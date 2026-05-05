@@ -1,13 +1,20 @@
-<<<<<<< HEAD
 import { useCallback } from "react";
 import { useApiData } from "../hooks/useApiData";
-import { fetchHomeSummary } from "../lib/api";
+import { fetchHomeSummary, type HomeSummary } from "../lib/api";
 
 function formatCompact(value: number) {
   return new Intl.NumberFormat("en-US", {
     notation: "compact",
     maximumFractionDigits: 1,
   }).format(value);
+}
+
+function formatCategoryLabel(value: string) {
+  return value
+    .split(/[\s_-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(" ");
 }
 
 function formatLastUpdated(value?: string | number | Date | null) {
@@ -26,6 +33,25 @@ function formatLastUpdated(value?: string | number | Date | null) {
     hour: "numeric",
     minute: "2-digit",
   }).format(date);
+}
+
+function getDatabaseLastUpdated(summary: HomeSummary) {
+  const timestampSource = summary as HomeSummary & {
+    last_updated_at?: string | null;
+    last_updated?: string | null;
+    updated_at?: string | null;
+    generated_at?: string | null;
+  };
+
+  return (
+    summary.last_successful_ingest_at ??
+    summary.latest_ingestion?.finished_at ??
+    summary.latest_ingestion?.started_at ??
+    timestampSource.last_updated_at ??
+    timestampSource.last_updated ??
+    timestampSource.updated_at ??
+    timestampSource.generated_at
+  );
 }
 
 export default function HomepageSummaryCards() {
@@ -49,41 +75,36 @@ export default function HomepageSummaryCards() {
         !error &&
         data &&
         (() => {
-          const timestampSource = data as typeof data & {
-            last_updated_at?: string | null;
-            last_updated?: string | null;
-            updated_at?: string | null;
-            generated_at?: string | null;
-          };
-
-          const lastUpdated =
-            timestampSource.last_updated_at ??
-            timestampSource.last_updated ??
-            timestampSource.updated_at ??
-            timestampSource.generated_at;
+          const lastUpdated = getDatabaseLastUpdated(data);
+          const marketCategoryCoverage =
+            data.market_category_coverage && data.market_category_coverage.length > 0
+              ? data.market_category_coverage
+              : data.platform_coverage.map((platform) => ({
+                  category_name: platform.platform_name,
+                  market_count: platform.market_count,
+                }));
 
           const coverageCharts = [
             {
               title: "Market Coverage Breakdown",
               label: "Markets",
-              total: data.platform_coverage.reduce(
-                (sum, platform) => sum + platform.market_count,
-                0
-              ),
-              getValue: (platform: (typeof data.platform_coverage)[number]) =>
-                platform.market_count,
+              rows: marketCategoryCoverage.map((row) => ({
+                name: formatCategoryLabel(row.category_name),
+                value: row.market_count,
+              })),
             },
             {
               title: "User Coverage Breakdown",
               label: "Users",
-              total: data.platform_coverage.reduce(
-                (sum, platform) => sum + platform.user_count,
-                0
-              ),
-              getValue: (platform: (typeof data.platform_coverage)[number]) =>
-                platform.user_count,
+              rows: data.platform_coverage.map((row) => ({
+                name: row.platform_name,
+                value: row.user_count,
+              })),
             },
-          ];
+          ].map((chart) => ({
+            ...chart,
+            total: chart.rows.reduce((sum, row) => sum + row.value, 0),
+          }));
 
           return (
             <div className="summary-grid summary-grid-three">
@@ -91,18 +112,27 @@ export default function HomepageSummaryCards() {
                 <p className="summary-card-label">Last Updated</p>
 
                 <div className="last-updated-card">
-                  <h3>Last updated:</h3>
+                  <h3>Last Updated:</h3>
                   <p>{formatLastUpdated(lastUpdated)}</p>
                 </div>
               </article>
 
               {coverageCharts.map((chart) => {
                 let offset = 0;
-                const colors = ["#6f7cff", "#42d3ff"];
+                const colors = [
+                  "#6f7cff",
+                  "#42d3ff",
+                  "#4fd18b",
+                  "#f6c85f",
+                  "#f07167",
+                  "#a78bfa",
+                  "#f59e0b",
+                  "#94a3b8",
+                ];
 
-                const segments = data.platform_coverage
-                  .map((platform, index) => {
-                    const value = chart.getValue(platform);
+                const segments = chart.rows
+                  .map((row, index) => {
+                    const value = row.value;
 
                     if (chart.total <= 0 || value <= 0) return null;
 
@@ -140,8 +170,8 @@ export default function HomepageSummaryCards() {
                       </div>
 
                       <div className="coverage-pie-legend">
-                        {data.platform_coverage.map((platform, index) => {
-                          const value = chart.getValue(platform);
+                        {chart.rows.map((row, index) => {
+                          const value = row.value;
                           const percent =
                             chart.total > 0
                               ? Math.round((value / chart.total) * 100)
@@ -150,7 +180,7 @@ export default function HomepageSummaryCards() {
                           return (
                             <div
                               className="coverage-legend-row"
-                              key={platform.platform_name}
+                              key={row.name}
                             >
                               <span
                                 className="coverage-legend-dot"
@@ -160,7 +190,7 @@ export default function HomepageSummaryCards() {
                               />
 
                               <div>
-                                <strong>{platform.platform_name}</strong>
+                                <strong>{row.name}</strong>
                                 <p>
                                   {formatCompact(value)} · {percent}%
                                 </p>
