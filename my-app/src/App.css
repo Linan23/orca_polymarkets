@@ -1321,7 +1321,7 @@ a {
 
 .summary-stats {
   display: grid;
-  grid-template-columns: repeat(4, minmax(120px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
   gap: 12px;
 }
 
@@ -4830,4 +4830,3 @@ font-weight:700;
     grid-template-columns: 1fr;
   }
 }
-

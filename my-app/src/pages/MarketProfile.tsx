@@ -66,10 +66,6 @@ function formatCurrency(value: number | null) {
   return `$${value.toLocaleString()}`;
 }
 
-function renderJson(value: unknown) {
-  return JSON.stringify(value, null, 2);
-}
-
 function profileTrendCases(trend: MarketProfileMlPredictionTrend | undefined) {
   if (!trend?.available || !trend.windows) return [];
   return PREDICTION_WINDOWS.flatMap((windowName) =>
@@ -388,6 +384,10 @@ export default function MarketProfile() {
                   <strong>{data.orderbook_depth?.toLocaleString() ?? "--"}</strong>
                 </div>
                 <div className="stat-chip">
+                  <span className="stat-chip-label">Read Time</span>
+                  <strong>{formatDateTime(data.read_time)}</strong>
+                </div>
+                <div className="stat-chip">
                   <span className="stat-chip-label">Whale Traders</span>
                   <strong>{data.whale_count}</strong>
                 </div>
@@ -412,37 +412,6 @@ export default function MarketProfile() {
           </section>
 
           <MarketMlPredictionTrendPanel trend={data.ml_prediction_trend} />
-
-          <section className="card profile-card">
-            <div className="card-header">
-              <p className="card-label">Profile Snapshot</p>
-              <h2>Market Details</h2>
-              <p className="card-subtext">Realtime payload plus dashboard market metrics from the backend.</p>
-            </div>
-
-            <div className="profile-grid polished-grid">
-              <div className="profile-item">
-                <span className="profile-key">market_contract_id</span>
-                <span className="profile-value">{data.market_contract_id}</span>
-              </div>
-              <div className="profile-item">
-                <span className="profile-key">dashboard_id</span>
-                <span className="profile-value">{data.dashboard_id}</span>
-              </div>
-              <div className="profile-item">
-                <span className="profile-key">realtime_source</span>
-                <span className="profile-value">{data.realtime_source}</span>
-              </div>
-              <div className="profile-item">
-                <span className="profile-key">read_time</span>
-                <span className="profile-value">{data.read_time ?? "--"}</span>
-              </div>
-              <div className="profile-item profile-item-full">
-                <span className="profile-key">realtime_payload</span>
-                <pre className="payload-box">{renderJson(data.realtime_payload)}</pre>
-              </div>
-            </div>
-          </section>
         </>
       )}
     </div>
