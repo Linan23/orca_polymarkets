@@ -78,11 +78,11 @@ function polymarketMarketUrl(marketUrl: string | null | undefined, marketSlug: s
       const parsed = new URL(marketUrl);
       if (parsed.hostname.endsWith("polymarket.com")) return parsed.toString();
     } catch {
-      // Fall through to the slug-based Polymarket page.
+      if (marketUrl.startsWith("/")) return `https://polymarket.com${marketUrl}`;
     }
   }
   if (!marketSlug) return null;
-  return `https://polymarket.com/event/${encodeURIComponent(marketSlug)}`;
+  return `https://polymarket.com/market/${encodeURIComponent(marketSlug)}`;
 }
 
 function profileTrendCases(trend: MarketProfileMlPredictionTrend | undefined) {
