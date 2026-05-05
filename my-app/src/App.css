@@ -1,3 +1,4 @@
+
 :root {
   font-family: Inter, system-ui, Arial, sans-serif;
   color: #f5f7fb;
@@ -4614,6 +4615,34 @@ font-weight:700;
   gap: 16px;
 }
 
+.market-ml-tabs {
+  display: inline-flex;
+  gap: 6px;
+  padding: 5px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  background: rgba(15, 23, 42, 0.62);
+  flex: 0 0 auto;
+}
+
+.market-ml-tabs button {
+  appearance: none;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #cbd5e1;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 700;
+  padding: 8px 12px;
+}
+
+.market-ml-tabs button.active {
+  background: rgba(45, 212, 191, 0.16);
+  color: #99f6e4;
+}
+
 .market-ml-local-pill {
   display: inline-flex;
   align-items: center;
@@ -4800,6 +4829,111 @@ font-weight:700;
   color: #dbeafe;
 }
 
+.market-ml-whales-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.market-ml-whales-summary {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  border: 1px solid rgba(45, 212, 191, 0.18);
+  background: rgba(20, 184, 166, 0.08);
+  border-radius: 18px;
+  padding: 16px;
+}
+
+.market-ml-whales-summary h3 {
+  margin: 0;
+  color: #f8fafc;
+  font-size: 1.25rem;
+}
+
+.market-ml-whale-list {
+  display: grid;
+  gap: 12px;
+}
+
+.market-ml-whale-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) minmax(190px, auto);
+  gap: 14px;
+  align-items: center;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  background: rgba(15, 23, 42, 0.58);
+  border-radius: 18px;
+  padding: 14px;
+}
+
+.market-ml-whale-rank {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: rgba(45, 212, 191, 0.14);
+  border: 1px solid rgba(45, 212, 191, 0.22);
+  color: #99f6e4;
+  font-weight: 800;
+}
+
+.market-ml-whale-main {
+  min-width: 0;
+}
+
+.market-ml-whale-title {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.market-ml-whale-title a {
+  color: #f8fafc;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.market-ml-whale-title a:hover {
+  color: #99f6e4;
+}
+
+.market-ml-whale-title span {
+  border-radius: 999px;
+  border: 1px solid rgba(45, 212, 191, 0.22);
+  color: #99f6e4;
+  background: rgba(45, 212, 191, 0.1);
+  padding: 5px 8px;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.market-ml-whale-main p {
+  margin: 6px 0 0;
+  color: #94a3b8;
+  overflow-wrap: anywhere;
+  font-size: 0.85rem;
+}
+
+.market-ml-whale-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.market-ml-whale-meta span {
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  background: rgba(2, 6, 23, 0.34);
+  color: #cbd5e1;
+  padding: 7px 10px;
+  font-size: 0.8rem;
+  text-align: right;
+}
+
 .market-ml-good {
   color: #bbf7d0 !important;
   border-color: rgba(34, 197, 94, 0.32) !important;
@@ -4830,7 +4964,176 @@ font-weight:700;
 @media (max-width: 920px) {
   .market-ml-chart-layout,
   .market-ml-live-entry,
-  .market-ml-prediction-grid {
+  .market-ml-prediction-grid,
+  .market-ml-whale-row {
     grid-template-columns: 1fr;
   }
+
+  .market-ml-header,
+  .market-ml-whales-summary {
+    flex-direction: column;
+  }
+
+  .market-ml-tabs {
+    width: 100%;
+  }
+
+  .market-ml-tabs button {
+    flex: 1;
+  }
+
+  .market-ml-whale-meta {
+    align-items: flex-start;
+  }
 }
+
+
+.carousel-container {
+  position: relative;
+  overflow: hidden;
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+.carousel-track {
+  display: flex;
+  transition: transform 0.45s ease;
+}
+
+.carousel-slide {
+  min-width: 100%;
+  display: flex;
+  justify-content: center; /* centers card */
+  padding: 50px 0;
+}
+
+/* 🔥 main card */
+.carousel-card {
+  width: 70%;        
+  max-width: 1000px;     
+  padding: 28px;
+
+  border-radius: 22px;
+  background: linear-gradient(
+    135deg,
+    rgba(20, 30, 60, 0.95),
+    rgba(10, 20, 40, 0.95)
+  );
+
+  box-shadow: 0 30px 70px rgba(0, 0, 0, 0.45);
+}
+
+/* arrows */
+
+.carousel-btn {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+
+  width: 64px;          /* 🔥 bigger */
+  height: 64px;
+  border-radius: 999px;
+
+  display: grid;
+  place-items: center;
+
+  background: rgba(255,255,255,0.12);
+  backdrop-filter: blur(6px);
+
+  font-size: 28px;      /* 🔥 bigger arrow */
+  color: white;
+
+  border: 1px solid rgba(255,255,255,0.18);
+  cursor: pointer;
+  z-index: 10;
+
+  transition: 0.2s ease;
+}
+
+.carousel-btn:hover {
+  background: rgba(255,255,255,0.2);
+  transform: translateY(-50%) scale(1.05);
+}
+
+.carousel-btn.left {
+  left: 4px;   /* was 10px */
+}
+
+.carousel-btn.right {
+  right: 4px;
+}
+
+/* dots */
+.carousel-dots {
+  display: flex;
+  justify-content: center;
+  margin-top: 14px;
+  gap: 10px;
+}
+
+.dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.3);
+  cursor: pointer;
+}
+
+.dot.active {
+  background: white;
+}
+
+.info-slide {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  margin-top: 28px;
+}
+
+.info-card {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  padding: 20px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.055);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.info-card span {
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: rgba(125, 211, 252, 0.14);
+  color: #7dd3fc;
+  font-weight: 900;
+}
+
+.info-card p {
+  margin: 0;
+  line-height: 1.65;
+  color: rgba(255, 255, 255, 0.76);
+}
+
+.info-slide.vertical {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+
+.definitions-hero-title {
+  margin: 12px 0 24px;
+
+  font-size: clamp(3rem, 7vw, 6.5rem);
+  line-height: 0.95;
+
+  letter-spacing: -0.06em;   /* 🔥 this is the key difference */
+  font-weight: 800;
+
+  color: #f5f7fb;
+}
+
+
