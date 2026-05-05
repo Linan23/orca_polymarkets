@@ -986,6 +986,25 @@ def latest_dashboard_markets(session: Session, limit: int = DEFAULT_LIMIT) -> di
     ).all()
     items = []
     for market, contract in rows:
+        market_slug_value = market.market_slug or contract.market_slug
+        if market.volume is not None:
+            volume = float(market.volume)
+        elif contract.volume is not None:
+            volume = float(contract.volume)
+        else:
+            volume = _observed_trade_volume_for_market(
+                session,
+                contract=contract,
+                market_slug=market_slug_value,
+            )
+        if market.orderbook_depth is not None:
+            orderbook_depth = int(market.orderbook_depth or 0)
+        else:
+            orderbook_depth = _latest_orderbook_depth_for_market(
+                session,
+                contract=contract,
+                market_slug=market_slug_value,
+            )
         item = {
             "market_id": market.market_id,
             "market_contract_id": market.market_contract_id,
@@ -993,9 +1012,9 @@ def latest_dashboard_markets(session: Session, limit: int = DEFAULT_LIMIT) -> di
             "market_url": market.market_url,
             "question": contract.question,
             "price": float(market.price) if market.price is not None else None,
-            "volume": float(market.volume) if market.volume is not None else None,
+            "volume": volume,
             "odds": float(market.odds) if market.odds is not None else None,
-            "orderbook_depth": int(market.orderbook_depth or 0) if market.orderbook_depth is not None else None,
+            "orderbook_depth": orderbook_depth,
             "whale_count": int(market.whale_count or 0),
             "trusted_whale_count": int(market.trusted_whale_count or 0),
             "whale_market_focus": market.whale_market_focus,

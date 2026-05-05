@@ -17,7 +17,7 @@ from typing import Any
 import sys
 
 import httpx
-from sqlalchemy import desc, select
+from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -28,7 +28,15 @@ if str(ROOT_DIR) not in sys.path:
 from data_platform.db.session import session_scope
 from data_platform.ingest.polymarket import ingest_orderbook_batch
 from data_platform.ingest.store import parse_datetime
-from data_platform.models import ApiPayload, MarketContract, MarketEvent, MarketTag, MarketTagMap, Platform
+from data_platform.models import (
+    ApiPayload,
+    MarketContract,
+    MarketEvent,
+    MarketTag,
+    MarketTagMap,
+    Platform,
+    TransactionFact,
+)
 from data_platform.services.market_scope import (
     add_focus_domain_argument,
     build_market_scope_texts,
@@ -157,6 +165,12 @@ def _load_event_tags(session: Session, event_ids: set[int]) -> dict[int, list[st
 
 def _load_target_markets(session: Session, market_limit: int, *, focus_domains: list[str]) -> list[tuple[MarketContract, list[str]]]:
     """Return top Polymarket markets that have resolvable CLOB token ids."""
+    observed_volume = (
+        select(func.coalesce(func.sum(TransactionFact.notional_value), 0))
+        .where(TransactionFact.market_contract_id == MarketContract.market_contract_id)
+        .correlate(MarketContract)
+        .scalar_subquery()
+    )
     rows = session.execute(
         select(MarketContract, MarketEvent)
         .join(Platform, Platform.platform_id == MarketContract.platform_id)
@@ -164,8 +178,11 @@ def _load_target_markets(session: Session, market_limit: int, *, focus_domains: 
         .where(Platform.platform_name == "polymarket")
         .where(MarketContract.is_active.is_(True))
         .where(MarketContract.is_closed.is_(False))
-        .where(MarketContract.volume.is_not(None))
-        .order_by(desc(MarketContract.volume), desc(MarketContract.updated_at))
+        .where((MarketContract.volume.is_not(None)) | (observed_volume > 0))
+        .order_by(
+            desc(func.coalesce(MarketContract.volume, observed_volume)),
+            desc(MarketContract.updated_at),
+        )
         .limit(market_limit * 12)
     ).all()
 
