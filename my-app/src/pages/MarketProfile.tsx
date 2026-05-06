@@ -327,8 +327,8 @@ function MarketPredictionTrendChart({ cases }: { cases: MarketProfileMlPredictio
   const left = 42;
   const right = 18;
   const top = 12;
-  const bottom = 10;
-  const axisY = height - bottom;
+  const axisLabelY = height - 3;
+  const axisY = axisLabelY - 16;
   const plotBottom = axisY - 24;
   const plotWidth = width - left - right;
   const plotHeight = plotBottom - top;
@@ -371,7 +371,7 @@ function MarketPredictionTrendChart({ cases }: { cases: MarketProfileMlPredictio
         ))}
         <line className="market-ml-axis-line" x1={left} x2={width - right} y1={axisY} y2={axisY} />
         {[0, 12, 24].map((hour) => (
-          <text className="market-ml-axis-label" key={`axis-${hour}`} x={xFor(hour)} y={height - 3} textAnchor="middle">
+          <text className="market-ml-axis-label" key={`axis-${hour}`} x={xFor(hour)} y={axisLabelY} textAnchor="middle">
             {hour === 0 ? "entry" : `+${hour}h`}
           </text>
         ))}
