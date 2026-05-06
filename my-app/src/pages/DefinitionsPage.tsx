@@ -57,22 +57,64 @@ const slides = [
     title: "How the ML Works",
     eyebrow: "Machine Learning",
     type: "ml",
-    points: [
-      "Orca collects market and trader behavior data.",
-      "The model looks for patterns in whale activity, volume, and past trades.",
-      "It compares current behavior to historical outcomes.",
-      "The goal is to help estimate which traders may give stronger market signals.",
+    definitions: [
+      {
+        term: "ML Prediction",
+        description:
+          "A forecast made from historical Polymarket data, current market odds, and whale trading behavior. It estimates how the market may move, but it is not a guarantee.",
+      },
+      {
+        term: "Whale Entry",
+        description:
+          "The point when a large or trusted trader starts buying into a market. Orca uses this as the starting point for the prediction trend.",
+      },
+      {
+        term: "12h / 24h Forecast",
+        description:
+          "The model estimates where the market odds may move over the next 12 and 24 hours after whale activity is detected.",
+      },
+      {
+        term: "Signal Tier",
+        description:
+          "A label that explains how reliable a prediction is. Strong means higher confidence, Watch means useful but less certain, and Review means the model needs more validation.",
+      },
+      {
+        term: "Validation",
+        description:
+          "A check that compares older predictions against what actually happened later. This helps show whether the model is matching real market movement.",
+      },
     ],
   },
   {
     title: "How the Trust Score Works",
     eyebrow: "Trust Score",
     type: "trust",
-    points: [
-      "The trust score ranks traders based on consistency and past performance.",
-      "Higher scores suggest stronger historical signal quality.",
-      "The score can use factors like win rate, volume, timing, and profitability.",
-      "Trusted whales are users with stronger scores and more reliable behavior patterns.",
+    definitions: [
+      {
+        term: "Trust Score",
+        description:
+          "A score that estimates how reliable a whale has been based on past trading behavior, performance, and consistency.",
+      },
+      {
+        term: "Trusted Whale",
+        description:
+          "A trader whose history shows stronger signal quality than most users. These whales can carry more weight in the ML prediction.",
+      },
+      {
+        term: "P&L History",
+        description:
+          "The trader’s profit and loss over time. Stronger P&L can help show whether a whale has been making useful market decisions.",
+      },
+      {
+        term: "Trading Pattern",
+        description:
+          "How often a whale buys or sells, when they enter markets, how long they usually hold, and how they behave before markets move.",
+      },
+      {
+        term: "Weight",
+        description:
+          "The influence a whale has in the model. A more trusted whale can have a larger effect than a whale with weaker or less consistent history.",
+      },
     ],
   },
 ];
@@ -152,10 +194,10 @@ const [activeSlide, setActiveSlide] = useState(0);
 </div>
 
           <div className="definitions-list">
-  {slides[1].points?.map((point, i) => (
-    <div className="definition-row" key={point}>
-      <h3>{i + 1}</h3>
-      <p>{point}</p>
+  {slides[1].definitions?.map((item) => (
+    <div className="definition-row" key={item.term}>
+      <h3>{item.term}</h3>
+      <p>{item.description}</p>
     </div>
   ))}
 </div>
@@ -173,10 +215,10 @@ const [activeSlide, setActiveSlide] = useState(0);
 </div>
 
        <div className="definitions-list">
-  {slides[2].points?.map((point, i) => (
-    <div className="definition-row" key={point}>
-      <h3>{i + 1}</h3>
-      <p>{point}</p>
+  {slides[2].definitions?.map((item) => (
+    <div className="definition-row" key={item.term}>
+      <h3>{item.term}</h3>
+      <p>{item.description}</p>
     </div>
   ))}
 </div>
