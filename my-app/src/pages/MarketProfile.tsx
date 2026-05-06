@@ -138,18 +138,15 @@ function forecastDirectionTag(item: MarketProfileMlPredictionCase) {
 }
 
 function historicalValidationTag(item: MarketProfileMlPredictionCase) {
-  const accuracyPct =
-    item.validation_accuracy_pct ??
-    item.direction_signal_accuracy_pct ??
-    item.historical_validation_direction_match_pct;
+  const trainedAccuracyPct = item.validation_accuracy_pct ?? item.direction_signal_accuracy_pct;
   if (
     item.historical_validation_tier === "trained_strong_confidence" ||
     item.historical_validation_tier === "trained_watch_confidence"
   ) {
-    return typeof accuracyPct === "number" ? `${accuracyPct.toFixed(1)}%` : "Pending";
+    return typeof trainedAccuracyPct === "number" ? `${trainedAccuracyPct.toFixed(1)}%` : "Pending";
   }
   if (item.historical_validation_tier === "trained_low_confidence") {
-    return typeof accuracyPct === "number" ? `Low ${accuracyPct.toFixed(1)}%` : "Low validation";
+    return typeof trainedAccuracyPct === "number" ? `Low ${trainedAccuracyPct.toFixed(1)}%` : "Low validation";
   }
   if (item.historical_validation_tier === "high_confidence_historical_slice") {
     const pct = item.historical_validation_direction_match_pct;
