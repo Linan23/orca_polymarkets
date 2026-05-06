@@ -43,6 +43,21 @@ HIGH_CONFIDENCE_DIRECTION_WINDOW_HOURS = 12
 HIGH_CONFIDENCE_DIRECTION_MIN_DELTA_PTS = 5.0
 HIGH_CONFIDENCE_24H_MIN_DELTA_PTS = 6.0
 HIGH_CONFIDENCE_24H_MIN_TOTAL_PRESSURE = 1000.0
+MARKET_CATEGORY_SQL = """
+CASE
+  WHEN LOWER(CONCAT_WS(' ', me.title, me.slug, me.category, mc.question, mc.market_slug, mc.outcome_a_label, mc.outcome_b_label)) ~ '(video[ -]?games?|videogames?|gaming|gta|grand theft auto|nintendo|playstation|xbox|steam|esports?|counter[ -]?strike|cs2|fortnite|call of duty|rockstar|rocket league|league of legends|valorant|dota)'
+    THEN 'Video Game'
+  WHEN LOWER(CONCAT_WS(' ', me.title, me.slug, me.category, mc.question, mc.market_slug, mc.outcome_a_label, mc.outcome_b_label)) ~ '(crypto|cryptocurrenc|bitcoin|ethereum|solana|doge|dogecoin|xrp|btc|eth|token|airdrop|coinbase|kraken|stablecoin|microstrategy|mstr|blockchain|defi)'
+    THEN 'Crypto'
+  WHEN LOWER(CONCAT_WS(' ', me.title, me.slug, me.category, mc.question, mc.market_slug, mc.outcome_a_label, mc.outcome_b_label)) ~ '(technology|tech|openai|gpt|llm|artificial intelligence|\\bai\\b|nvidia|amd|microsoft|google|alphabet|meta|apple|anthropic|sam altman|semiconductor|chips?|software|hardware)'
+    THEN 'Technology'
+  WHEN LOWER(CONCAT_WS(' ', me.title, me.slug, me.category, mc.question, mc.market_slug, mc.outcome_a_label, mc.outcome_b_label)) ~ '(geopolit|world affairs|foreign policy|diplom|ceasefire|military|nato|ukraine|russia|putin|zelensky|china|taiwan|iran|israel|gaza|syria|middle east|\\bwar\\b)'
+    THEN 'Geopolitics'
+  WHEN LOWER(CONCAT_WS(' ', me.title, me.slug, me.category, mc.question, mc.market_slug, mc.outcome_a_label, mc.outcome_b_label)) ~ '(politic|elections?|government|president|presidential|prime minister|congress|senate|parliament|cabinet|minister|tariff|trump|biden|starmer|macron|supreme court|us government)'
+    THEN 'Politics'
+  ELSE 'Other'
+END
+"""
 
 
 def _potential_whale_clause() -> Any:
@@ -2929,13 +2944,14 @@ def following_overview(
 
         position_focus_rows = session.execute(
             text(
-                """
+                f"""
                 WITH latest_positions AS (
                   SELECT
                     ps.user_id,
                     ps.market_contract_id,
                     mc.market_slug,
                     mc.question,
+                    {MARKET_CATEGORY_SQL} AS market_category,
                     mc.is_closed,
                     ABS(COALESCE(ps.market_value, 0)) AS focus_value,
                     ps.snapshot_time AS latest_activity_time,
@@ -2946,6 +2962,8 @@ def following_overview(
                   FROM analytics.position_snapshot ps
                   JOIN analytics.market_contract mc
                     ON mc.market_contract_id = ps.market_contract_id
+                  JOIN analytics.market_event me
+                    ON me.event_id = mc.event_id
                   WHERE ps.user_id = ANY(:user_ids)
                     AND mc.market_slug IS NOT NULL
                 ),
@@ -2966,6 +2984,7 @@ def following_overview(
                   user_id,
                   market_slug,
                   question,
+                  market_category,
                   is_closed,
                   focus_value,
                   latest_activity_time
@@ -2992,6 +3011,7 @@ def following_overview(
                 "main_market_question": row["question"],
                 "focus_value": float(row["focus_value"] or 0),
                 "focus_source": "position",
+                "main_market_category": row["market_category"],
                 "latest_activity_time": row["latest_activity_time"],
                 "market_status_label": _market_status_label(row["is_closed"]),
             }
@@ -3000,24 +3020,27 @@ def following_overview(
         if missing_user_ids:
             recent_flow_rows = session.execute(
                 text(
-                    """
+                    f"""
                     WITH recent_market_flow AS (
                       SELECT
                         tf.user_id,
                         tf.market_contract_id,
                         mc.market_slug,
                         mc.question,
+                        {MARKET_CATEGORY_SQL} AS market_category,
                         mc.is_closed,
                         COALESCE(SUM(tf.notional_value), 0) AS focus_value,
                         MAX(tf.transaction_time) AS latest_activity_time
                       FROM analytics.transaction_fact tf
                       JOIN analytics.market_contract mc
                         ON mc.market_contract_id = tf.market_contract_id
+                      JOIN analytics.market_event me
+                        ON me.event_id = mc.event_id
                       WHERE tf.user_id = ANY(:user_ids)
                         AND tf.transaction_time >= :window_start
                         AND LOWER(COALESCE(tf.side, '')) = 'buy'
                         AND mc.market_slug IS NOT NULL
-                      GROUP BY tf.user_id, tf.market_contract_id, mc.market_slug, mc.question, mc.is_closed
+                      GROUP BY tf.user_id, tf.market_contract_id, mc.market_slug, mc.question, mc.is_closed, {MARKET_CATEGORY_SQL}
                     ),
                     ranked_recent_flow AS (
                       SELECT
@@ -3035,6 +3058,7 @@ def following_overview(
                       user_id,
                       market_slug,
                       question,
+                      market_category,
                       is_closed,
                       focus_value,
                       latest_activity_time
@@ -3062,6 +3086,7 @@ def following_overview(
                     "main_market_question": row["question"],
                     "focus_value": float(row["focus_value"] or 0),
                     "focus_source": "recent_flow",
+                    "main_market_category": row["market_category"],
                     "latest_activity_time": row["latest_activity_time"],
                     "market_status_label": _market_status_label(row["is_closed"]),
                 }
@@ -3070,13 +3095,14 @@ def following_overview(
         if missing_user_ids:
             lifetime_flow_rows = session.execute(
                 text(
-                    """
+                    f"""
                     WITH lifetime_market_flow AS (
                       SELECT
                         tf.user_id,
                         tf.market_contract_id,
                         mc.market_slug,
                         mc.question,
+                        {MARKET_CATEGORY_SQL} AS market_category,
                         mc.is_closed,
                         COALESCE(SUM(CASE WHEN LOWER(COALESCE(tf.side, '')) = 'buy' THEN tf.notional_value ELSE 0 END), 0) AS buy_focus_value,
                         COALESCE(SUM(tf.notional_value), 0) AS total_notional,
@@ -3084,9 +3110,11 @@ def following_overview(
                       FROM analytics.transaction_fact tf
                       JOIN analytics.market_contract mc
                         ON mc.market_contract_id = tf.market_contract_id
+                      JOIN analytics.market_event me
+                        ON me.event_id = mc.event_id
                       WHERE tf.user_id = ANY(:user_ids)
                         AND mc.market_slug IS NOT NULL
-                      GROUP BY tf.user_id, tf.market_contract_id, mc.market_slug, mc.question, mc.is_closed
+                      GROUP BY tf.user_id, tf.market_contract_id, mc.market_slug, mc.question, mc.is_closed, {MARKET_CATEGORY_SQL}
                     ),
                     ranked_lifetime_flow AS (
                       SELECT
@@ -3105,6 +3133,7 @@ def following_overview(
                       user_id,
                       market_slug,
                       question,
+                      market_category,
                       is_closed,
                       buy_focus_value AS focus_value,
                       latest_activity_time
@@ -3129,6 +3158,7 @@ def following_overview(
                     "main_market_question": row["question"],
                     "focus_value": float(row["focus_value"] or 0),
                     "focus_source": "lifetime_flow",
+                    "main_market_category": row["market_category"],
                     "latest_activity_time": row["latest_activity_time"],
                     "market_status_label": _market_status_label(row["is_closed"]),
                 }

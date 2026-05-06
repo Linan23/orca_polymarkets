@@ -2409,12 +2409,12 @@ a {
 }
 
 .following-flow-panel .leaderboard-top {
-  padding: 20px 22px 12px;
+  padding: 20px 22px;
 }
 
 .following-flow-panel .following-row-list {
   gap: 10px;
-  padding: 4px 18px 18px;
+  padding: 18px;
 }
 
 .following-flow-panel .following-data-row {
@@ -2550,6 +2550,33 @@ a {
 
 .following-donut-layout {
   align-items: center;
+}
+
+.following-category-pie-layout {
+  display: grid;
+  grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
+  gap: 20px;
+  align-items: center;
+  padding: 18px;
+}
+
+.following-category-pie-shell {
+  display: grid;
+  place-items: center;
+  min-height: 260px;
+  overflow: visible;
+}
+
+.following-category-pie {
+  color: #f8fafc;
+}
+
+.following-category-list {
+  padding: 0;
+}
+
+.following-category-title {
+  color: #f8fafc;
 }
 
 .following-focus-row {

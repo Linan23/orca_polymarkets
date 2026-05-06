@@ -643,6 +643,7 @@ export type FollowedTraderFocusRow = {
   display_label: string | null;
   main_market_slug: string;
   main_market_question: string;
+  main_market_category?: string | null;
   focus_value: number;
   focus_source: "position" | "recent_flow" | "lifetime_flow";
   share_percentage: number;

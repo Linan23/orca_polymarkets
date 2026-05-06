@@ -1,3 +1,4 @@
+import { PieChart } from "@mui/x-charts/PieChart";
 import { useCallback, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useApiData } from "../hooks/useApiData";
@@ -17,26 +18,7 @@ import { formatTrustScorePercent } from "../lib/scoreFormatting";
 import { deriveUserIdentity } from "../lib/userIdentity";
 import TopNavbar from "../homepage/TopNavbar";
 
-const FOLLOWING_DONUT_COLORS = [
-  "#ef4444",
-  "#f97316",
-  "#eab308",
-  "#84cc16",
-  "#22c55e",
-  "#14b8a6",
-  "#06b6d4",
-  "#3b82f6",
-  "#8b5cf6",
-  "#d946ef",
-];
-
-function focusMarketColor(marketSlug: string) {
-  let hash = 0;
-  for (let index = 0; index < marketSlug.length; index += 1) {
-    hash = (hash * 31 + marketSlug.charCodeAt(index)) >>> 0;
-  }
-  return FOLLOWING_DONUT_COLORS[hash % FOLLOWING_DONUT_COLORS.length];
-}
+const FOLLOWING_CATEGORY_COLORS = ["#38bdf8", "#22c55e", "#f97316", "#eab308", "#a78bfa", "#94a3b8"];
 
 function formatCurrency(value: number | null | undefined) {
   if (value === null || value === undefined) return "--";
@@ -60,6 +42,16 @@ function formatDateTime(value: string | null | undefined) {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(date);
+}
+
+function formatCategoryLabel(value: string | null | undefined) {
+  const category = value?.trim();
+  if (!category) return "Other";
+  return category
+    .split(/[\s_-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(" ");
 }
 
 function sourceLabel(value: FollowedTraderFocusRow["focus_source"]) {
@@ -122,49 +114,49 @@ function emptyFollowingDashboard(): FollowingDashboard {
   };
 }
 
-type TraderFocusMarketSlice = {
-  market_slug: string;
-  question: string;
-  market_status_label: "Open" | "Closed";
-  latest_activity_time: string | null;
+type TraderFocusCategorySlice = {
+  category_name: string;
+  focus_value: number;
   share_percentage: number;
   trader_count: number;
+  market_count: number;
 };
 
-function buildTraderFocusMarketSlices(items: FollowedTraderFocusRow[]): TraderFocusMarketSlice[] {
+function buildTraderFocusCategorySlices(items: FollowedTraderFocusRow[]): TraderFocusCategorySlice[] {
   const activeItems = items.filter((item) => item.share_percentage > 0);
-  const byMarket = new Map<string, TraderFocusMarketSlice>();
+  const byCategory = new Map<string, TraderFocusCategorySlice & { marketSlugs: Set<string> }>();
+  const focusTotal = activeItems.reduce((sum, item) => sum + item.focus_value, 0);
 
   activeItems.forEach((item) => {
-    const current = byMarket.get(item.main_market_slug);
+    const categoryName = formatCategoryLabel(item.main_market_category);
+    const current = byCategory.get(categoryName);
     if (!current) {
-      byMarket.set(item.main_market_slug, {
-        market_slug: item.main_market_slug,
-        question: item.main_market_question,
-        market_status_label: item.market_status_label,
-        latest_activity_time: item.latest_activity_time,
-        share_percentage: item.share_percentage,
+      byCategory.set(categoryName, {
+        category_name: categoryName,
+        focus_value: item.focus_value,
+        share_percentage: 0,
         trader_count: 1,
+        market_count: 1,
+        marketSlugs: new Set([item.main_market_slug]),
       });
       return;
     }
 
-    const nextLatestTime =
-      current.latest_activity_time && item.latest_activity_time
-        ? current.latest_activity_time > item.latest_activity_time
-          ? current.latest_activity_time
-          : item.latest_activity_time
-        : current.latest_activity_time ?? item.latest_activity_time;
-
-    byMarket.set(item.main_market_slug, {
-      ...current,
-      share_percentage: current.share_percentage + item.share_percentage,
-      trader_count: current.trader_count + 1,
-      latest_activity_time: nextLatestTime,
-    });
+    current.focus_value += item.focus_value;
+    current.trader_count += 1;
+    current.marketSlugs.add(item.main_market_slug);
+    current.market_count = current.marketSlugs.size;
   });
 
-  return [...byMarket.values()].sort((left, right) => right.share_percentage - left.share_percentage);
+  return [...byCategory.values()]
+    .map((item) => ({
+      category_name: item.category_name,
+      focus_value: item.focus_value,
+      share_percentage: focusTotal > 0 ? item.focus_value / focusTotal : 0,
+      trader_count: item.trader_count,
+      market_count: item.market_count,
+    }))
+    .sort((left, right) => right.focus_value - left.focus_value);
 }
 
 function buildRecentMarketFocusRows(items: FollowedTraderFocusRow[]): FollowingMarketFocusRecentRow[] {
@@ -236,74 +228,65 @@ function OverviewMetricCard({
 }
 
 function TraderFocusDonut({ items }: { items: FollowedTraderFocusRow[] }) {
-  const marketSlices = buildTraderFocusMarketSlices(items);
-  if (marketSlices.length === 0) {
+  const categorySlices = buildTraderFocusCategorySlices(items);
+  if (categorySlices.length === 0) {
     return <div className="empty-chart-state">No current positions or buy-flow history for followed traders.</div>;
   }
-
-  const segments = marketSlices.reduce<Array<TraderFocusMarketSlice & { strokeDashoffset: number }>>((rows, item) => {
-    const currentOffset = rows.reduce((sum, row) => sum + row.share_percentage * 100, 0);
-    rows.push({
-      ...item,
-      strokeDashoffset: -currentOffset,
-    });
-    return rows;
-  }, []);
+  const pieData = categorySlices.map((item, index) => ({
+    id: index,
+    value: item.focus_value,
+    label: item.category_name,
+    color: FOLLOWING_CATEGORY_COLORS[index % FOLLOWING_CATEGORY_COLORS.length],
+  }));
 
   return (
-    <div className="donut-layout following-donut-layout">
-      <div className="donut-shell">
-        <svg viewBox="0 0 36 36" className="donut-chart" aria-label="Followed trader main markets donut chart">
-          <circle cx="18" cy="18" r="15.915" className="donut-track" />
-          <g transform="rotate(-90 18 18)">
-            {segments.map((item) => {
-              const dash = item.share_percentage * 100;
-              return (
-                <circle
-                  key={item.market_slug}
-                  cx="18"
-                  cy="18"
-                  r="15.915"
-                  className="donut-segment"
-                  stroke={focusMarketColor(item.market_slug)}
-                  strokeDasharray={`${dash} ${100 - dash}`}
-                  strokeDashoffset={item.strokeDashoffset}
-                />
-              );
-            })}
-          </g>
-        </svg>
-        <div className="donut-center following-donut-center">
-          <div className="following-donut-center-label">
-            <strong>{marketSlices.length}</strong>
-            <span>Main Markets</span>
-          </div>
-        </div>
+    <div className="following-category-pie-layout">
+      <div className="following-category-pie-shell">
+        <PieChart
+          className="market-category-pie following-category-pie"
+          series={[
+            {
+              data: pieData,
+              cornerRadius: 3,
+              paddingAngle: 1,
+              highlightScope: { fade: "global", highlight: "item" },
+              faded: { innerRadius: 30, additionalRadius: -30, color: "gray" },
+              valueFormatter: (item) => {
+                const slice = categorySlices[Number(item.id)];
+                return `${formatCurrency(item.value)} · ${formatPercent(slice?.share_percentage)}`;
+              },
+            },
+          ]}
+          width={260}
+          height={250}
+          hideLegend
+          margin={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          slotProps={{
+            tooltip: {
+              trigger: "item",
+              anchor: "pointer",
+              position: "right",
+              sx: { zIndex: 99999 },
+            },
+          }}
+        />
       </div>
 
-      <div className="watchlist-list following-overview-card-list">
-        {marketSlices.map((item) => {
+      <div className="watchlist-list following-overview-card-list following-category-list">
+        {categorySlices.map((item, index) => {
           return (
-            <article key={item.market_slug} className="watchlist-card overview-watchlist-card following-focus-card">
+            <article key={item.category_name} className="watchlist-card overview-watchlist-card following-focus-card">
               <span
                 className="chart-swatch overview-card-swatch"
-                style={{ backgroundColor: focusMarketColor(item.market_slug) }}
+                style={{ backgroundColor: FOLLOWING_CATEGORY_COLORS[index % FOLLOWING_CATEGORY_COLORS.length] }}
               />
               <div className="watchlist-card-main following-focus-main">
-                <p className="watchlist-card-kicker">Main Market</p>
-                <Link to={`/markets/${item.market_slug}`} className="watchlist-card-title following-legend-link following-row-title">
-                  {item.question}
-                </Link>
-                <p className="watchlist-card-subtitle">{item.market_slug}</p>
+                <p className="watchlist-card-kicker">Market Category</p>
+                <strong className="watchlist-card-title following-category-title">{item.category_name}</strong>
                 <div className="leaderboard-meta">
                   <span className="meta-pill">{item.trader_count} traders</span>
+                  <span className="meta-pill">{item.market_count} markets</span>
                   <span className="meta-pill">{formatPercent(item.share_percentage)}</span>
-                  <span className="meta-pill">{formatDateTime(item.latest_activity_time)}</span>
-                </div>
-                <div className="watchlist-card-tags">
-                  <span className={`following-pill following-status-pill ${statusPillClass(item.market_status_label)}`}>
-                    {item.market_status_label}
-                  </span>
                 </div>
               </div>
             </article>
@@ -569,8 +552,8 @@ export default function FollowingPage() {
     () => new Map(visibleRecentClosedMarkets.map((item) => [item.market_slug, item])),
     [visibleRecentClosedMarkets],
   );
-  const traderFocusMarketCount = useMemo(
-    () => buildTraderFocusMarketSlices(visibleTraderFocus).length,
+  const traderFocusCategoryCount = useMemo(
+    () => buildTraderFocusCategorySlices(visibleTraderFocus).length,
     [visibleTraderFocus],
   );
   const activeDetailMeta = useMemo(() => {
@@ -596,13 +579,13 @@ export default function FollowingPage() {
       default:
         return {
           kicker: "Trader Positioning",
-          title: "Main Markets for Your Followed Traders",
-          description: `${traderFocusMarketCount} main markets across your followed traders, sized by combined main-market share.`,
+          title: "Followed Market Categories",
+          description: `${traderFocusCategoryCount} market categories across your followed traders, sized by combined positioning value.`,
         };
     }
   }, [
     activeDetailTab,
-    traderFocusMarketCount,
+    traderFocusCategoryCount,
     visibleMarkets.length,
     visibleRecentClosedMarkets.length,
     visibleUsers.length,
