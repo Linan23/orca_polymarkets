@@ -72,11 +72,6 @@ type CoveragePieRow = {
   value: number;
 };
 
-type CoverageMetric = {
-  label: string;
-  value: number;
-};
-
 const COVERAGE_COLORS = [
   "#6f7cff",
   "#42d3ff",
@@ -92,12 +87,10 @@ function CoveragePieChart({
   rows,
   total,
   totalLabel,
-  metrics,
 }: {
   rows: CoveragePieRow[];
   total: number;
   totalLabel: string;
-  metrics?: CoverageMetric[];
 }) {
   const activeRows = rows.filter((row) => row.value > 0);
   const pieData = activeRows.map((row, index) => ({
@@ -122,6 +115,9 @@ function CoveragePieChart({
               arcLabelMinAngle: 20,
               cornerRadius: 3,
               paddingAngle: 1,
+              highlightScope: { fade: "global", highlight: "item" },
+              highlighted: { additionalRadius: 5 },
+              faded: { additionalRadius: -3 },
               valueFormatter: (item) => {
                 const percent = total > 0 ? (item.value / total) * 100 : 0;
                 return `${formatCompact(item.value)} · ${formatPercent(percent)}`;
@@ -136,18 +132,15 @@ function CoveragePieChart({
       </div>
 
       <div className="coverage-pie-legend">
-        {metrics?.map((metric) => (
-          <div className="coverage-metric-row" key={metric.label}>
-            <span>{metric.label}</span>
-            <strong>{formatCompact(metric.value)}</strong>
-          </div>
-        ))}
-
         {activeRows.map((row, index) => {
           const percent = total > 0 ? Math.round((row.value / total) * 100) : 0;
 
           return (
-            <div className="coverage-legend-row" key={row.name}>
+            <div
+              className="coverage-legend-row"
+              key={row.name}
+              title={`${row.name}: ${formatCompact(row.value)} · ${percent}%`}
+            >
               <span
                 className="coverage-legend-dot"
                 style={{
@@ -233,16 +226,6 @@ export default function HomepageSummaryCards() {
                   value: Math.max(summary.whales_detected - summary.trusted_whales, 0),
                 },
               ],
-              metrics: [
-                {
-                  label: "Number of Trusted Whales",
-                  value: summary.trusted_whales,
-                },
-                {
-                  label: "Total Number of Whales Tracked",
-                  value: summary.whales_detected,
-                },
-              ],
             },
           ].map((chart) => ({
             ...chart,
@@ -277,7 +260,6 @@ export default function HomepageSummaryCards() {
                       rows={chart.rows}
                       total={chart.total}
                       totalLabel={chart.totalLabel}
-                      metrics={chart.metrics}
                     />
                   </article>
                 );

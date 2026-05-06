@@ -3410,14 +3410,14 @@ a {
 
 .coverage-pie-content {
   display: grid;
-  grid-template-columns: 170px 1fr;
-  gap: 24px;
+  grid-template-columns: minmax(180px, 200px) minmax(0, 1fr);
+  gap: 28px;
   align-items: center;
 }
 
 .coverage-mui-pie-shell {
-  width: min(180px, 100%);
-  min-height: 180px;
+  width: min(200px, 100%);
+  min-height: 200px;
   margin: 0 auto;
 }
 
@@ -3478,56 +3478,41 @@ a {
 
 .coverage-pie-legend {
   display: grid;
-  gap: 14px;
+  gap: 12px;
+  align-content: center;
+  min-width: 0;
 }
 
 .coverage-legend-row {
   display: grid;
-  grid-template-columns: 10px 1fr;
+  grid-template-columns: 12px minmax(0, 1fr);
   gap: 12px;
-  align-items: start;
+  align-items: center;
+  min-width: 0;
+  padding: 8px 0;
 }
 
 .coverage-legend-dot {
-  width: 10px;
-  height: 10px;
+  width: 12px;
+  height: 12px;
   border-radius: 999px;
-  margin-top: 5px;
+  margin-top: 0;
   box-shadow: none;
-}
-
-.coverage-metric-row {
-  display: grid;
-  gap: 4px;
-  padding: 10px 12px;
-  border-radius: 14px;
-  background: rgba(7, 19, 38, 0.72);
-  border: 1px solid rgba(148, 163, 184, 0.12);
-}
-
-.coverage-metric-row span {
-  color: rgba(226, 232, 240, 0.66);
-  font-size: 0.72rem;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.coverage-metric-row strong {
-  color: #f8fafc;
-  font-size: 1.12rem;
 }
 
 .coverage-legend-row strong {
   display: block;
   color: white;
-  font-size: .88rem;
+  font-size: .86rem;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
 }
 
 .coverage-legend-row p {
   margin: 3px 0 0;
   color: rgba(255,255,255,.62);
-  font-size: .82rem;
+  font-size: .8rem;
+  line-height: 1.25;
 }
 
 /* Better spacing for the top cards */
@@ -4058,8 +4043,8 @@ font-weight:700;
 
 /* Make the donut cards fit inside each third */
 .summary-grid-three .coverage-pie-content {
-  grid-template-columns: minmax(125px, 150px) minmax(0, 1fr);
-  gap: 18px;
+  grid-template-columns: minmax(150px, 170px) minmax(0, 1fr);
+  gap: 22px;
 }
 
 .summary-grid-three .coverage-donut {
