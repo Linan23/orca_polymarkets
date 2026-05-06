@@ -3662,14 +3662,24 @@ def following_dashboard(
     """Return the full Following page payload in one backend round trip."""
     normalized_user_ids = _normalize_watchlist_user_ids(user_ids)
     normalized_market_slugs = _normalize_watchlist_market_slugs(market_slugs)
+    overview = following_overview(
+        session,
+        user_ids=normalized_user_ids,
+        market_slugs=normalized_market_slugs,
+    )
+    markets = following_market_cards(session, market_slugs=normalized_market_slugs)
+    closed_market_slugs = {
+        str(item.get("market_slug") or "").strip().casefold()
+        for item in overview.get("recent_closed_markets", [])
+        if isinstance(item, dict)
+    }
+    for market in markets:
+        if str(market.get("market_slug") or "").strip().casefold() in closed_market_slugs:
+            market["market_status_label"] = "Closed"
     return {
-        "overview": following_overview(
-            session,
-            user_ids=normalized_user_ids,
-            market_slugs=normalized_market_slugs,
-        ),
+        "overview": overview,
         "users": following_user_cards(session, user_ids=normalized_user_ids),
-        "markets": following_market_cards(session, market_slugs=normalized_market_slugs),
+        "markets": markets,
     }
 
 
