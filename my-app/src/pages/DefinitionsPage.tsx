@@ -59,9 +59,14 @@ const slides = [
     type: "ml",
     definitions: [
       {
-        term: "ML Prediction",
+        term: "Market Odds",
         description:
-          "A forecast made from historical Polymarket data, current market odds, and whale trading behavior. It estimates how the market may move, but it is not a guarantee.",
+          "The current Yes or No probability shown by the market. For example, 77% means the market side is priced around a 77% chance.",
+      },
+      {
+        term: "Prediction Trend",
+        description:
+          "The model’s expected odds movement after whale activity. It shows whether the market may move up or down over the forecast window.",
       },
       {
         term: "Whale Entry",
@@ -74,9 +79,19 @@ const slides = [
           "The model estimates where the market odds may move over the next 12 and 24 hours after whale activity is detected.",
       },
       {
-        term: "Signal Tier",
+        term: "Review Only",
         description:
-          "A label that explains how reliable a prediction is. Strong means higher confidence, Watch means useful but less certain, and Review means the model needs more validation.",
+          "A signal shown for context, but not treated as reliable yet. It usually means the model needs more data or stronger validation for that market type.",
+      },
+      {
+        term: "Validated Slice",
+        description:
+          "A group of similar past predictions that has enough history to compare forecasts against actual market movement.",
+      },
+      {
+        term: "Low Confidence",
+        description:
+          "A prediction where the model does not have enough support to make a strong call. Users should treat it as weak or uncertain.",
       },
       {
         term: "Validation",
@@ -90,6 +105,16 @@ const slides = [
     eyebrow: "Trust Score",
     type: "trust",
     definitions: [
+      {
+        term: "Whale",
+        description:
+          "A trader or wallet with large positions, high volume, or meaningful activity that may influence how a market moves.",
+      },
+      {
+        term: "Potential Whale",
+        description:
+          "A trader who shows some whale-like behavior but does not yet have enough history or trust score strength to be labeled as a whale.",
+      },
       {
         term: "Trust Score",
         description:
