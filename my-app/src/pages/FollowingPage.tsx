@@ -122,6 +122,16 @@ type TraderFocusCategorySlice = {
   market_count: number;
 };
 
+type TraderFocusMarketSlice = {
+  market_slug: string;
+  question: string;
+  category_name: string;
+  market_status_label: "Open" | "Closed";
+  latest_activity_time: string | null;
+  share_percentage: number;
+  trader_count: number;
+};
+
 function buildTraderFocusCategorySlices(items: FollowedTraderFocusRow[]): TraderFocusCategorySlice[] {
   const activeItems = items.filter((item) => item.share_percentage > 0);
   const byCategory = new Map<string, TraderFocusCategorySlice & { marketSlugs: Set<string> }>();
@@ -157,6 +167,43 @@ function buildTraderFocusCategorySlices(items: FollowedTraderFocusRow[]): Trader
       market_count: item.market_count,
     }))
     .sort((left, right) => right.focus_value - left.focus_value);
+}
+
+function buildTraderFocusMarketSlices(items: FollowedTraderFocusRow[]): TraderFocusMarketSlice[] {
+  const activeItems = items.filter((item) => item.share_percentage > 0);
+  const byMarket = new Map<string, TraderFocusMarketSlice>();
+
+  activeItems.forEach((item) => {
+    const current = byMarket.get(item.main_market_slug);
+    if (!current) {
+      byMarket.set(item.main_market_slug, {
+        market_slug: item.main_market_slug,
+        question: item.main_market_question,
+        category_name: formatCategoryLabel(item.main_market_category),
+        market_status_label: item.market_status_label,
+        latest_activity_time: item.latest_activity_time,
+        share_percentage: item.share_percentage,
+        trader_count: 1,
+      });
+      return;
+    }
+
+    const nextLatestTime =
+      current.latest_activity_time && item.latest_activity_time
+        ? current.latest_activity_time > item.latest_activity_time
+          ? current.latest_activity_time
+          : item.latest_activity_time
+        : current.latest_activity_time ?? item.latest_activity_time;
+
+    byMarket.set(item.main_market_slug, {
+      ...current,
+      share_percentage: current.share_percentage + item.share_percentage,
+      trader_count: current.trader_count + 1,
+      latest_activity_time: nextLatestTime,
+    });
+  });
+
+  return [...byMarket.values()].sort((left, right) => right.share_percentage - left.share_percentage);
 }
 
 function buildRecentMarketFocusRows(items: FollowedTraderFocusRow[]): FollowingMarketFocusRecentRow[] {
@@ -229,6 +276,7 @@ function OverviewMetricCard({
 
 function TraderFocusDonut({ items }: { items: FollowedTraderFocusRow[] }) {
   const categorySlices = buildTraderFocusCategorySlices(items);
+  const marketSlices = buildTraderFocusMarketSlices(items);
   if (categorySlices.length === 0) {
     return <div className="empty-chart-state">No current positions or buy-flow history for followed traders.</div>;
   }
@@ -272,21 +320,27 @@ function TraderFocusDonut({ items }: { items: FollowedTraderFocusRow[] }) {
         />
       </div>
 
-      <div className="watchlist-list following-overview-card-list following-category-list">
-        {categorySlices.map((item, index) => {
+      <div className="watchlist-list following-overview-card-list following-market-list">
+        {marketSlices.map((item) => {
           return (
-            <article key={item.category_name} className="watchlist-card overview-watchlist-card following-focus-card">
-              <span
-                className="chart-swatch overview-card-swatch"
-                style={{ backgroundColor: FOLLOWING_CATEGORY_COLORS[index % FOLLOWING_CATEGORY_COLORS.length] }}
-              />
+            <article key={item.market_slug} className="watchlist-card overview-watchlist-card following-focus-card">
               <div className="watchlist-card-main following-focus-main">
-                <p className="watchlist-card-kicker">Market Category</p>
-                <strong className="watchlist-card-title following-category-title">{item.category_name}</strong>
+                <p className="watchlist-card-kicker">Followed Market</p>
+                <Link to={`/markets/${item.market_slug}`} className="watchlist-card-title following-legend-link following-row-title">
+                  {item.question}
+                </Link>
+                <p className="watchlist-card-subtitle">
+                  {item.category_name} · {item.market_slug}
+                </p>
                 <div className="leaderboard-meta">
                   <span className="meta-pill">{item.trader_count} traders</span>
-                  <span className="meta-pill">{item.market_count} markets</span>
                   <span className="meta-pill">{formatPercent(item.share_percentage)}</span>
+                  <span className="meta-pill">{formatDateTime(item.latest_activity_time)}</span>
+                </div>
+                <div className="watchlist-card-tags">
+                  <span className={`following-pill following-status-pill ${statusPillClass(item.market_status_label)}`}>
+                    {item.market_status_label}
+                  </span>
                 </div>
               </div>
             </article>

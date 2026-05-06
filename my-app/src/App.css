@@ -2571,7 +2571,8 @@ a {
   color: #f8fafc;
 }
 
-.following-category-list {
+.following-category-list,
+.following-market-list {
   padding: 0;
 }
 
