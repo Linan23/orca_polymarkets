@@ -323,11 +323,11 @@ function MarketPredictionTrendChart({ cases }: { cases: MarketProfileMlPredictio
   const minOdds = paddedMax - paddedMin < minRange ? Math.max(0, Math.floor(midpoint - minRange / 2)) : paddedMin;
   const maxOdds = paddedMax - paddedMin < minRange ? Math.min(100, Math.ceil(midpoint + minRange / 2)) : paddedMax;
   const width = 520;
-  const height = 250;
+  const height = 320;
   const left = 42;
   const right = 18;
   const top = 12;
-  const bottom = 14;
+  const bottom = 10;
   const axisY = height - bottom;
   const plotWidth = width - left - right;
   const plotHeight = axisY - top;
@@ -337,7 +337,7 @@ function MarketPredictionTrendChart({ cases }: { cases: MarketProfileMlPredictio
     const x = xFor(hour);
     const isRightEdge = hour >= 22;
     const isLeftEdge = hour <= 2;
-    const y = Math.min(Math.max(yFor(odds) + offset, top + 12), axisY - 8);
+    const y = Math.min(Math.max(yFor(odds) + offset, top + 12), axisY - 10);
     return {
       x: isRightEdge ? x - 8 : isLeftEdge ? x + 8 : x,
       y,
@@ -370,7 +370,7 @@ function MarketPredictionTrendChart({ cases }: { cases: MarketProfileMlPredictio
         ))}
         <line className="market-ml-axis-line" x1={left} x2={width - right} y1={axisY} y2={axisY} />
         {[0, 12, 24].map((hour) => (
-          <text className="market-ml-axis-label" key={`axis-${hour}`} x={xFor(hour)} y={height - 2} textAnchor="middle">
+          <text className="market-ml-axis-label" key={`axis-${hour}`} x={xFor(hour)} y={height - 3} textAnchor="middle">
             {hour === 0 ? "entry" : `+${hour}h`}
           </text>
         ))}
