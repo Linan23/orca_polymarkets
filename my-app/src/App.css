@@ -2246,52 +2246,23 @@ a {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
-.histogram {
+.trading-hours-chart {
   display: grid;
   gap: 14px;
 }
 
-.histogram-bars {
-  display: grid;
-  grid-template-columns: repeat(24, minmax(0, 1fr));
-  gap: 8px;
-  align-items: end;
-  min-height: 220px;
-  padding: 20px 0 0;
+.trading-hours-chart .MuiChartsAxis-line,
+.trading-hours-chart .MuiChartsAxis-tick {
+  stroke: rgba(148, 163, 184, 0.34);
 }
 
-.histogram-bars.top-hours {
-  grid-template-columns: repeat(5, minmax(76px, 1fr));
-  gap: 18px;
+.trading-hours-chart .MuiChartsAxis-tickLabel,
+.trading-hours-chart .MuiChartsAxis-label {
+  fill: rgba(226, 232, 240, 0.74);
 }
 
-.histogram-column {
-  display: grid;
-  gap: 8px;
-  align-items: end;
-  justify-items: center;
-}
-
-.histogram-bar {
-  width: 100%;
-  min-height: 2px;
-  border-radius: 999px 999px 6px 6px;
-  background: linear-gradient(180deg, #38bdf8, #2563eb);
-  box-shadow: none;
-}
-
-.histogram-column.peak .histogram-bar {
-  background: linear-gradient(180deg, #facc15, #f97316);
-}
-
-.histogram-label {
-  font-size: 0.74rem;
-  color: rgba(191, 219, 254, 0.68);
-}
-
-.histogram-bars.top-hours .histogram-label {
-  font-size: 0.82rem;
-  font-weight: 700;
+.trading-hours-chart .MuiChartsGrid-line {
+  stroke: rgba(148, 163, 184, 0.12);
 }
 
 .chart-footnote {
@@ -2792,15 +2763,6 @@ a {
 
   .following-metric-grid {
     grid-template-columns: 1fr;
-  }
-
-  .histogram-bars {
-    gap: 4px;
-    min-height: 180px;
-  }
-
-  .histogram-label:nth-child(odd) {
-    opacity: 0.7;
   }
 }
 

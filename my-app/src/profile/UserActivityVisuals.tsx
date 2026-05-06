@@ -1,3 +1,4 @@
+import { BarChart } from "@mui/x-charts/BarChart";
 import { PieChart } from "@mui/x-charts/PieChart";
 import {
   type HourlyActivityBucket,
@@ -114,37 +115,50 @@ export function HourlyActivityChart({ buckets }: { buckets: HourlyActivityBucket
   if (maxTrades === 0) {
     return <div className="empty-chart-state">No hourly activity in this timeframe.</div>;
   }
-  const topBuckets = [...buckets]
+  const chartData = buckets.map((bucket) => ({
+    hour: `${bucket.hour_utc.toString().padStart(2, "0")}:00`,
+    trades: bucket.trade_count,
+  }));
+  const peakBucket = buckets
     .filter((bucket) => bucket.trade_count > 0)
     .sort((first, second) => {
       if (second.trade_count !== first.trade_count) return second.trade_count - first.trade_count;
       return first.hour_utc - second.hour_utc;
-    })
-    .slice(0, 5);
-  const topMaxTrades = Math.max(...topBuckets.map((bucket) => bucket.trade_count), 0);
-  const peakLabel = `${topBuckets[0].hour_utc.toString().padStart(2, "0")}:00 UTC`;
+    })[0];
+  const peakLabel = `${peakBucket.hour_utc.toString().padStart(2, "0")}:00 UTC`;
 
   return (
-    <div className="histogram">
-      <div className="histogram-bars top-hours" aria-label="Top 5 active trading hours in UTC">
-        {topBuckets.map((bucket, index) => {
-          const height = topMaxTrades > 0 ? Math.max((bucket.trade_count / topMaxTrades) * 100, 12) : 0;
-          const hourLabel = `${bucket.hour_utc.toString().padStart(2, "0")}:00 UTC`;
-          const isPeak = index === 0;
-          return (
-            <div key={bucket.hour_utc} className={`histogram-column${isPeak ? " peak" : ""}`}>
-              <div
-                className="histogram-bar"
-                style={{ height: `${height}%` }}
-                title={`${hourLabel} · ${bucket.trade_count} trades${isPeak ? " · most active" : ""}`}
-                aria-label={`${hourLabel}: ${bucket.trade_count} trades${isPeak ? ", most active hour" : ""}`}
-              />
-              <span className="histogram-label">{bucket.hour_utc.toString().padStart(2, "0")}</span>
-            </div>
-          );
-        })}
-      </div>
-      <p className="chart-footnote">Top 5 active trading hours. Most active: {peakLabel}. Activity hours are shown in UTC.</p>
+    <div className="trading-hours-chart">
+      <BarChart
+        dataset={chartData}
+        xAxis={[
+          {
+            dataKey: "hour",
+            scaleType: "band",
+            tickPlacement: "middle",
+            tickLabelPlacement: "middle",
+          },
+        ]}
+        yAxis={[
+          {
+            label: "Trades",
+            width: 46,
+          },
+        ]}
+        series={[
+          {
+            dataKey: "trades",
+            label: "Trades",
+            color: "#38bdf8",
+            valueFormatter: (value) => `${value ?? 0} trades`,
+          },
+        ]}
+        height={300}
+        margin={{ top: 18, right: 16, bottom: 46, left: 4 }}
+        grid={{ horizontal: true }}
+        hideLegend
+      />
+      <p className="chart-footnote">Most active: {peakLabel}. Activity hours are shown in UTC.</p>
     </div>
   );
 }
