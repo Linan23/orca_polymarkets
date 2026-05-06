@@ -41,6 +41,8 @@ DEFAULT_LIVE_FEATURE_MARKET_LIMIT = 1000
 MAX_SIGNAL_DELTA_BY_WINDOW = {12: 6.0, 24: 9.0}
 HIGH_CONFIDENCE_DIRECTION_WINDOW_HOURS = 12
 HIGH_CONFIDENCE_DIRECTION_MIN_DELTA_PTS = 5.0
+HIGH_CONFIDENCE_24H_MIN_DELTA_PTS = 6.0
+HIGH_CONFIDENCE_24H_MIN_TOTAL_PRESSURE = 1000.0
 PHYSICAL_SPORTS_TERMS = (
     "nba", "nfl", "mlb", "nhl", "ufc", "soccer", "football", "tennis", "golf",
     "cricket", "rugby", "baseball", "basketball", "hockey", "formula 1", "f1",
@@ -477,12 +479,20 @@ def _live_prediction_for(
             0.0,
             0.92,
         )
-    is_high_confidence_validated_slice = (
+    is_high_confidence_12h_slice = (
         window_hours == HIGH_CONFIDENCE_DIRECTION_WINDOW_HOURS
         and predicted_direction != "flat"
         and confidence >= 0.7
         and abs(predicted_delta_pts) >= HIGH_CONFIDENCE_DIRECTION_MIN_DELTA_PTS
     )
+    is_high_confidence_24h_slice = (
+        window_hours == 24
+        and predicted_direction != "flat"
+        and confidence >= 0.7
+        and abs(predicted_delta_pts) >= HIGH_CONFIDENCE_24H_MIN_DELTA_PTS
+        and total_pressure >= HIGH_CONFIDENCE_24H_MIN_TOTAL_PRESSURE
+    )
+    is_high_confidence_validated_slice = is_high_confidence_12h_slice or is_high_confidence_24h_slice
     is_directional_watch = predicted_direction != "flat" and confidence >= 0.7 and abs(predicted_delta_pts) >= 1.0
     if predicted_direction == "flat":
         signal_tier = "abstain"
@@ -491,7 +501,11 @@ def _live_prediction_for(
     elif is_high_confidence_validated_slice:
         signal_tier = "watch"
         display_tier = "show"
-        tier_reason = "historical validation supports this 12h Watch signal when predicted movement is at least 5 points"
+        tier_reason = (
+            "historical validation supports this 24h Watch signal when predicted movement is at least 6 points with strong whale pressure"
+            if is_high_confidence_24h_slice
+            else "historical validation supports this 12h Watch signal when predicted movement is at least 5 points"
+        )
     elif is_directional_watch:
         signal_tier = "watch"
         display_tier = "review"
@@ -511,7 +525,11 @@ def _live_prediction_for(
     event_category = str(row.get("event_category") or "uncategorized")
     if is_high_confidence_validated_slice:
         validation_tier = "high_confidence_historical_slice"
-        validation_reason = "12h Watch with at least 5pt predicted movement reached 81.82% direction match in the older validation sample"
+        validation_reason = (
+            "24h Watch with at least 6pt predicted movement and whale pressure above 1000 reached 81.48% direction match in the older validation sample"
+            if is_high_confidence_24h_slice
+            else "12h Watch with at least 5pt predicted movement reached 81.82% direction match in the older validation sample"
+        )
     elif signal_tier == "watch":
         validation_tier = "review_only"
         validation_reason = "watch signal is visible, but this slice has not validated above the 70% target yet"
@@ -569,8 +587,12 @@ def _live_prediction_for(
         "direction_signal_tier_reason": tier_reason,
         "historical_validation_tier": validation_tier,
         "historical_validation_reason": validation_reason,
-        "historical_validation_direction_match_pct": 81.82 if is_high_confidence_validated_slice else None,
-        "historical_validation_sample_size": 22 if is_high_confidence_validated_slice else None,
+        "historical_validation_direction_match_pct": (
+            81.48 if is_high_confidence_24h_slice else 81.82 if is_high_confidence_12h_slice else None
+        ),
+        "historical_validation_sample_size": (
+            27 if is_high_confidence_24h_slice else 22 if is_high_confidence_12h_slice else None
+        ),
         "direction_signal_predicted_direction": predicted_direction,
         "direction_signal_confidence": round(confidence, 4),
         "reliability_warnings": reliability_warnings,

@@ -41,6 +41,8 @@ POTENTIAL_WHALE_MIN_TRUST_SCORE = 1.08
 POTENTIAL_WHALE_MIN_SAMPLE_TRADES = 5
 HIGH_CONFIDENCE_DIRECTION_WINDOW_HOURS = 12
 HIGH_CONFIDENCE_DIRECTION_MIN_DELTA_PTS = 5.0
+HIGH_CONFIDENCE_24H_MIN_DELTA_PTS = 6.0
+HIGH_CONFIDENCE_24H_MIN_TOTAL_PRESSURE = 1000.0
 
 
 def _potential_whale_clause() -> Any:
@@ -232,13 +234,24 @@ def _apply_market_profile_reliability_policy(item: dict[str, Any]) -> None:
     predicted_delta = _coerce_float(item.get("predicted_delta_pts"))
     signal_tier = str(item.get("direction_signal_tier") or "")
     predicted_direction = str(item.get("predicted_direction") or "")
-    is_high_confidence = (
+    whale_anchor = item.get("whale_anchor") if isinstance(item.get("whale_anchor"), dict) else {}
+    total_pressure = _coerce_float(whale_anchor.get("side_total_pressure")) or 0.0
+    is_high_confidence_12h = (
         window_hours == HIGH_CONFIDENCE_DIRECTION_WINDOW_HOURS
         and signal_tier == "watch"
         and predicted_direction != "flat"
         and predicted_delta is not None
         and abs(predicted_delta) >= HIGH_CONFIDENCE_DIRECTION_MIN_DELTA_PTS
     )
+    is_high_confidence_24h = (
+        window_hours == 24
+        and signal_tier == "watch"
+        and predicted_direction != "flat"
+        and predicted_delta is not None
+        and abs(predicted_delta) >= HIGH_CONFIDENCE_24H_MIN_DELTA_PTS
+        and total_pressure >= HIGH_CONFIDENCE_24H_MIN_TOTAL_PRESSURE
+    )
+    is_high_confidence = is_high_confidence_12h or is_high_confidence_24h
     warnings = list(item.get("reliability_warnings") or [])
     if signal_tier == "strong" and predicted_direction != "flat":
         item["display_tier"] = "show"
@@ -250,12 +263,16 @@ def _apply_market_profile_reliability_policy(item: dict[str, Any]) -> None:
         item["display_tier"] = "show"
         item["historical_validation_tier"] = "high_confidence_historical_slice"
         item["historical_validation_reason"] = (
-            "12h Watch with at least 5pt predicted movement reached 81.82% direction match in the older validation sample"
+            "24h Watch with at least 6pt predicted movement and whale pressure above 1000 reached 81.48% direction match in the older validation sample"
+            if is_high_confidence_24h
+            else "12h Watch with at least 5pt predicted movement reached 81.82% direction match in the older validation sample"
         )
-        item["historical_validation_direction_match_pct"] = 81.82
-        item["historical_validation_sample_size"] = 22
+        item["historical_validation_direction_match_pct"] = 81.48 if is_high_confidence_24h else 81.82
+        item["historical_validation_sample_size"] = 27 if is_high_confidence_24h else 22
         item["direction_signal_tier_reason"] = (
-            "historical validation supports this 12h Watch signal when predicted movement is at least 5 points"
+            "historical validation supports this 24h Watch signal when predicted movement is at least 6 points with strong whale pressure"
+            if is_high_confidence_24h
+            else "historical validation supports this 12h Watch signal when predicted movement is at least 5 points"
         )
         item["review_reasons"] = []
     elif signal_tier == "watch":
