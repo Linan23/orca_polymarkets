@@ -27,6 +27,8 @@ from data_platform.models import (
 )
 from data_platform.services.home_summary_snapshot import latest_home_summary_snapshot_payload, market_category_coverage_payload
 from data_platform.services.ml_reports import market_profile_ml_trend
+from data_platform.services.polymarket_live import LivePolymarketMarket
+from data_platform.services.polymarket_live import fetch_live_polymarket_market_by_slug
 from data_platform.services.research_analytics_snapshot import latest_research_analytics_view
 from data_platform.services.whale_event_sequences import whale_event_sequence_for_market
 from data_platform.services.whale_scoring import load_resolved_market_outcomes, load_resolved_user_performance
@@ -168,6 +170,148 @@ def _market_status_label(is_closed: bool | None) -> str:
     return "Closed" if bool(is_closed) else "Open"
 
 
+def _parse_payload_datetime(value: Any) -> datetime | None:
+    """Parse ISO datetimes that were already serialized into an API payload."""
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    text_value = str(value).strip()
+    if not text_value:
+        return None
+    if text_value.endswith("Z"):
+        text_value = f"{text_value[:-1]}+00:00"
+    try:
+        parsed = datetime.fromisoformat(text_value)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def _coerce_float(value: Any) -> float | None:
+    """Return a finite float from API payload values."""
+    if value is None or value == "":
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed == parsed and parsed not in (float("inf"), float("-inf")) else None
+
+
+def _clamp_pct(value: float) -> float:
+    """Clamp a percentage-point value to 0-100."""
+    return max(0.0, min(value, 100.0))
+
+
+def _direction_from_delta(delta: float) -> str:
+    """Return the dashboard movement direction for a percentage-point delta."""
+    if delta > 0.25:
+        return "up"
+    if delta < -0.25:
+        return "down"
+    return "flat"
+
+
+def _profile_side_label(contract: MarketContract) -> str | None:
+    """Infer the side label represented by a dashboard contract row."""
+    question = str(contract.question or "")
+    if question.endswith("]") and "[" in question:
+        candidate = question.rsplit("[", 1)[-1].rstrip("]").strip()
+        if candidate:
+            return candidate
+    return contract.outcome_a_label or contract.outcome_b_label
+
+
+def _live_market_payload(live_market: LivePolymarketMarket) -> dict[str, Any]:
+    """Serialize the live Polymarket fields used by the dashboard."""
+    return {
+        "source": "polymarket_gamma_live",
+        "market_url": live_market.market_url,
+        "event_slug": live_market.event_slug,
+        "question": live_market.question,
+        "outcomes": list(live_market.outcomes),
+        "outcome_probabilities": live_market.outcome_probabilities(),
+        "last_trade_price": live_market.last_trade_price,
+        "best_bid": live_market.best_bid,
+        "best_ask": live_market.best_ask,
+        "spread": live_market.spread,
+        "volume": live_market.volume,
+        "liquidity": live_market.liquidity,
+        "is_active": live_market.active,
+        "is_closed": live_market.closed,
+        "is_archived": live_market.archived,
+        "updated_at": live_market.updated_at.isoformat() if live_market.updated_at else None,
+        "closed_time": live_market.closed_time.isoformat() if live_market.closed_time else None,
+    }
+
+
+def _apply_live_polymarket_profile_overlay(
+    payload: dict[str, Any],
+    *,
+    contract: MarketContract,
+) -> tuple[dict[str, Any], LivePolymarketMarket | None]:
+    """Overlay live Gamma side probabilities on a market-profile payload."""
+    live_market = fetch_live_polymarket_market_by_slug(str(payload.get("market_slug") or contract.market_slug or ""))
+    if live_market is None:
+        return payload, None
+
+    side_label = _profile_side_label(contract)
+    live_price = live_market.price_for_side(side_label)
+    observed_at = live_market.observed_at
+    live_payload = _live_market_payload(live_market)
+
+    payload["market_url"] = live_market.market_url
+    if live_market.question:
+        payload["question"] = live_market.question
+    if live_price is not None:
+        payload["price"] = live_price
+        payload["odds"] = live_price
+    if live_market.volume is not None:
+        payload["volume"] = live_market.volume
+    payload["market_status_label"] = _market_status_label(live_market.closed)
+    payload["realtime_source"] = "polymarket_gamma_live"
+    if observed_at is not None:
+        payload["read_time"] = observed_at.isoformat()
+        payload["snapshot_time"] = observed_at.isoformat()
+    payload["selected_side_label"] = side_label
+    payload["primary_side_label"] = live_market.primary_side_label()
+    payload["outcome_probabilities"] = live_market.outcome_probabilities()
+    payload["realtime_payload"] = {
+        **(payload.get("realtime_payload") if isinstance(payload.get("realtime_payload"), dict) else {}),
+        **live_payload,
+        "selected_side_label": side_label,
+        "selected_side_probability": live_price,
+    }
+    return payload, live_market
+
+
+def _apply_profile_freshness(
+    payload: dict[str, Any],
+    *,
+    fallback_observed_at: datetime | None,
+    fallback_source: str,
+    last_successful_ingest_at: datetime | None,
+    live_market: LivePolymarketMarket | None,
+) -> dict[str, Any]:
+    """Attach freshness metadata, treating live closed markets as resolved snapshots."""
+    if live_market is not None and live_market.closed:
+        return {
+            "is_stale": False,
+            "stale_as_of": None,
+            "freshness_source": "polymarket_gamma_live.closed_market",
+            "last_successful_ingest_at": last_successful_ingest_at.isoformat() if last_successful_ingest_at else None,
+        }
+    observed_at = live_market.observed_at if live_market is not None else None
+    freshness_source = "polymarket_gamma_live.updated_at" if live_market is not None else fallback_source
+    return _freshness_metadata(
+        observed_at=observed_at or _parse_payload_datetime(payload.get("snapshot_time")) or fallback_observed_at,
+        threshold_minutes=settings.market_stale_minutes,
+        freshness_source=freshness_source,
+        last_successful_ingest_at=last_successful_ingest_at,
+    )
+
+
 def _whale_bias_label(yes_value: float | int | None, no_value: float | int | None) -> str:
     """Return a simple YES/NO lean label from comparable aggregate values."""
     yes_total = float(yes_value or 0)
@@ -272,7 +416,7 @@ def _serialize_market_profile(
     read_time = market.read_time if market and market.read_time is not None else contract.updated_at
     snapshot_time = profile.snapshot_time if profile and profile.snapshot_time is not None else contract.updated_at
 
-    return {
+    payload = {
         "dashboard_id": dashboard_id,
         "market_id": market_id,
         "market_contract_id": contract.market_contract_id,
@@ -303,6 +447,8 @@ def _serialize_market_profile(
             }
         ),
     }
+    payload, _ = _apply_live_polymarket_profile_overlay(payload, contract=contract)
+    return payload
 
 def _observed_trade_volume_for_market(session: Session, *, contract: MarketContract, market_slug: str | None) -> float | None:
     """Return observed market volume from ingested trades when source market volume is unavailable."""
@@ -709,6 +855,99 @@ def _latest_market_prediction_snapshot_payload(session: Session, market_slug: st
     }
 
 
+def _append_unique(values: list[str], value: str) -> list[str]:
+    """Append a warning/reason once while preserving order."""
+    if value not in values:
+        values.append(value)
+    return values
+
+
+def _apply_live_polymarket_prediction_overlay(
+    windows: dict[str, list[dict[str, Any]]],
+    *,
+    live_market: LivePolymarketMarket | None,
+) -> dict[str, list[dict[str, Any]]]:
+    """Re-anchor prediction rows to live Polymarket outcome prices."""
+    if live_market is None:
+        return windows
+
+    adjusted: dict[str, list[dict[str, Any]]] = {}
+    for window_name, rows in windows.items():
+        adjusted_rows: list[dict[str, Any]] = []
+        for row in rows or []:
+            item = dict(row)
+            side_label = str(item.get("side_label") or "")
+            live_price = live_market.price_for_side(side_label)
+            if live_price is None:
+                adjusted_rows.append(item)
+                continue
+
+            live_current_pct = round(_clamp_pct(live_price * 100.0), 4)
+            original_current = _coerce_float(item.get("current_odds_pct"))
+            original_future = _coerce_float(item.get("predicted_future_odds_pct"))
+            original_delta = _coerce_float(item.get("predicted_delta_pts"))
+            if original_delta is None and original_current is not None and original_future is not None:
+                original_delta = original_future - original_current
+            if original_delta is None:
+                original_delta = 0.0
+
+            if live_market.question:
+                item["question"] = f"{live_market.question} [{side_label}]" if side_label else live_market.question
+            item["current_odds_pct"] = live_current_pct
+            item["data_freshness_status"] = "polymarket_gamma_live_overlay"
+            item["prediction_timeline_source"] = "polymarket_gamma_live_current_odds"
+            item["live_polymarket_updated_at"] = live_market.updated_at.isoformat() if live_market.updated_at else None
+            item["live_polymarket_closed"] = bool(live_market.closed)
+
+            warnings = list(item.get("reliability_warnings") or [])
+            if live_market.closed:
+                _append_unique(warnings, "market_closed")
+                item["predicted_future_odds_pct"] = live_current_pct
+                item["predicted_delta_pts"] = 0.0
+                item["predicted_direction"] = "flat"
+                item["overlay_future_odds_pct"] = live_current_pct
+                item["overlay_delta_pts"] = 0.0
+                item["overlay_direction"] = "flat"
+                item["interval_low_future_odds_pct"] = live_current_pct
+                item["interval_high_future_odds_pct"] = live_current_pct
+                item["direction_signal_tier"] = "abstain"
+                item["direction_signal_tier_reason"] = "market is closed; live Polymarket outcome price is final"
+                item["direction_signal_predicted_direction"] = "flat"
+                item["direction_signal_confidence"] = 0.0
+                item["prediction_status"] = "market_closed_live_outcome"
+                item["display_tier"] = "review"
+                item["display_reasons"] = ["market_closed_live_outcome"]
+                item["review_reasons"] = ["market_closed"]
+            else:
+                predicted_future = round(_clamp_pct(live_current_pct + original_delta), 4)
+                adjusted_delta = round(predicted_future - live_current_pct, 4)
+                item["predicted_future_odds_pct"] = predicted_future
+                item["predicted_delta_pts"] = adjusted_delta
+                item["predicted_direction"] = _direction_from_delta(adjusted_delta)
+                item["overlay_future_odds_pct"] = predicted_future
+                item["overlay_delta_pts"] = adjusted_delta
+                item["overlay_direction"] = item["predicted_direction"]
+                original_low = _coerce_float(item.get("interval_low_future_odds_pct"))
+                original_high = _coerce_float(item.get("interval_high_future_odds_pct"))
+                if original_low is not None and original_high is not None and original_future is not None:
+                    item["interval_low_future_odds_pct"] = round(
+                        _clamp_pct(predicted_future - max(original_future - original_low, 0.0)),
+                        4,
+                    )
+                    item["interval_high_future_odds_pct"] = round(
+                        _clamp_pct(predicted_future + max(original_high - original_future, 0.0)),
+                        4,
+                    )
+                else:
+                    item["interval_low_future_odds_pct"] = predicted_future
+                    item["interval_high_future_odds_pct"] = predicted_future
+                _append_unique(warnings, "live_polymarket_price_overlay")
+            item["reliability_warnings"] = warnings
+            adjusted_rows.append(item)
+        adjusted[window_name] = adjusted_rows
+    return adjusted
+
+
 def _baseline_side_labels(contract: MarketContract | None) -> list[str]:
     """Return side labels for a current-odds ML fallback chart."""
     if contract is None:
@@ -805,6 +1044,7 @@ def _market_profile_ml_trend_payload(
     contract: MarketContract | None = None,
 ) -> dict[str, Any]:
     """Return server-shaped whale entry plus 12h/24h trend predictions."""
+    live_market = fetch_live_polymarket_market_by_slug(market_slug)
     persisted_prediction = _latest_market_prediction_snapshot_payload(session, market_slug)
     local_prediction = persisted_prediction or market_profile_ml_trend(market_slug)
     live_sequence = whale_event_sequence_for_market(
@@ -841,9 +1081,13 @@ def _market_profile_ml_trend_payload(
         windows = _current_odds_baseline_windows(contract=contract, market_slug=market_slug, anchor=anchor)
         baseline_available = any(windows.get(window_name) for window_name in ("12h", "24h"))
         chart_available = baseline_available
+    windows = _apply_live_polymarket_prediction_overlay(windows, live_market=live_market)
     model_prediction_available = bool(local_prediction.get("model_prediction_available", chart_available))
     base_prediction_status = str(local_prediction.get("prediction_status") or "")
-    if baseline_available:
+    if live_market is not None and live_market.closed and chart_available:
+        model_prediction_available = False
+        prediction_status = "market_closed_live_outcome"
+    elif baseline_available:
         model_prediction_available = False
         prediction_status = "current_odds_baseline_available"
     elif chart_available and not model_prediction_available and base_prediction_status:
@@ -867,6 +1111,10 @@ def _market_profile_ml_trend_payload(
         "server_ready_shape": True,
         "model_prediction_available": model_prediction_available,
         "prediction_status": prediction_status,
+        "outcome_probabilities": live_market.outcome_probabilities() if live_market is not None else None,
+        "primary_side_label": live_market.primary_side_label() if live_market is not None else None,
+        "live_polymarket_updated_at": live_market.updated_at.isoformat() if live_market and live_market.updated_at else None,
+        "live_polymarket_closed": bool(live_market.closed) if live_market is not None else None,
         "prediction_anchor": anchor,
         "live_whale_sequence": {
             "available": bool(live_sequence.get("available")),
@@ -2977,12 +3225,14 @@ def latest_market_profile(session: Session, market_slug: str) -> dict[str, Any] 
                 ),
             )
             payload["whale_market_focus"] = _normalize_whale_market_focus(session, payload["whale_market_focus"])
+            live_market = fetch_live_polymarket_market_by_slug(str(payload.get("market_slug") or market_slug_value or ""))
             payload.update(
-                _freshness_metadata(
-                    observed_at=profile.snapshot_time if profile and profile.snapshot_time else market.read_time,
-                    threshold_minutes=settings.market_stale_minutes,
-                    freshness_source="analytics.market_profile.snapshot_time",
+                _apply_profile_freshness(
+                    payload,
+                    fallback_observed_at=profile.snapshot_time if profile and profile.snapshot_time else market.read_time,
+                    fallback_source="analytics.market_profile.snapshot_time",
                     last_successful_ingest_at=_latest_successful_scrape_time(session),
+                    live_market=live_market,
                 )
             )
             return payload
@@ -3026,12 +3276,14 @@ def latest_market_profile(session: Session, market_slug: str) -> dict[str, Any] 
             ),
         )
         payload["whale_market_focus"] = _normalize_whale_market_focus(session, payload["whale_market_focus"])
+        live_market = fetch_live_polymarket_market_by_slug(str(payload.get("market_slug") or market_slug_value or ""))
         payload.update(
-            _freshness_metadata(
-                observed_at=profile.snapshot_time if profile and profile.snapshot_time else market.read_time,
-                threshold_minutes=settings.market_stale_minutes,
-                freshness_source="analytics.market_profile.snapshot_time",
+            _apply_profile_freshness(
+                payload,
+                fallback_observed_at=profile.snapshot_time if profile and profile.snapshot_time else market.read_time,
+                fallback_source="analytics.market_profile.snapshot_time",
                 last_successful_ingest_at=_latest_successful_scrape_time(session),
+                live_market=live_market,
             )
         )
         return payload
@@ -3069,16 +3321,18 @@ def latest_market_profile(session: Session, market_slug: str) -> dict[str, Any] 
         ),
     )
     payload["whale_market_focus"] = _normalize_whale_market_focus(session, payload["whale_market_focus"])
+    live_market = fetch_live_polymarket_market_by_slug(str(payload.get("market_slug") or contract.market_slug or ""))
     payload.update(
-        _freshness_metadata(
-            observed_at=latest_orderbook.snapshot_time if latest_orderbook is not None else contract.updated_at,
-            threshold_minutes=settings.market_stale_minutes,
-            freshness_source=(
+        _apply_profile_freshness(
+            payload,
+            fallback_observed_at=latest_orderbook.snapshot_time if latest_orderbook is not None else contract.updated_at,
+            fallback_source=(
                 "analytics.orderbook_snapshot.snapshot_time"
                 if latest_orderbook is not None
                 else "analytics.market_contract.updated_at"
             ),
             last_successful_ingest_at=_latest_successful_scrape_time(session),
+            live_market=live_market,
         )
     )
     return payload

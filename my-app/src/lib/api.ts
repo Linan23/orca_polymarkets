@@ -135,7 +135,14 @@ export type MarketProfileMlPredictionCase = {
   crypto_segment_direction_gate_tier?: string;
   crypto_segment_direction_gate_reason?: string;
   crypto_direction_source_selector_reason?: string;
+  live_polymarket_updated_at?: string | null;
+  live_polymarket_closed?: boolean | null;
   local_backtest_only?: boolean;
+};
+
+export type MarketOutcomeProbability = {
+  label: string;
+  probability: number | null;
 };
 
 export type MarketProfileWhaleEntryAnchor = {
@@ -179,6 +186,10 @@ export type MarketProfileMlPredictionTrend = {
   local_backtest_only?: boolean;
   server_ready_shape?: boolean;
   prediction_status?: string;
+  outcome_probabilities?: MarketOutcomeProbability[] | null;
+  primary_side_label?: string | null;
+  live_polymarket_updated_at?: string | null;
+  live_polymarket_closed?: boolean | null;
   prediction_anchor?: MarketProfileWhaleEntryAnchor;
   live_whale_sequence?: {
     available?: boolean;
@@ -311,6 +322,9 @@ export type MarketProfile = {
   trusted_whale_count: number;
   whale_market_focus: string | null;
   read_time: string | null;
+  selected_side_label?: string | null;
+  primary_side_label?: string | null;
+  outcome_probabilities?: MarketOutcomeProbability[] | null;
   market_status_label: "Open" | "Closed";
   realtime_source: string;
   snapshot_time: string | null;

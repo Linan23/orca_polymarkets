@@ -6,6 +6,7 @@ import {
   fetchMarketProfile,
   fetchMarketProfileMlTrend,
   fetchMarketProfileTopWhales,
+  type MarketOutcomeProbability,
   type MarketProfileMlPredictionCase,
   type MarketProfileMlPredictionTrend,
   type MarketProfileTopWhale,
@@ -61,12 +62,6 @@ function formatLabel(value: string | null | undefined) {
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
-function formatOpposingPercent(value: number | null) {
-  if (value === null) return "--";
-  const normalized = Math.min(Math.max(value, 0), 1);
-  return `${Math.round((1 - normalized) * 100)}%`;
-}
-
 function formatCurrency(value: number | null) {
   if (value === null) return "--";
   return `$${value.toLocaleString()}`;
@@ -95,6 +90,12 @@ function profileTrendCases(trend: MarketProfileMlPredictionTrend | undefined) {
   );
 }
 
+function normalizeSideLabel(value: string | null | undefined) {
+  return String(value ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
+}
+
 function windowHours(windowName: string) {
   return windowName === "12h" ? 12 : 24;
 }
@@ -109,7 +110,14 @@ function predictionRank(item: MarketProfileMlPredictionCase) {
   );
 }
 
-function primaryTrendCases(cases: MarketProfileMlPredictionCase[]) {
+function primaryTrendCases(cases: MarketProfileMlPredictionCase[], preferredSideLabel?: string | null) {
+  const normalizedPreferred = normalizeSideLabel(preferredSideLabel);
+  const preferredCases = normalizedPreferred
+    ? cases.filter((item) => normalizeSideLabel(item.side_label) === normalizedPreferred)
+    : [];
+  if (preferredCases.length > 0) {
+    return preferredCases.sort((left, right) => windowHours(left.window) - windowHours(right.window));
+  }
   const primary = [...cases].sort((left, right) => predictionRank(left) - predictionRank(right))[0];
   if (!primary) return [];
   return cases
@@ -161,6 +169,20 @@ function confidenceTag(item: MarketProfileMlPredictionCase) {
 
 function whaleAnchorValue(item: MarketProfileMlPredictionCase, key: string) {
   return item.whale_anchor?.[key];
+}
+
+function outcomeProbabilityRows(
+  outcomes: MarketOutcomeProbability[] | null | undefined,
+  price: number | null,
+  odds: number | null,
+) {
+  const liveRows = (outcomes ?? []).filter((item) => item.label && typeof item.probability === "number");
+  if (liveRows.length > 0) return liveRows;
+  const baseline = odds ?? price;
+  return [
+    { label: "Yes", probability: price },
+    { label: "No", probability: baseline === null ? null : Math.min(Math.max(1 - baseline, 0), 1) },
+  ];
 }
 
 function LiveWhaleEntrySummary({ trend }: { trend: MarketProfileMlPredictionTrend | undefined }) {
@@ -353,7 +375,13 @@ function TopMarketWhalesPanel({ marketSlug }: { marketSlug: string }) {
   );
 }
 
-function MarketMlPredictionTrendPanel({ marketSlug }: { marketSlug: string }) {
+function MarketMlPredictionTrendPanel({
+  marketSlug,
+  preferredSideLabel,
+}: {
+  marketSlug: string;
+  preferredSideLabel?: string | null;
+}) {
   const loadTrend = useCallback(
     () => (marketSlug ? fetchMarketProfileMlTrend(marketSlug) : Promise.resolve(emptyMlTrend(marketSlug))),
     [marketSlug],
@@ -361,7 +389,7 @@ function MarketMlPredictionTrendPanel({ marketSlug }: { marketSlug: string }) {
   const { data: trendPayload, loading: trendLoading, error: trendError } = useApiData(loadTrend);
   const trend = trendPayload ?? undefined;
   const cases = profileTrendCases(trend);
-  const primaryCases = primaryTrendCases(cases);
+  const primaryCases = primaryTrendCases(cases, trend?.primary_side_label ?? preferredSideLabel);
   const anchor = trend?.prediction_anchor;
   const [activeTab, setActiveTab] = useState<"trend" | "whales">("trend");
 
@@ -532,8 +560,7 @@ export default function MarketProfile() {
         <>
           <section className="market-summary-card">
             <div className="market-summary-left">
-              <p className="summary-label">Current Yes Probability</p>
-        
+              <p className="summary-label">Current Market Probability</p>
 
               <div className="summary-stats">
                 <div className="stat-chip">
@@ -559,20 +586,24 @@ export default function MarketProfile() {
               </div>
             </div>
 
-<div className="market-summary-right">
-  <button className="trade-btn trade-btn-yes" type="button">
-    <span className="trade-label">Yes Probability</span>
-    <strong>{formatPercent(data.price)}</strong>
-  </button>
-
-  <button className="trade-btn trade-btn-no" type="button">
-    <span className="trade-label">No Probability</span>
-    <strong>{formatOpposingPercent(data.odds ?? data.price)}</strong>
-  </button>
-</div>
+            <div className="market-summary-right">
+              {outcomeProbabilityRows(data.outcome_probabilities, data.price, data.odds).map((outcome, index) => (
+                <button
+                  className={`trade-btn ${index === 0 ? "trade-btn-yes" : "trade-btn-no"}`}
+                  type="button"
+                  key={outcome.label}
+                >
+                  <span className="trade-label">{formatLabel(outcome.label)} Probability</span>
+                  <strong>{formatPercent(outcome.probability)}</strong>
+                </button>
+              ))}
+            </div>
           </section>
 
-          <MarketMlPredictionTrendPanel marketSlug={data.market_slug} />
+          <MarketMlPredictionTrendPanel
+            marketSlug={data.market_slug}
+            preferredSideLabel={data.primary_side_label ?? data.selected_side_label}
+          />
         </>
       )}
     </div>
