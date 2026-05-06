@@ -382,6 +382,24 @@ def _expected_error_for_score(window_model: dict[str, Any], score: float) -> flo
     return _safe_float(value) if value is not None else None
 
 
+def _bin_accuracy_for_score(window_model: dict[str, Any], score: float) -> float | None:
+    """Return empirical validation accuracy for the score bucket, as a 0-100 percentage."""
+    for bin_row in window_model.get("error_bins") or []:
+        low = _safe_float(bin_row.get("min_confidence"))
+        high = _safe_float(bin_row.get("max_confidence"), 1.0)
+        if low <= score < high or (score == 1.0 and high == 1.0):
+            value = bin_row.get("direction_match_pct")
+            return _safe_float(value) if value is not None else None
+    return None
+
+
+def _threshold_precision_pct(thresholds: dict[str, Any], tier: str) -> float | None:
+    """Return holdout precision for a selected tier threshold, as a 0-100 percentage."""
+    threshold_detail = thresholds.get(tier) if isinstance(thresholds.get(tier), dict) else {}
+    precision = threshold_detail.get("precision")
+    return round(100.0 * _safe_float(precision), 2) if precision is not None else None
+
+
 def apply_trained_confidence(payload: dict[str, Any], artifact: dict[str, Any] | None) -> dict[str, Any]:
     """Annotate one prediction payload with trained confidence when an artifact is available."""
     if not artifact:
@@ -412,6 +430,7 @@ def apply_trained_confidence(payload: dict[str, Any], artifact: dict[str, Any] |
     watch_threshold = _safe_float((thresholds.get("watch") or {}).get("threshold"), 0.7)
     strong_threshold = _safe_float((thresholds.get("strong") or {}).get("threshold"), 0.8)
     expected_error = _expected_error_for_score(window_model, confidence)
+    bin_accuracy_pct = _bin_accuracy_for_score(window_model, confidence)
     metrics = window_model.get("metrics") if isinstance(window_model.get("metrics"), dict) else {}
     predicted_direction = str(payload.get("predicted_direction") or "").lower()
 
@@ -421,6 +440,8 @@ def apply_trained_confidence(payload: dict[str, Any], artifact: dict[str, Any] |
     payload["trained_confidence_trained_at"] = artifact.get("trained_at")
     payload["trained_confidence_score"] = round(confidence, 4)
     payload["trained_confidence_pct"] = round(confidence * 100.0, 2)
+    payload["model_confidence_score"] = round(confidence, 4)
+    payload["model_confidence_pct"] = round(confidence * 100.0, 2)
     payload["confidence_training_window_rows"] = window_model.get("row_count")
     payload["confidence_holdout_direction_match_pct"] = metrics.get("holdout_direction_match_pct")
     payload["confidence_calibration_ece_pct"] = metrics.get("holdout_ece_pct")
@@ -435,6 +456,8 @@ def apply_trained_confidence(payload: dict[str, Any], artifact: dict[str, Any] |
         payload["display_tier"] = "review"
         payload["historical_validation_tier"] = "trained_flat_signal"
         payload["historical_validation_reason"] = "trained confidence is only used for non-flat up/down forecasts"
+        display_accuracy_pct = bin_accuracy_pct
+        accuracy_source = "validation_bucket_accuracy"
         if "flat_prediction" not in warnings:
             warnings.append("flat_prediction")
     elif confidence >= strong_threshold:
@@ -446,6 +469,8 @@ def apply_trained_confidence(payload: dict[str, Any], artifact: dict[str, Any] |
         review_reasons = []
         if "trained_confidence_model" not in display_reasons:
             display_reasons.append("trained_confidence_model")
+        display_accuracy_pct = _threshold_precision_pct(thresholds, "strong") or bin_accuracy_pct
+        accuracy_source = "strong_threshold_holdout_precision"
     elif confidence >= watch_threshold:
         payload["direction_signal_tier"] = "watch"
         payload["display_tier"] = "show"
@@ -455,6 +480,8 @@ def apply_trained_confidence(payload: dict[str, Any], artifact: dict[str, Any] |
         review_reasons = []
         if "trained_confidence_model" not in display_reasons:
             display_reasons.append("trained_confidence_model")
+        display_accuracy_pct = _threshold_precision_pct(thresholds, "watch") or bin_accuracy_pct
+        accuracy_source = "watch_threshold_holdout_precision"
     else:
         payload["direction_signal_tier"] = "abstain"
         payload["display_tier"] = "review"
@@ -464,8 +491,16 @@ def apply_trained_confidence(payload: dict[str, Any], artifact: dict[str, Any] |
         if "trained_low_confidence" not in warnings:
             warnings.append("trained_low_confidence")
         review_reasons = ["trained_low_confidence"]
+        display_accuracy_pct = bin_accuracy_pct
+        accuracy_source = "validation_bucket_accuracy"
 
-    payload["historical_validation_direction_match_pct"] = round(confidence * 100.0, 2)
+    if display_accuracy_pct is None:
+        display_accuracy_pct = metrics.get("holdout_direction_match_pct")
+        accuracy_source = "window_holdout_direction_match"
+    payload["validation_accuracy_pct"] = round(_safe_float(display_accuracy_pct), 2) if display_accuracy_pct is not None else None
+    payload["direction_signal_accuracy_pct"] = payload["validation_accuracy_pct"]
+    payload["accuracy_source"] = accuracy_source
+    payload["historical_validation_direction_match_pct"] = payload["validation_accuracy_pct"]
     payload["historical_validation_sample_size"] = window_model.get("row_count")
     payload["reliability_warnings"] = warnings
     payload["display_reasons"] = display_reasons

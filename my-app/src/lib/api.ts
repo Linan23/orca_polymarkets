@@ -112,6 +112,10 @@ export type MarketProfileMlPredictionCase = {
   historical_validation_reason?: string | null;
   historical_validation_direction_match_pct?: number | null;
   historical_validation_sample_size?: number | null;
+  validation_accuracy_pct?: number | null;
+  direction_signal_accuracy_pct?: number | null;
+  model_confidence_pct?: number | null;
+  accuracy_source?: string | null;
   direction_signal_predicted_direction: string;
   direction_signal_confidence: number;
   reliability_warnings: string[];

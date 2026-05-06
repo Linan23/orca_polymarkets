@@ -246,7 +246,9 @@ def _apply_market_profile_reliability_policy(item: dict[str, Any]) -> None:
         score = _coerce_float(item.get("trained_confidence_score"))
         if score is not None:
             item["direction_signal_confidence"] = round(score, 4)
-            item["historical_validation_direction_match_pct"] = round(score * 100.0, 2)
+        accuracy_pct = _coerce_float(item.get("validation_accuracy_pct") or item.get("direction_signal_accuracy_pct"))
+        if accuracy_pct is not None:
+            item["historical_validation_direction_match_pct"] = round(accuracy_pct, 2)
         if item.get("confidence_training_window_rows") is not None:
             item["historical_validation_sample_size"] = item.get("confidence_training_window_rows")
         warnings = list(item.get("reliability_warnings") or [])

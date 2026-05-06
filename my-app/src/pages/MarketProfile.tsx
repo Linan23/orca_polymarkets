@@ -138,9 +138,22 @@ function forecastDirectionTag(item: MarketProfileMlPredictionCase) {
 }
 
 function historicalValidationTag(item: MarketProfileMlPredictionCase) {
+  const accuracyPct =
+    item.validation_accuracy_pct ??
+    item.direction_signal_accuracy_pct ??
+    item.historical_validation_direction_match_pct;
+  if (
+    item.historical_validation_tier === "trained_strong_confidence" ||
+    item.historical_validation_tier === "trained_watch_confidence"
+  ) {
+    return typeof accuracyPct === "number" ? `${accuracyPct.toFixed(1)}%` : "Pending";
+  }
+  if (item.historical_validation_tier === "trained_low_confidence") {
+    return typeof accuracyPct === "number" ? `Low ${accuracyPct.toFixed(1)}%` : "Low validation";
+  }
   if (item.historical_validation_tier === "high_confidence_historical_slice") {
     const pct = item.historical_validation_direction_match_pct;
-    return typeof pct === "number" ? `Past match ${pct.toFixed(1)}%` : "Past match available";
+    return typeof pct === "number" ? `${pct.toFixed(1)}%` : "Past match available";
   }
   if (item.historical_validation_tier === "strong_model_signal") return "High confidence";
   if (item.historical_validation_tier === "review_only") return "Needs review";
@@ -457,7 +470,7 @@ function MarketPredictionOutcomeSummary({ cases }: { cases: MarketProfileMlPredi
             </div>
             <div className="market-ml-outcome-footer">
               <span>Direction: {forecastDirectionTag(item)}</span>
-              <span>Confidence: {historicalValidationTag(item)}</span>
+              <span>Accuracy: {historicalValidationTag(item)}</span>
               <span>Odds change: {formatSignedPoints(comparison?.model_predicted_delta_pts ?? modelDelta(item))}</span>
               {hasValidation && <span>Past error: {formatPointMagnitude(comparison?.prediction_absolute_error_pts ?? item.prediction_absolute_error_pts)}</span>}
             </div>
