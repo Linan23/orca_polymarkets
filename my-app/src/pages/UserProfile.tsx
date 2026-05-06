@@ -498,7 +498,7 @@ export default function UserProfile() {
 
                       <article className="tab-card chart-card chart-card-full">
                         <h3>Trading Hours</h3>
-                        <p className="tab-copy">Hourly trade count in UTC, with the most active hour highlighted.</p>
+                        <p className="tab-copy">Top 5 active trading hours in UTC, ranked by trade count.</p>
                         <HourlyActivityChart buckets={insights.hourly_activity_utc} />
                       </article>
                     </div>

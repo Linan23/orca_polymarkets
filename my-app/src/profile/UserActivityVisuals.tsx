@@ -114,18 +114,23 @@ export function HourlyActivityChart({ buckets }: { buckets: HourlyActivityBucket
   if (maxTrades === 0) {
     return <div className="empty-chart-state">No hourly activity in this timeframe.</div>;
   }
-  const peakHours = buckets
-    .filter((bucket) => bucket.trade_count === maxTrades)
-    .map((bucket) => `${bucket.hour_utc.toString().padStart(2, "0")}:00 UTC`);
-  const peakLabel = peakHours.join(", ");
+  const topBuckets = [...buckets]
+    .filter((bucket) => bucket.trade_count > 0)
+    .sort((first, second) => {
+      if (second.trade_count !== first.trade_count) return second.trade_count - first.trade_count;
+      return first.hour_utc - second.hour_utc;
+    })
+    .slice(0, 5);
+  const topMaxTrades = Math.max(...topBuckets.map((bucket) => bucket.trade_count), 0);
+  const peakLabel = `${topBuckets[0].hour_utc.toString().padStart(2, "0")}:00 UTC`;
 
   return (
     <div className="histogram">
-      <div className="histogram-bars" aria-label="Hourly activity histogram in UTC">
-        {buckets.map((bucket) => {
-          const height = maxTrades > 0 ? Math.max((bucket.trade_count / maxTrades) * 100, bucket.trade_count > 0 ? 8 : 0) : 0;
+      <div className="histogram-bars top-hours" aria-label="Top 5 active trading hours in UTC">
+        {topBuckets.map((bucket, index) => {
+          const height = topMaxTrades > 0 ? Math.max((bucket.trade_count / topMaxTrades) * 100, 12) : 0;
           const hourLabel = `${bucket.hour_utc.toString().padStart(2, "0")}:00 UTC`;
-          const isPeak = bucket.trade_count === maxTrades;
+          const isPeak = index === 0;
           return (
             <div key={bucket.hour_utc} className={`histogram-column${isPeak ? " peak" : ""}`}>
               <div
@@ -139,7 +144,7 @@ export function HourlyActivityChart({ buckets }: { buckets: HourlyActivityBucket
           );
         })}
       </div>
-      <p className="chart-footnote">Most active: {peakLabel}. Activity hours are shown in UTC.</p>
+      <p className="chart-footnote">Top 5 active trading hours. Most active: {peakLabel}. Activity hours are shown in UTC.</p>
     </div>
   );
 }

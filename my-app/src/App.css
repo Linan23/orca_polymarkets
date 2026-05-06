@@ -2260,6 +2260,11 @@ a {
   padding: 20px 0 0;
 }
 
+.histogram-bars.top-hours {
+  grid-template-columns: repeat(5, minmax(76px, 1fr));
+  gap: 18px;
+}
+
 .histogram-column {
   display: grid;
   gap: 8px;
@@ -2282,6 +2287,11 @@ a {
 .histogram-label {
   font-size: 0.74rem;
   color: rgba(191, 219, 254, 0.68);
+}
+
+.histogram-bars.top-hours .histogram-label {
+  font-size: 0.82rem;
+  font-weight: 700;
 }
 
 .chart-footnote {
