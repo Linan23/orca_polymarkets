@@ -3429,10 +3429,50 @@ a {
 }
 
 .coverage-mui-pie-shell {
+  position: relative;
   width: min(240px, 100%);
   min-height: 220px;
   margin: 0 auto;
   overflow: visible;
+}
+
+.coverage-pointer-tooltip {
+  position: absolute;
+  z-index: 2147483647;
+  display: grid;
+  gap: 2px;
+  min-width: 118px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: rgba(2, 6, 23, 0.96);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.38);
+  color: #f8fafc;
+  pointer-events: none;
+  transform: translate(12px, 10px);
+}
+
+.coverage-pointer-tooltip strong,
+.coverage-pointer-tooltip span,
+.coverage-pointer-tooltip small {
+  color: #f8fafc;
+  line-height: 1.15;
+  white-space: nowrap;
+}
+
+.coverage-pointer-tooltip strong {
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.coverage-pointer-tooltip span {
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.coverage-pointer-tooltip small {
+  color: rgba(226, 232, 240, 0.72);
+  font-size: 0.72rem;
 }
 
 .coverage-mui-pie {
@@ -4062,10 +4102,17 @@ font-weight:700;
 }
 
 .summary-grid-three .summary-card {
+  position: relative;
   grid-column: auto !important;
+  z-index: 1;
   width: 100%;
   min-width: 0;
   min-height: 285px;
+  overflow: visible;
+}
+
+.summary-grid-three .summary-card:has(.coverage-mui-pie-shell:hover) {
+  z-index: 20;
 }
 
 /* Make the donut cards fit inside each third */

@@ -1,5 +1,5 @@
 import { PieChart } from "@mui/x-charts/PieChart";
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import { useApiData } from "../hooks/useApiData";
 import { fetchHomeSummary, type HomeSummary } from "../lib/api";
 
@@ -92,6 +92,11 @@ function CoveragePieChart({
   total: number;
   totalLabel: string;
 }) {
+  const [tooltip, setTooltip] = useState<{
+    dataIndex: number;
+    x: number;
+    y: number;
+  } | null>(null);
   const activeRows = rows.filter((row) => row.value > 0);
   const pieData = activeRows.map((row, index) => ({
     id: index,
@@ -99,11 +104,39 @@ function CoveragePieChart({
     label: row.name,
     color: COVERAGE_COLORS[index % COVERAGE_COLORS.length],
   }));
+  const tooltipRow = tooltip ? activeRows[tooltip.dataIndex] : null;
+  const tooltipPercent =
+    tooltipRow && total > 0 ? (tooltipRow.value / total) * 100 : 0;
 
   return (
     <div className="coverage-pie-content">
       {activeRows.length > 0 ? (
-        <div className="coverage-mui-pie-shell">
+        <div
+          className="coverage-mui-pie-shell"
+          onPointerMove={(event) => {
+            const target = event.target;
+            if (!(target instanceof Element)) {
+              setTooltip(null);
+              return;
+            }
+
+            const arc = target.closest(".MuiPieArc-root[data-index]");
+            const dataIndex = arc ? Number(arc.getAttribute("data-index")) : Number.NaN;
+
+            if (!Number.isInteger(dataIndex) || dataIndex < 0 || dataIndex >= activeRows.length) {
+              setTooltip(null);
+              return;
+            }
+
+            const bounds = event.currentTarget.getBoundingClientRect();
+            setTooltip({
+              dataIndex,
+              x: event.clientX - bounds.left,
+              y: event.clientY - bounds.top,
+            });
+          }}
+          onPointerLeave={() => setTooltip(null)}
+        >
           <PieChart
             className="coverage-mui-pie"
             series={[
@@ -125,21 +158,23 @@ function CoveragePieChart({
             margin={{ top: 10, bottom: 10, left: 10, right: 10 }}
             slotProps={{
               tooltip: {
-                trigger: "item",
-                anchor: "pointer",
-                position: "right",
-                modifiers: [
-                  {
-                    name: "offset",
-                    options: {
-                      offset: [8, 8],
-                    },
-                  },
-                ],
-                sx: { zIndex: 99999 },
+                trigger: "none",
               },
             }}
           />
+          {tooltipRow && tooltip && (
+            <div
+              className="coverage-pointer-tooltip"
+              style={{
+                left: tooltip.x,
+                top: tooltip.y,
+              }}
+            >
+              <strong>{tooltipRow.name}</strong>
+              <span>{formatCompact(tooltipRow.value)}</span>
+              <small>{formatPercent(tooltipPercent)}</small>
+            </div>
+          )}
         </div>
       ) : (
         <div className="coverage-empty-state">
