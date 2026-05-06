@@ -338,7 +338,7 @@ function MarketPredictionTrendChart({ cases }: { cases: MarketProfileMlPredictio
     const x = xFor(hour);
     const isRightEdge = hour >= 22;
     const isLeftEdge = hour <= 2;
-    const y = Math.min(Math.max(yFor(odds) + offset, top + 12), plotBottom - 8);
+    const y = Math.min(Math.max(yFor(odds) + offset, top + 18), plotBottom - 14);
     return {
       x: isRightEdge ? x - 8 : isLeftEdge ? x + 8 : x,
       y,
@@ -380,7 +380,7 @@ function MarketPredictionTrendChart({ cases }: { cases: MarketProfileMlPredictio
         {predictedPoints.map((point) => (
           <g key={`${point.label}-${point.hour}`}>
             <circle cx={xFor(point.hour)} cy={yFor(point.odds)} r={point.hour === 0 ? 4 : 6} />
-            <text {...pointTextProps(point.hour, point.odds, -8)}>
+            <text {...pointTextProps(point.hour, point.odds, -18)}>
               {formatOddsPercent(point.odds)}
             </text>
           </g>
@@ -388,7 +388,7 @@ function MarketPredictionTrendChart({ cases }: { cases: MarketProfileMlPredictio
         {actualPoints.map((point) => (
           <g key={`actual-${point.label}-${point.hour}`}>
             <circle className="market-ml-chart-actual-dot" cx={xFor(point.hour)} cy={yFor(point.odds)} r={5} />
-            <text {...pointTextProps(point.hour, point.odds, 16)}>
+            <text {...pointTextProps(point.hour, point.odds, 24)}>
               {formatOddsPercent(point.odds)}
             </text>
           </g>
