@@ -2177,6 +2177,11 @@ a {
   color: #f8fafc;
 }
 
+.market-category-pie text,
+.trading-hours-chart text {
+  fill: #f8fafc !important;
+}
+
 .market-category-pie .MuiChartsSurface-root {
   overflow: visible;
 }
@@ -2265,6 +2270,13 @@ a {
 .MuiChartsTooltip-paper {
   background: rgba(2, 6, 23, 0.94) !important;
   border: 1px solid rgba(148, 163, 184, 0.2);
+  color: #f8fafc !important;
+}
+
+.MuiChartsTooltip-root,
+.MuiChartsTooltip-root *,
+.MuiChartsTooltip-paper,
+.MuiChartsTooltip-paper * {
   color: #f8fafc !important;
 }
 
