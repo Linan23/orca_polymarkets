@@ -4891,13 +4891,13 @@ font-weight:700;
 }
 
 .market-ml-probability-tile.is-yes {
-  border-color: rgba(34, 197, 94, 0.24);
-  background: rgba(22, 101, 52, 0.18);
+  border-color: rgba(34, 197, 94, 0.46);
+  background: rgba(22, 163, 74, 0.28);
 }
 
 .market-ml-probability-tile.is-no {
-  border-color: rgba(248, 113, 113, 0.24);
-  background: rgba(127, 29, 29, 0.14);
+  border-color: rgba(248, 113, 113, 0.48);
+  background: rgba(220, 38, 38, 0.24);
 }
 
 .market-ml-probability-tile span,
