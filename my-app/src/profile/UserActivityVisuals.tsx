@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { PieChart } from "@mui/x-charts/PieChart";
 import {
   type HourlyActivityBucket,
   type OutcomeBias,
@@ -17,68 +17,45 @@ function formatPercent(value: number) {
 }
 
 export function TagExposureDonut({ slices }: { slices: TagExposureSlice[] }) {
-  const [hoveredLabel, setHoveredLabel] = useState<string | null>(null);
   const activeSlices = slices.filter((slice) => slice.percentage > 0);
   if (activeSlices.length === 0) {
     return <div className="empty-chart-state">No market-category activity for this timeframe.</div>;
   }
-  const displayedSlice = activeSlices.find((slice) => slice.label === hoveredLabel) ?? activeSlices[0];
-
-  const segments = activeSlices.reduce<Array<TagExposureSlice & { strokeDashoffset: number }>>((items, slice) => {
-    const currentOffset = items.reduce((sum, item) => sum + item.percentage * 100, 0);
-    items.push({
-      ...slice,
-      strokeDashoffset: -currentOffset,
-    });
-    return items;
-  }, []);
+  const pieData = activeSlices.map((slice, index) => ({
+    id: index,
+    value: Number((slice.percentage * 100).toFixed(4)),
+    label: slice.label,
+    color: DONUT_COLORS[index % DONUT_COLORS.length],
+  }));
 
   return (
-    <div className="donut-layout">
-      <div className="donut-shell">
-        <svg viewBox="0 0 36 36" className="donut-chart" aria-label="Market category trade mix donut chart">
-          <circle cx="18" cy="18" r="15.915" className="donut-track" />
-          <g transform="rotate(-90 18 18)">
-            {segments.map((slice, index) => {
-              const dash = slice.percentage * 100;
-              const isActive = displayedSlice.label === slice.label;
-              const isMuted = hoveredLabel !== null && !isActive;
-              return (
-                <circle
-                  key={slice.label}
-                  cx="18"
-                  cy="18"
-                  r="15.915"
-                  className={`donut-segment${isActive ? " is-active" : ""}${isMuted ? " is-muted" : ""}`}
-                  stroke={DONUT_COLORS[index % DONUT_COLORS.length]}
-                  strokeDasharray={`${dash} ${100 - dash}`}
-                  strokeDashoffset={slice.strokeDashoffset}
-                  tabIndex={0}
-                  aria-label={`${slice.label}: ${formatPercent(slice.percentage)} of trades, ${slice.trade_count} trades`}
-                  onFocus={() => setHoveredLabel(slice.label)}
-                  onBlur={() => setHoveredLabel(null)}
-                  onMouseEnter={() => setHoveredLabel(slice.label)}
-                  onMouseLeave={() => setHoveredLabel(null)}
-                />
-              );
-            })}
-          </g>
-        </svg>
-        <div className="donut-center">
-          <strong>{formatPercent(displayedSlice.percentage)}</strong>
-          <span>{displayedSlice.label}</span>
-          <small>{displayedSlice.trade_count} trades</small>
-        </div>
+    <div className="market-category-pie-layout">
+      <div className="market-category-pie-shell">
+        <PieChart
+          className="market-category-pie"
+          series={[
+            {
+              data: pieData,
+              arcLabel: (item) => `${Math.round(item.value)}%`,
+              arcLabelMinAngle: 24,
+              cornerRadius: 3,
+              paddingAngle: 1,
+              valueFormatter: (item) => {
+                const slice = activeSlices[Number(item.id)];
+                return `${item.value.toFixed(1)}% · ${slice?.trade_count ?? 0} trades`;
+              },
+            },
+          ]}
+          width={260}
+          height={240}
+          hideLegend
+          margin={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        />
       </div>
 
       <div className="chart-legend">
         {activeSlices.map((slice, index) => (
-          <div
-            key={slice.label}
-            className={`chart-legend-row${displayedSlice.label === slice.label ? " is-active" : ""}`}
-            onMouseEnter={() => setHoveredLabel(slice.label)}
-            onMouseLeave={() => setHoveredLabel(null)}
-          >
+          <div key={slice.label} className="chart-legend-row">
             <span className="chart-swatch" style={{ backgroundColor: DONUT_COLORS[index % DONUT_COLORS.length] }} />
             <div className="chart-legend-main">
               <strong>{slice.label}</strong>

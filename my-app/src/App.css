@@ -2160,6 +2160,33 @@ a {
   gap: 12px;
 }
 
+.market-category-pie-layout {
+  display: grid;
+  grid-template-columns: minmax(220px, 260px) minmax(0, 1fr);
+  gap: 22px;
+  align-items: center;
+}
+
+.market-category-pie-shell {
+  width: min(260px, 100%);
+  min-height: 240px;
+  margin: 0 auto;
+}
+
+.market-category-pie {
+  color: #f8fafc;
+}
+
+.market-category-pie .MuiChartsSurface-root {
+  overflow: visible;
+}
+
+.market-category-pie .MuiPieArcLabel-root {
+  fill: #f8fafc;
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
 .chart-legend-row {
   display: flex;
   align-items: center;
@@ -5172,4 +5199,3 @@ font-weight:700;
 
   color: #f5f7fb;
 }
-
