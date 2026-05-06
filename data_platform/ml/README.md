@@ -129,6 +129,8 @@ Train only the closed-market confidence artifact used by market profiles:
 
 The confidence artifact is trained from `analytics.ml_market_prediction_validation` joined to saved prediction snapshots. The split is chronological, so newer validated markets are held out and the model does not learn from future outcomes when scoring older predictions.
 
+The slower analytics refresh loop now runs the same validation -> confidence training -> snapshot generation sequence when ML validation and snapshots are both enabled.
+
 Train the cold-start regime with its dedicated feature path:
 
 ```bash

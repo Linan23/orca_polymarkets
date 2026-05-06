@@ -84,7 +84,25 @@ def main() -> int:
             ("build_home_summary_snapshot", [py, "build_home_summary_snapshot.py"]),
             ("build_research_analytics_snapshot", [py, "build_research_analytics_snapshot.py"]),
         ]
-        if not args.skip_ml_prediction_snapshots:
+        if not args.skip_ml_prediction_snapshots and not args.skip_ml_prediction_validation:
+            commands.append(
+                (
+                    "run_ml_prediction_confidence_cycle",
+                    [
+                        py,
+                        "data_platform/jobs/run_ml_prediction_confidence_cycle.py",
+                        "--platform-name",
+                        args.ml_prediction_snapshot_platform,
+                        "--validation-limit",
+                        str(int(args.ml_prediction_validation_limit)),
+                        "--target-tolerance-minutes",
+                        str(int(args.ml_prediction_validation_target_tolerance_minutes)),
+                        "--snapshot-limit",
+                        str(int(args.ml_prediction_snapshot_limit)),
+                    ],
+                )
+            )
+        elif not args.skip_ml_prediction_snapshots:
             commands.append(
                 (
                     "generate_ml_market_prediction_snapshots",
@@ -98,7 +116,7 @@ def main() -> int:
                     ],
                 )
             )
-        if not args.skip_ml_prediction_validation:
+        if not args.skip_ml_prediction_validation and args.skip_ml_prediction_snapshots:
             commands.append(
                 (
                     "validate_ml_market_predictions",
