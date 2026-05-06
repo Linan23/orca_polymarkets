@@ -281,7 +281,7 @@ function CurrentMarketProbabilityPanel({
 function LiveWhaleEntrySummary({ trend }: { trend: MarketProfileMlPredictionTrend | undefined }) {
   const anchor = trend?.prediction_anchor;
   const sequence = trend?.live_whale_sequence;
-  if (!anchor?.available && !sequence?.available) return null;
+  if (!anchor?.available) return null;
 
   return (
     <div className="market-ml-live-entry">
@@ -361,16 +361,18 @@ function MarketPredictionTrendChart({ cases }: { cases: MarketProfileMlPredictio
   );
   const rawMin = Math.min(...values);
   const rawMax = Math.max(...values);
-  const paddedMin = Math.max(0, Math.floor(rawMin - 8));
-  const paddedMax = Math.min(100, Math.ceil(rawMax + 8));
-  const minOdds = paddedMax - paddedMin < 20 ? Math.max(0, paddedMin - 10) : paddedMin;
-  const maxOdds = paddedMax - paddedMin < 20 ? Math.min(100, paddedMax + 10) : paddedMax;
+  const paddedMin = Math.max(0, Math.floor(rawMin - 4));
+  const paddedMax = Math.min(100, Math.ceil(rawMax + 4));
+  const minRange = 12;
+  const midpoint = (paddedMin + paddedMax) / 2;
+  const minOdds = paddedMax - paddedMin < minRange ? Math.max(0, Math.floor(midpoint - minRange / 2)) : paddedMin;
+  const maxOdds = paddedMax - paddedMin < minRange ? Math.min(100, Math.ceil(midpoint + minRange / 2)) : paddedMax;
   const width = 520;
   const height = 230;
-  const left = 46;
-  const right = 32;
-  const top = 24;
-  const bottom = 38;
+  const left = 42;
+  const right = 22;
+  const top = 16;
+  const bottom = 30;
   const plotWidth = width - left - right;
   const plotHeight = height - top - bottom;
   const yFor = (odds: number) => top + ((maxOdds - odds) / Math.max(maxOdds - minOdds, 1)) * plotHeight;
