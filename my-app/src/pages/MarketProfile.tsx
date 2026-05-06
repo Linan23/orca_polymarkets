@@ -137,6 +137,19 @@ function forecastDirectionTag(item: MarketProfileMlPredictionCase) {
   return "Flat forecast";
 }
 
+function historicalValidationTag(item: MarketProfileMlPredictionCase) {
+  if (item.historical_validation_tier === "high_confidence_historical_slice") {
+    const pct = item.historical_validation_direction_match_pct;
+    return typeof pct === "number" ? `Validated slice ${pct.toFixed(1)}%` : "Validated slice";
+  }
+  if (item.historical_validation_tier === "strong_model_signal") return "Strong signal";
+  if (item.historical_validation_tier === "review_only") return "Review only";
+  if (item.historical_validation_tier === "insufficient_validated_accuracy") return "Low validation";
+  if (item.direction_signal_tier === "watch") return "Watch signal";
+  if (item.direction_signal_tier === "abstain") return "Review only";
+  return formatLabel(item.direction_signal_tier);
+}
+
 function modelFutureOdds(item: MarketProfileMlPredictionCase) {
   return item.model_predicted_future_odds_pct ?? item.predicted_future_odds_pct ?? null;
 }
@@ -409,6 +422,7 @@ function MarketPredictionOutcomeSummary({ cases }: { cases: MarketProfileMlPredi
             </div>
             <div className="market-ml-outcome-footer">
               <span>{forecastDirectionTag(item)}</span>
+              <span>{historicalValidationTag(item)}</span>
               <span>{formatSignedPoints(comparison?.model_predicted_delta_pts ?? modelDelta(item))}</span>
               {hasValidation && <span>Error {formatPointMagnitude(comparison?.prediction_absolute_error_pts ?? item.prediction_absolute_error_pts)}</span>}
             </div>

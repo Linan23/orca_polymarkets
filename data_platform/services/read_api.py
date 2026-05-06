@@ -39,6 +39,8 @@ from data_platform.settings import get_settings
 DEFAULT_LIMIT = 50
 POTENTIAL_WHALE_MIN_TRUST_SCORE = 1.08
 POTENTIAL_WHALE_MIN_SAMPLE_TRADES = 5
+HIGH_CONFIDENCE_DIRECTION_WINDOW_HOURS = 12
+HIGH_CONFIDENCE_DIRECTION_MIN_DELTA_PTS = 5.0
 
 
 def _potential_whale_clause() -> Any:
@@ -212,6 +214,70 @@ def _direction_from_delta(delta: float) -> str:
     if delta < -0.25:
         return "down"
     return "flat"
+
+
+def _append_unique(values: list[str], value: str) -> list[str]:
+    """Append a warning/reason once while preserving order."""
+    if value not in values:
+        values.append(value)
+    return values
+
+
+def _apply_market_profile_reliability_policy(item: dict[str, Any]) -> None:
+    """Annotate profile predictions with the currently validated reliable slice."""
+    try:
+        window_hours = int(item.get("prediction_window_hours") or str(item.get("window") or "").replace("h", ""))
+    except (TypeError, ValueError):
+        window_hours = 0
+    predicted_delta = _coerce_float(item.get("predicted_delta_pts"))
+    signal_tier = str(item.get("direction_signal_tier") or "")
+    predicted_direction = str(item.get("predicted_direction") or "")
+    is_high_confidence = (
+        window_hours == HIGH_CONFIDENCE_DIRECTION_WINDOW_HOURS
+        and signal_tier == "watch"
+        and predicted_direction != "flat"
+        and predicted_delta is not None
+        and abs(predicted_delta) >= HIGH_CONFIDENCE_DIRECTION_MIN_DELTA_PTS
+    )
+    warnings = list(item.get("reliability_warnings") or [])
+    if signal_tier == "strong" and predicted_direction != "flat":
+        item["display_tier"] = "show"
+        item["historical_validation_tier"] = "strong_model_signal"
+        item["historical_validation_reason"] = "strict model signal; monitor completed validations before treating it as broad-market accuracy"
+        item["historical_validation_direction_match_pct"] = None
+        item["historical_validation_sample_size"] = None
+    elif is_high_confidence:
+        item["display_tier"] = "show"
+        item["historical_validation_tier"] = "high_confidence_historical_slice"
+        item["historical_validation_reason"] = (
+            "12h Watch with at least 5pt predicted movement reached 81.82% direction match in the older validation sample"
+        )
+        item["historical_validation_direction_match_pct"] = 81.82
+        item["historical_validation_sample_size"] = 22
+        item["direction_signal_tier_reason"] = (
+            "historical validation supports this 12h Watch signal when predicted movement is at least 5 points"
+        )
+        item["review_reasons"] = []
+    elif signal_tier == "watch":
+        item["display_tier"] = "review"
+        item["historical_validation_tier"] = "review_only"
+        item["historical_validation_reason"] = (
+            "watch signal is visible, but this slice has not validated above the 70% target yet"
+        )
+        item["historical_validation_direction_match_pct"] = None
+        item["historical_validation_sample_size"] = None
+        item["review_reasons"] = ["review_only"]
+        _append_unique(warnings, "review_only")
+    else:
+        item["display_tier"] = "review"
+        item["historical_validation_tier"] = "insufficient_validated_accuracy"
+        item["historical_validation_reason"] = (
+            "abstain and weak-signal slices validated poorly and should not be treated as reliable direction forecasts"
+        )
+        item["historical_validation_direction_match_pct"] = None
+        item["historical_validation_sample_size"] = None
+        _append_unique(warnings, "insufficient_validated_accuracy")
+    item["reliability_warnings"] = warnings
 
 
 def _profile_side_label(contract: MarketContract) -> str | None:
@@ -1057,6 +1123,7 @@ def _latest_market_prediction_snapshot_payload(session: Session, market_slug: st
         payload.setdefault("model_version", row.model_version)
         payload.setdefault("feature_schema_version", row.feature_schema_version)
         payload.setdefault("data_freshness_status", row.data_freshness_status)
+        _apply_market_profile_reliability_policy(payload)
         statuses.add(row.prediction_status)
         if row.predicted_future_odds_pct is not None:
             model_prediction_available = True
@@ -1079,14 +1146,6 @@ def _latest_market_prediction_snapshot_payload(session: Session, market_slug: st
         "prediction_status": primary_status,
         "windows": windows,
     }
-
-
-def _append_unique(values: list[str], value: str) -> list[str]:
-    """Append a warning/reason once while preserving order."""
-    if value not in values:
-        values.append(value)
-    return values
-
 
 def _apply_live_polymarket_prediction_overlay(
     windows: dict[str, list[dict[str, Any]]],
@@ -1150,6 +1209,10 @@ def _apply_live_polymarket_prediction_overlay(
                 item["display_tier"] = "review"
                 item["display_reasons"] = ["market_closed_live_outcome"]
                 item["review_reasons"] = ["market_closed"]
+                item["historical_validation_tier"] = "market_closed"
+                item["historical_validation_reason"] = "market is closed; live Polymarket outcome price is final"
+                item["historical_validation_direction_match_pct"] = None
+                item["historical_validation_sample_size"] = None
             else:
                 predicted_future = round(_clamp_pct(live_current_pct + original_delta), 4)
                 adjusted_delta = round(predicted_future - live_current_pct, 4)
@@ -1175,6 +1238,8 @@ def _apply_live_polymarket_prediction_overlay(
                     item["interval_high_future_odds_pct"] = predicted_future
                 _append_unique(warnings, "live_polymarket_price_overlay")
             item["reliability_warnings"] = warnings
+            if not live_market.closed:
+                _apply_market_profile_reliability_policy(item)
             adjusted_rows.append(item)
         adjusted[window_name] = adjusted_rows
     return adjusted

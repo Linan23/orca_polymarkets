@@ -108,6 +108,10 @@ export type MarketProfileMlPredictionCase = {
   review_reasons: string[];
   direction_signal_tier: "strong" | "watch" | "abstain" | string;
   direction_signal_tier_reason: string;
+  historical_validation_tier?: string | null;
+  historical_validation_reason?: string | null;
+  historical_validation_direction_match_pct?: number | null;
+  historical_validation_sample_size?: number | null;
   direction_signal_predicted_direction: string;
   direction_signal_confidence: number;
   reliability_warnings: string[];

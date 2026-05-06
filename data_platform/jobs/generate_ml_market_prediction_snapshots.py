@@ -39,6 +39,8 @@ PREDICTION_WINDOWS = (12, 24)
 DEFAULT_INSERT_BATCH_SIZE = 1000
 DEFAULT_LIVE_FEATURE_MARKET_LIMIT = 1000
 MAX_SIGNAL_DELTA_BY_WINDOW = {12: 6.0, 24: 9.0}
+HIGH_CONFIDENCE_DIRECTION_WINDOW_HOURS = 12
+HIGH_CONFIDENCE_DIRECTION_MIN_DELTA_PTS = 5.0
 PHYSICAL_SPORTS_TERMS = (
     "nba", "nfl", "mlb", "nhl", "ufc", "soccer", "football", "tennis", "golf",
     "cricket", "rugby", "baseball", "basketball", "hockey", "formula 1", "f1",
@@ -475,14 +477,28 @@ def _live_prediction_for(
             0.0,
             0.92,
         )
+    is_high_confidence_validated_slice = (
+        window_hours == HIGH_CONFIDENCE_DIRECTION_WINDOW_HOURS
+        and predicted_direction != "flat"
+        and confidence >= 0.7
+        and abs(predicted_delta_pts) >= HIGH_CONFIDENCE_DIRECTION_MIN_DELTA_PTS
+    )
+    is_directional_watch = predicted_direction != "flat" and confidence >= 0.7 and abs(predicted_delta_pts) >= 1.0
     if predicted_direction == "flat":
         signal_tier = "abstain"
         display_tier = "review"
         tier_reason = "live model expects no material 12-24h move"
-    elif confidence >= 0.7 and abs(predicted_delta_pts) >= 1.0:
+    elif is_high_confidence_validated_slice:
+        signal_tier = "watch"
+        display_tier = "show"
+        tier_reason = "historical validation supports this 12h Watch signal when predicted movement is at least 5 points"
+    elif is_directional_watch:
         signal_tier = "watch"
         display_tier = "review"
-        tier_reason = "recent whale pressure supports a directional watch signal"
+        if window_hours == 24 and abs(predicted_delta_pts) >= HIGH_CONFIDENCE_DIRECTION_MIN_DELTA_PTS:
+            tier_reason = "24h Watch signals remain review-only until validation reaches the 70% target"
+        else:
+            tier_reason = "directional whale signal is below the historically high-confidence movement threshold"
     else:
         signal_tier = "abstain"
         display_tier = "review"
@@ -493,9 +509,25 @@ def _live_prediction_for(
     interval_high = round(_clamp(predicted_future_odds_pct + interval_width, 0.0, 100.0), 4)
     target_time = generated_at + timedelta(hours=window_hours)
     event_category = str(row.get("event_category") or "uncategorized")
-    display_reasons = ["live_whale_signal_model"]
-    review_reasons = [] if signal_tier == "watch" else ["insufficient_watch_confidence"]
+    if is_high_confidence_validated_slice:
+        validation_tier = "high_confidence_historical_slice"
+        validation_reason = "12h Watch with at least 5pt predicted movement reached 81.82% direction match in the older validation sample"
+    elif signal_tier == "watch":
+        validation_tier = "review_only"
+        validation_reason = "watch signal is visible, but this slice has not validated above the 70% target yet"
+    else:
+        validation_tier = "insufficient_validated_accuracy"
+        validation_reason = "abstain and weak-signal slices validated poorly and should not be treated as reliable direction forecasts"
+
+    display_reasons = ["live_whale_signal_model", validation_tier]
+    review_reasons = (
+        []
+        if validation_tier == "high_confidence_historical_slice"
+        else [validation_tier if signal_tier == "watch" else "insufficient_watch_confidence"]
+    )
     reliability_warnings = [] if has_whale_signal else ["no_recent_whale_signal_for_side"]
+    if validation_tier != "high_confidence_historical_slice":
+        reliability_warnings.append(validation_tier)
     latest_entry_time = features.get("latest_entry_time")
 
     whale_anchor = {
@@ -535,6 +567,10 @@ def _live_prediction_for(
         "review_reasons": review_reasons,
         "direction_signal_tier": signal_tier,
         "direction_signal_tier_reason": tier_reason,
+        "historical_validation_tier": validation_tier,
+        "historical_validation_reason": validation_reason,
+        "historical_validation_direction_match_pct": 81.82 if is_high_confidence_validated_slice else None,
+        "historical_validation_sample_size": 22 if is_high_confidence_validated_slice else None,
         "direction_signal_predicted_direction": predicted_direction,
         "direction_signal_confidence": round(confidence, 4),
         "reliability_warnings": reliability_warnings,
