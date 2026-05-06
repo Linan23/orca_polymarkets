@@ -2116,6 +2116,17 @@ a {
   fill: none;
   stroke-width: 3.6;
   stroke-linecap: butt;
+  cursor: pointer;
+  outline: none;
+  transition: opacity 0.16s ease, stroke-width 0.16s ease;
+}
+
+.donut-segment.is-active {
+  stroke-width: 4.4;
+}
+
+.donut-segment.is-muted {
+  opacity: 0.42;
 }
 
 .donut-center {
@@ -2138,6 +2149,12 @@ a {
   font-weight: 600;
 }
 
+.donut-center small {
+  color: rgba(226, 232, 240, 0.58);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
 .chart-legend {
   display: grid;
   gap: 12px;
@@ -2151,6 +2168,12 @@ a {
   border-radius: 16px;
   background: rgba(7, 16, 32, 0.68);
   border: 1px solid rgba(148, 163, 184, 0.08);
+  transition: border-color 0.16s ease, background 0.16s ease;
+}
+
+.chart-legend-row.is-active {
+  background: rgba(15, 23, 42, 0.88);
+  border-color: rgba(148, 163, 184, 0.22);
 }
 
 .chart-swatch {
@@ -2158,6 +2181,7 @@ a {
   height: 12px;
   min-width: 12px;
   border-radius: 999px;
+  box-shadow: none;
 }
 
 .chart-legend-main {
@@ -2221,7 +2245,11 @@ a {
   min-height: 2px;
   border-radius: 999px 999px 6px 6px;
   background: linear-gradient(180deg, #38bdf8, #2563eb);
-  box-shadow: 0 12px 28px rgba(37, 99, 235, 0.18);
+  box-shadow: none;
+}
+
+.histogram-column.peak .histogram-bar {
+  background: linear-gradient(180deg, #facc15, #f97316);
 }
 
 .histogram-label {
@@ -5144,5 +5172,4 @@ font-weight:700;
 
   color: #f5f7fb;
 }
-
 

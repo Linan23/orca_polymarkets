@@ -1953,71 +1953,105 @@ def user_activity_insights(
               SELECT
                 tf.transaction_id,
                 tf.event_id,
-                COALESCE(tf.notional_value, 0) AS notional_value
+                COALESCE(tf.notional_value, 0) AS notional_value,
+                LOWER(CONCAT_WS(
+                  ' ',
+                  me.title,
+                  me.slug,
+                  me.category,
+                  mc.question,
+                  mc.market_slug,
+                  mc.outcome_a_label,
+                  mc.outcome_b_label
+                )) AS haystack
               FROM analytics.transaction_fact tf
+              JOIN analytics.market_contract mc
+                ON mc.market_contract_id = tf.market_contract_id
+              JOIN analytics.market_event me
+                ON me.event_id = mc.event_id
               WHERE tf.user_id = :user_id
                 {transaction_window_clause}
             ),
-            event_tag_counts AS (
+            classified_tx AS (
               SELECT
-                ft.event_id,
-                COUNT(DISTINCT mtm.tag_id) AS tag_count
-              FROM filtered_tx ft
-              LEFT JOIN analytics.market_tag_map mtm
-                ON mtm.event_id = ft.event_id
-              GROUP BY ft.event_id
+                transaction_id,
+                notional_value,
+                CASE
+                  WHEN haystack ~ '(video[ -]?games?|videogames?|gaming|gta|grand theft auto|nintendo|playstation|xbox|steam|esports?|counter[ -]?strike|cs2|fortnite|call of duty|rockstar|rocket league|league of legends|valorant|dota)'
+                    THEN 'Video Game'
+                  WHEN haystack ~ '(crypto|cryptocurrenc|bitcoin|ethereum|solana|doge|dogecoin|xrp|btc|eth|token|airdrop|coinbase|kraken|stablecoin|microstrategy|mstr|blockchain|defi)'
+                    THEN 'Crypto'
+                  WHEN haystack ~ '(technology|tech|openai|gpt|llm|artificial intelligence|\\bai\\b|nvidia|amd|microsoft|google|alphabet|meta|apple|anthropic|sam altman|semiconductor|chips?|software|hardware)'
+                    THEN 'Technology'
+                  WHEN haystack ~ '(geopolit|world affairs|foreign policy|diplom|ceasefire|military|nato|ukraine|russia|putin|zelensky|china|taiwan|iran|israel|gaza|syria|middle east|\\bwar\\b)'
+                    THEN 'Geopolitics'
+                  WHEN haystack ~ '(politic|elections?|government|president|presidential|prime minister|congress|senate|parliament|cabinet|minister|tariff|trump|biden|starmer|macron|supreme court|us government)'
+                    THEN 'Politics'
+                  ELSE 'Other'
+                END AS category_name
+              FROM filtered_tx
+            ),
+            category_totals AS (
+              SELECT
+                category_name,
+                COALESCE(SUM(notional_value), 0) AS total_notional,
+                COUNT(transaction_id) AS trade_count
+              FROM classified_tx
+              GROUP BY category_name
             )
             SELECT
-              COALESCE(mt.tag_label, 'Unlabeled') AS tag_label,
-              COALESCE(
-                SUM(
-                  ft.notional_value / CASE
-                    WHEN COALESCE(etc.tag_count, 0) > 0 THEN etc.tag_count
-                    ELSE 1
-                  END
-                ),
-                0
-              ) AS weighted_notional,
-              COUNT(DISTINCT ft.transaction_id) AS trade_count
-            FROM filtered_tx ft
-            LEFT JOIN event_tag_counts etc
-              ON etc.event_id = ft.event_id
-            LEFT JOIN analytics.market_tag_map mtm
-              ON mtm.event_id = ft.event_id
-            LEFT JOIN analytics.market_tag mt
-              ON mt.tag_id = mtm.tag_id
-            GROUP BY COALESCE(mt.tag_label, 'Unlabeled')
-            ORDER BY weighted_notional DESC, tag_label ASC
+              category_name,
+              total_notional,
+              trade_count
+            FROM category_totals
+            ORDER BY
+              CASE category_name
+                WHEN 'Video Game' THEN 1
+                WHEN 'Technology' THEN 2
+                WHEN 'Crypto' THEN 3
+                WHEN 'Geopolitics' THEN 4
+                WHEN 'Politics' THEN 5
+                ELSE 6
+              END,
+              total_notional DESC
             """
         ),
         params,
     ).mappings().all()
-    total_tag_notional = sum(float(row["weighted_notional"] or 0) for row in tag_rows)
-    top_tag_rows = tag_rows[:5]
-    other_tag_notional = sum(float(row["weighted_notional"] or 0) for row in tag_rows[5:])
-    other_trade_count = sum(int(row["trade_count"] or 0) for row in tag_rows[5:])
+    total_category_trades = sum(int(row["trade_count"] or 0) for row in tag_rows)
     tag_exposure = [
         {
-            "label": row["tag_label"],
-            "total_notional": float(row["weighted_notional"] or 0),
+            "label": row["category_name"],
+            "total_notional": float(row["total_notional"] or 0),
             "trade_count": int(row["trade_count"] or 0),
+            "percentage": (
+                round(int(row["trade_count"] or 0) / total_category_trades, 6)
+                if total_category_trades > 0
+                else 0.0
+            ),
         }
-        for row in top_tag_rows
+        for row in tag_rows
     ]
-    if other_tag_notional > 0:
+    if total_category_trades > 0 and not any(item["label"] == "Other" for item in tag_exposure):
         tag_exposure.append(
             {
                 "label": "Other",
-                "total_notional": other_tag_notional,
-                "trade_count": other_trade_count,
+                "total_notional": 0.0,
+                "trade_count": 0,
+                "percentage": 0.0,
             }
         )
-    for item in tag_exposure:
-        item["percentage"] = (
-            round(item["total_notional"] / total_tag_notional, 6)
-            if total_tag_notional > 0
-            else 0.0
-        )
+    tag_exposure.sort(
+        key=lambda item: {
+            "Video Game": 1,
+            "Technology": 2,
+            "Crypto": 3,
+            "Geopolitics": 4,
+            "Politics": 5,
+            "Other": 6,
+        }.get(str(item["label"]), 99)
+    )
+    tag_exposure = [item for item in tag_exposure if item["trade_count"] > 0]
 
     outcome_rows = session.execute(
         text(

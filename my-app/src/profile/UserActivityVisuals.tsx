@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   type HourlyActivityBucket,
   type OutcomeBias,
@@ -16,10 +17,12 @@ function formatPercent(value: number) {
 }
 
 export function TagExposureDonut({ slices }: { slices: TagExposureSlice[] }) {
+  const [hoveredLabel, setHoveredLabel] = useState<string | null>(null);
   const activeSlices = slices.filter((slice) => slice.percentage > 0);
   if (activeSlices.length === 0) {
-    return <div className="empty-chart-state">No tagged market activity for this timeframe.</div>;
+    return <div className="empty-chart-state">No market-category activity for this timeframe.</div>;
   }
+  const displayedSlice = activeSlices.find((slice) => slice.label === hoveredLabel) ?? activeSlices[0];
 
   const segments = activeSlices.reduce<Array<TagExposureSlice & { strokeDashoffset: number }>>((items, slice) => {
     const currentOffset = items.reduce((sum, item) => sum + item.percentage * 100, 0);
@@ -33,35 +36,49 @@ export function TagExposureDonut({ slices }: { slices: TagExposureSlice[] }) {
   return (
     <div className="donut-layout">
       <div className="donut-shell">
-        <svg viewBox="0 0 36 36" className="donut-chart" aria-label="Tag exposure donut chart">
+        <svg viewBox="0 0 36 36" className="donut-chart" aria-label="Market category trade mix donut chart">
           <circle cx="18" cy="18" r="15.915" className="donut-track" />
           <g transform="rotate(-90 18 18)">
             {segments.map((slice, index) => {
               const dash = slice.percentage * 100;
+              const isActive = displayedSlice.label === slice.label;
+              const isMuted = hoveredLabel !== null && !isActive;
               return (
                 <circle
                   key={slice.label}
                   cx="18"
                   cy="18"
                   r="15.915"
-                  className="donut-segment"
+                  className={`donut-segment${isActive ? " is-active" : ""}${isMuted ? " is-muted" : ""}`}
                   stroke={DONUT_COLORS[index % DONUT_COLORS.length]}
                   strokeDasharray={`${dash} ${100 - dash}`}
                   strokeDashoffset={slice.strokeDashoffset}
+                  tabIndex={0}
+                  aria-label={`${slice.label}: ${formatPercent(slice.percentage)} of trades, ${slice.trade_count} trades`}
+                  onFocus={() => setHoveredLabel(slice.label)}
+                  onBlur={() => setHoveredLabel(null)}
+                  onMouseEnter={() => setHoveredLabel(slice.label)}
+                  onMouseLeave={() => setHoveredLabel(null)}
                 />
               );
             })}
           </g>
         </svg>
         <div className="donut-center">
-          <strong>{formatPercent(activeSlices[0].percentage)}</strong>
-          <span>{activeSlices[0].label}</span>
+          <strong>{formatPercent(displayedSlice.percentage)}</strong>
+          <span>{displayedSlice.label}</span>
+          <small>{displayedSlice.trade_count} trades</small>
         </div>
       </div>
 
       <div className="chart-legend">
         {activeSlices.map((slice, index) => (
-          <div key={slice.label} className="chart-legend-row">
+          <div
+            key={slice.label}
+            className={`chart-legend-row${displayedSlice.label === slice.label ? " is-active" : ""}`}
+            onMouseEnter={() => setHoveredLabel(slice.label)}
+            onMouseLeave={() => setHoveredLabel(null)}
+          >
             <span className="chart-swatch" style={{ backgroundColor: DONUT_COLORS[index % DONUT_COLORS.length] }} />
             <div className="chart-legend-main">
               <strong>{slice.label}</strong>
@@ -120,25 +137,32 @@ export function HourlyActivityChart({ buckets }: { buckets: HourlyActivityBucket
   if (maxTrades === 0) {
     return <div className="empty-chart-state">No hourly activity in this timeframe.</div>;
   }
+  const peakHours = buckets
+    .filter((bucket) => bucket.trade_count === maxTrades)
+    .map((bucket) => `${bucket.hour_utc.toString().padStart(2, "0")}:00 UTC`);
+  const peakLabel = peakHours.join(", ");
 
   return (
     <div className="histogram">
       <div className="histogram-bars" aria-label="Hourly activity histogram in UTC">
         {buckets.map((bucket) => {
           const height = maxTrades > 0 ? Math.max((bucket.trade_count / maxTrades) * 100, bucket.trade_count > 0 ? 8 : 0) : 0;
+          const hourLabel = `${bucket.hour_utc.toString().padStart(2, "0")}:00 UTC`;
+          const isPeak = bucket.trade_count === maxTrades;
           return (
-            <div key={bucket.hour_utc} className="histogram-column">
+            <div key={bucket.hour_utc} className={`histogram-column${isPeak ? " peak" : ""}`}>
               <div
                 className="histogram-bar"
                 style={{ height: `${height}%` }}
-                title={`${bucket.hour_utc.toString().padStart(2, "0")}:00 UTC · ${bucket.trade_count} trades`}
+                title={`${hourLabel} · ${bucket.trade_count} trades${isPeak ? " · most active" : ""}`}
+                aria-label={`${hourLabel}: ${bucket.trade_count} trades${isPeak ? ", most active hour" : ""}`}
               />
-              <span className="histogram-label">{bucket.hour_utc}</span>
+              <span className="histogram-label">{bucket.hour_utc.toString().padStart(2, "0")}</span>
             </div>
           );
         })}
       </div>
-      <p className="chart-footnote">Activity hours are shown in UTC.</p>
+      <p className="chart-footnote">Most active: {peakLabel}. Activity hours are shown in UTC.</p>
     </div>
   );
 }

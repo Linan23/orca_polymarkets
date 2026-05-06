@@ -485,8 +485,8 @@ export default function UserProfile() {
                     <ActivitySummaryStrip summary={insights.summary} />
                     <div className="tab-grid two-col">
                       <article className="tab-card chart-card">
-                        <h3>Market Mix</h3>
-                        <p className="tab-copy">Activity split by market-tag exposure, weighted by traded notional.</p>
+                        <h3>Market Categories</h3>
+                        <p className="tab-copy">Activity split by focused market category, based on trade count.</p>
                         <TagExposureDonut slices={insights.tag_exposure} />
                       </article>
 
@@ -498,7 +498,7 @@ export default function UserProfile() {
 
                       <article className="tab-card chart-card chart-card-full">
                         <h3>Trading Hours</h3>
-                        <p className="tab-copy">When this trader is most active, bucketed by hour of day in UTC.</p>
+                        <p className="tab-copy">Hourly trade count in UTC, with the most active hour highlighted.</p>
                         <HourlyActivityChart buckets={insights.hourly_activity_utc} />
                       </article>
                     </div>
