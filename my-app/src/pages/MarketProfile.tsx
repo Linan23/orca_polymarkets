@@ -334,6 +334,10 @@ function MarketPredictionTrendChart({ cases }: { cases: MarketProfileMlPredictio
   const plotHeight = plotBottom - top;
   const yFor = (odds: number) => top + ((maxOdds - odds) / Math.max(maxOdds - minOdds, 1)) * plotHeight;
   const xFor = (hour: number) => left + (Math.min(Math.max(hour, 0), 24) / 24) * plotWidth;
+  const lineOddsAtHour = (hour: number) => [
+    ...predictedPoints.filter((point) => point.hour === hour).map((point) => point.odds),
+    ...actualPoints.filter((point) => point.hour === hour).map((point) => point.odds),
+  ];
   const pointTextProps = (hour: number, odds: number, preferredSide: "above" | "below") => {
     const x = xFor(hour);
     const isRightEdge = hour >= 22;
@@ -342,27 +346,26 @@ function MarketPredictionTrendChart({ cases }: { cases: MarketProfileMlPredictio
     const labelTop = top + 18;
     const labelBottom = plotBottom - 20;
     const labelGap = 28;
-    const aboveY = lineY - labelGap;
-    const belowY = lineY + labelGap;
-    const hasAboveRoom = aboveY >= labelTop;
-    const hasBelowRoom = belowY <= labelBottom;
-    let y =
-      preferredSide === "above"
-        ? hasAboveRoom
-          ? aboveY
-          : hasBelowRoom
-            ? belowY
-            : Math.max(labelTop, Math.min(aboveY, labelBottom))
-        : hasBelowRoom
-          ? belowY
-          : hasAboveRoom
-            ? aboveY
-            : Math.max(labelTop, Math.min(belowY, labelBottom));
-
-    if (Math.abs(y - lineY) < 22) {
-      const fallbackY = lineY < (labelTop + labelBottom) / 2 ? belowY : aboveY;
-      y = Math.max(labelTop, Math.min(fallbackY, labelBottom));
-    }
+    const avoidLineYs = lineOddsAtHour(hour).map(yFor);
+    const aboveCandidates = [lineY - labelGap, lineY - labelGap - 16, lineY - labelGap - 30];
+    const belowCandidates = [lineY + labelGap, lineY + labelGap + 16, lineY + labelGap + 30];
+    const orderedCandidates = preferredSide === "above"
+      ? [...aboveCandidates, ...belowCandidates]
+      : [...belowCandidates, ...aboveCandidates];
+    const candidateIsClear = (candidateY: number) =>
+      candidateY >= labelTop &&
+      candidateY <= labelBottom &&
+      avoidLineYs.every((avoidY) => Math.abs(candidateY - avoidY) >= 24);
+    const y =
+      orderedCandidates.find(candidateIsClear) ??
+      Math.max(
+        labelTop,
+        Math.min(
+          orderedCandidates.find((candidateY) => candidateY >= labelTop && candidateY <= labelBottom) ??
+            (lineY < (labelTop + labelBottom) / 2 ? lineY + labelGap : lineY - labelGap),
+          labelBottom,
+        ),
+      );
 
     return {
       x: isRightEdge ? x - 10 : isLeftEdge ? x + 10 : x,
@@ -411,7 +414,7 @@ function MarketPredictionTrendChart({ cases }: { cases: MarketProfileMlPredictio
         {predictedPoints.map((point) => (
           <g key={`${point.label}-${point.hour}`}>
             <circle cx={xFor(point.hour)} cy={yFor(point.odds)} r={point.hour === 0 ? 4 : 6} />
-            <text {...pointTextProps(point.hour, point.odds, "above")}>
+            <text className="market-ml-point-label" {...pointTextProps(point.hour, point.odds, "above")}>
               {formatOddsPercent(point.odds)}
             </text>
           </g>
@@ -419,7 +422,7 @@ function MarketPredictionTrendChart({ cases }: { cases: MarketProfileMlPredictio
         {actualPoints.map((point) => (
           <g key={`actual-${point.label}-${point.hour}`}>
             <circle className="market-ml-chart-actual-dot" cx={xFor(point.hour)} cy={yFor(point.odds)} r={5} />
-            <text {...pointTextProps(point.hour, point.odds, "below")}>
+            <text className="market-ml-point-label" {...pointTextProps(point.hour, point.odds, "below")}>
               {formatOddsPercent(point.odds)}
             </text>
           </g>

@@ -5117,6 +5117,14 @@ font-weight:700;
   font-weight: 700;
 }
 
+.market-ml-chart .market-ml-point-label {
+  fill: #e2e8f0;
+  paint-order: stroke;
+  stroke: rgba(2, 6, 23, 0.92);
+  stroke-linejoin: round;
+  stroke-width: 4px;
+}
+
 .market-ml-chart circle {
   fill: #2dd4bf;
   stroke: #f8fafc;
