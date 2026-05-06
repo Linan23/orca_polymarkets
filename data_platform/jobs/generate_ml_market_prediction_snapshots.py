@@ -28,6 +28,11 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from data_platform.db.session import session_scope
+from data_platform.ml.prediction_confidence import (
+    DEFAULT_CONFIDENCE_MODEL_PATH,
+    apply_trained_confidence,
+    load_confidence_artifact,
+)
 from data_platform.models import MlMarketPredictionSnapshot
 from data_platform.models.base import utc_now
 from data_platform.services.ml_reports import WHALE_ANCHORED_DELTA_JSON_PATH
@@ -675,6 +680,7 @@ def _snapshot_row(
     live_prediction: dict[str, Any] | None,
     model_version: str,
     feature_schema_version: str,
+    confidence_artifact: dict[str, Any] | None,
 ) -> dict[str, Any]:
     """Return one database row for a market side/window prediction snapshot."""
     payload = dict(
@@ -697,10 +703,12 @@ def _snapshot_row(
     payload["prediction_generated_at"] = generated_at.isoformat()
     payload["model_version"] = model_version
     payload["feature_schema_version"] = feature_schema_version
+    payload = apply_trained_confidence(payload, confidence_artifact)
 
     observation_time = _parse_iso(str(payload.get("observation_time") or "")) or generated_at
     prediction_target_time = _parse_iso(str(payload.get("prediction_target_time") or ""))
     whale_entry_time = _parse_iso(str(payload.get("whale_entry_time") or ""))
+    trained_as_of = _parse_iso(str(payload.get("trained_confidence_trained_at") or ""))
     prediction_available = payload.get("predicted_future_odds_pct") is not None
     prediction_status = (
         "prediction_available"
@@ -721,6 +729,10 @@ def _snapshot_row(
         "review_reasons": payload.get("review_reasons") or [],
         "reliability_warnings": payload.get("reliability_warnings") or [],
         "direction_signal_tier_reason": payload.get("direction_signal_tier_reason"),
+        "trained_confidence_available": payload.get("trained_confidence_available"),
+        "trained_confidence_score": payload.get("trained_confidence_score"),
+        "confidence_source": payload.get("confidence_source"),
+        "expected_direction_error_pts": payload.get("expected_direction_error_pts"),
     }
 
     return {
@@ -740,7 +752,7 @@ def _snapshot_row(
         "prediction_status": prediction_status,
         "model_version": model_version,
         "feature_schema_version": feature_schema_version,
-        "trained_as_of": None,
+        "trained_as_of": trained_as_of,
         "prediction_generated_at": generated_at,
         "data_freshness_status": "current_market_contract_snapshot",
         "prediction_source": prediction_source,
@@ -769,6 +781,7 @@ def generate_prediction_snapshots(
     feature_schema_version: str,
     create_table: bool,
     live_feature_market_limit: int,
+    confidence_model_path: Path | None = DEFAULT_CONFIDENCE_MODEL_PATH,
 ) -> dict[str, Any]:
     """Generate and persist all-market prediction snapshot rows."""
     if create_table:
@@ -781,6 +794,7 @@ def generate_prediction_snapshots(
         }
 
     local_index = _read_local_prediction_index(local_report_path)
+    confidence_artifact = load_confidence_artifact(confidence_model_path)
     generated_at = utc_now()
     raw_market_rows = session.execute(
         ACTIVE_MARKETS_SQL,
@@ -848,6 +862,7 @@ def generate_prediction_snapshots(
                         live_prediction=live_prediction,
                         model_version=model_version,
                         feature_schema_version=feature_schema_version,
+                        confidence_artifact=confidence_artifact,
                     )
                 )
 
@@ -893,6 +908,9 @@ def generate_prediction_snapshots(
         "pending_prediction_row_count": pending_prediction_count,
         "model_version": model_version,
         "feature_schema_version": feature_schema_version,
+        "confidence_model_loaded": bool(confidence_artifact),
+        "confidence_model_version": confidence_artifact.get("model_version") if confidence_artifact else None,
+        "confidence_model_trained_at": confidence_artifact.get("trained_at") if confidence_artifact else None,
     }
 
 
@@ -906,6 +924,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--local-report-path", default=str(WHALE_ANCHORED_DELTA_JSON_PATH))
     parser.add_argument("--model-version", default=DEFAULT_MODEL_VERSION)
     parser.add_argument("--feature-schema-version", default=DEFAULT_FEATURE_SCHEMA_VERSION)
+    parser.add_argument(
+        "--confidence-model-path",
+        default=os.getenv("ML_PREDICTION_CONFIDENCE_MODEL_PATH", str(DEFAULT_CONFIDENCE_MODEL_PATH)),
+        help="Optional trained confidence artifact generated from closed-market validations.",
+    )
     parser.add_argument(
         "--live-feature-market-limit",
         type=int,
@@ -933,6 +956,7 @@ def main() -> int:
             feature_schema_version=args.feature_schema_version,
             create_table=bool(args.create_table),
             live_feature_market_limit=int(args.live_feature_market_limit),
+            confidence_model_path=Path(args.confidence_model_path) if args.confidence_model_path else None,
         )
     print(json.dumps(summary, sort_keys=True))
     return 0 if summary.get("ok") else 1

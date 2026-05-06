@@ -242,6 +242,24 @@ def _append_unique(values: list[str], value: str) -> list[str]:
 
 def _apply_market_profile_reliability_policy(item: dict[str, Any]) -> None:
     """Annotate profile predictions with the currently validated reliable slice."""
+    if item.get("trained_confidence_available") is True:
+        score = _coerce_float(item.get("trained_confidence_score"))
+        if score is not None:
+            item["direction_signal_confidence"] = round(score, 4)
+            item["historical_validation_direction_match_pct"] = round(score * 100.0, 2)
+        if item.get("confidence_training_window_rows") is not None:
+            item["historical_validation_sample_size"] = item.get("confidence_training_window_rows")
+        warnings = list(item.get("reliability_warnings") or [])
+        tier = str(item.get("historical_validation_tier") or "")
+        if tier == "trained_low_confidence":
+            _append_unique(warnings, "trained_low_confidence")
+            item["display_tier"] = "review"
+            item["review_reasons"] = ["trained_low_confidence"]
+        elif tier in {"trained_watch_confidence", "trained_strong_confidence"}:
+            item["display_tier"] = "show"
+            item["review_reasons"] = []
+        item["reliability_warnings"] = warnings
+        return
     try:
         window_hours = int(item.get("prediction_window_hours") or str(item.get("window") or "").replace("h", ""))
     except (TypeError, ValueError):

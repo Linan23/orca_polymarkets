@@ -114,6 +114,21 @@ Train only the trade-covered regime:
 .venv/bin/python data_platform/jobs/train_market_model.py --task outcome --evaluation-mode rolling --regime trade_covered
 ```
 
+Validate closed/matured market-profile predictions, retrain the confidence layer, and generate fresh 12h/24h snapshots:
+
+```bash
+.venv/bin/python data_platform/jobs/run_ml_prediction_confidence_cycle.py
+```
+
+Train only the closed-market confidence artifact used by market profiles:
+
+```bash
+.venv/bin/python data_platform/jobs/train_ml_prediction_confidence.py \
+  --output-path data_platform/runtime/ml/market_prediction_confidence_model.json
+```
+
+The confidence artifact is trained from `analytics.ml_market_prediction_validation` joined to saved prediction snapshots. The split is chronological, so newer validated markets are held out and the model does not learn from future outcomes when scoring older predictions.
+
 Train the cold-start regime with its dedicated feature path:
 
 ```bash
