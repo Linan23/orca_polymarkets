@@ -120,7 +120,7 @@ function CoveragePieChart({
               return;
             }
 
-            const arc = target.closest(".MuiPieArc-root[data-index]");
+            const arc = target.closest(".MuiPieChart-arc[data-index], path[data-index]");
             const dataIndex = arc ? Number(arc.getAttribute("data-index")) : Number.NaN;
 
             if (!Number.isInteger(dataIndex) || dataIndex < 0 || dataIndex >= activeRows.length) {
