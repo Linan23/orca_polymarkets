@@ -115,7 +115,7 @@ function CoveragePieChart({
                 faded: { innerRadius: 30, additionalRadius: -30, color: "gray" },
                 valueFormatter: (item) => {
                   const percent = total > 0 ? (item.value / total) * 100 : 0;
-                  return `${formatCompact(item.value)} · ${formatPercent(percent)}`;
+                  return `${item.label}: ${formatCompact(item.value)} · ${formatPercent(percent)}`;
                 },
               },
             ]}
@@ -123,6 +123,22 @@ function CoveragePieChart({
             height={220}
             hideLegend
             margin={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            slotProps={{
+              tooltip: {
+                trigger: "item",
+                anchor: "pointer",
+                position: "right",
+                modifiers: [
+                  {
+                    name: "offset",
+                    options: {
+                      offset: [0, 6],
+                    },
+                  },
+                ],
+                sx: { zIndex: 3000 },
+              },
+            }}
           />
         </div>
       ) : (

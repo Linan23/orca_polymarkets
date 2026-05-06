@@ -2271,6 +2271,8 @@ a {
   background: rgba(2, 6, 23, 0.94) !important;
   border: 1px solid rgba(148, 163, 184, 0.2);
   color: #f8fafc !important;
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.36) !important;
+  padding: 8px 10px !important;
 }
 
 .MuiChartsTooltip-root,
@@ -2278,6 +2280,11 @@ a {
 .MuiChartsTooltip-paper,
 .MuiChartsTooltip-paper * {
   color: #f8fafc !important;
+}
+
+.MuiChartsTooltip-root {
+  z-index: 3000 !important;
+  pointer-events: none;
 }
 
 .MuiChartsTooltip-table,
