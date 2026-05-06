@@ -108,16 +108,10 @@ function CoveragePieChart({
           series={[
             {
               data: pieData,
-              arcLabel: (item) => {
-                const percent = total > 0 ? (item.value / total) * 100 : 0;
-                return percent >= 8 ? formatPercent(percent) : "";
-              },
-              arcLabelMinAngle: 20,
               cornerRadius: 3,
               paddingAngle: 1,
               highlightScope: { fade: "global", highlight: "item" },
-              highlighted: { additionalRadius: 5 },
-              faded: { additionalRadius: -3 },
+              faded: { innerRadius: 30, additionalRadius: -30, color: "gray" },
               valueFormatter: (item) => {
                 const percent = total > 0 ? (item.value / total) * 100 : 0;
                 return `${formatCompact(item.value)} · ${formatPercent(percent)}`;
