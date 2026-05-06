@@ -3104,7 +3104,25 @@ def latest_whale_scores(
         statement = statement.where(WhaleScoreSnapshot.is_whale.is_(True))
 
     rows = session.execute(statement).all()
-    resolved_performance_by_user, _ = load_resolved_user_performance(session)
+    user_ids = [int(account.user_id) for _, account, _ in rows]
+    realized_pnl_by_user: dict[int, float | None] = {}
+    if user_ids:
+        latest_dashboard = session.scalars(select(Dashboard).order_by(desc(Dashboard.generated_at)).limit(1)).first()
+        if latest_dashboard is not None:
+            profile_rows = session.execute(
+                select(UserProfile.user_id, UserProfile.trusted_traders_summary).where(
+                    UserProfile.dashboard_id == latest_dashboard.dashboard_id,
+                    UserProfile.user_id.in_(user_ids),
+                )
+            ).all()
+            for user_id, trusted_traders_summary in profile_rows:
+                if not isinstance(trusted_traders_summary, dict):
+                    continue
+                resolved_performance = trusted_traders_summary.get("resolved_performance")
+                if not isinstance(resolved_performance, dict):
+                    continue
+                realized_pnl = resolved_performance.get("realized_pnl")
+                realized_pnl_by_user[int(user_id)] = float(realized_pnl) if realized_pnl is not None else None
     items = [
         {
             "user_id": account.user_id,
@@ -3117,11 +3135,7 @@ def latest_whale_scores(
             "scoring_version": score.scoring_version,
             "trust_score": float(score.trust_score or 0),
             "profitability_score": float(score.profitability_score or 0),
-            "realized_pnl": (
-                float(resolved_performance_by_user[account.user_id].realized_pnl)
-                if account.user_id in resolved_performance_by_user
-                else None
-            ),
+            "realized_pnl": realized_pnl_by_user.get(int(account.user_id)),
             "sample_trade_count": int(score.sample_trade_count or 0),
             "is_whale": bool(score.is_whale),
             "is_trusted_whale": bool(score.is_trusted_whale),
