@@ -1,3 +1,4 @@
+import { PieChart } from "@mui/x-charts/PieChart";
 import { useCallback } from "react";
 import { useApiData } from "../hooks/useApiData";
 import { fetchHomeSummary, type HomeSummary } from "../lib/api";
@@ -22,6 +23,10 @@ function formatCompact(value: number) {
     notation: "compact",
     maximumFractionDigits: 1,
   }).format(value);
+}
+
+function formatPercent(value: number) {
+  return `${Math.round(value)}%`;
 }
 
 function formatCategoryLabel(value: string) {
@@ -62,6 +67,117 @@ function getDatabaseLastUpdated(summary: HomeSummaryWithFreshness) {
   );
 }
 
+type CoveragePieRow = {
+  name: string;
+  value: number;
+};
+
+type CoverageMetric = {
+  label: string;
+  value: number;
+};
+
+const COVERAGE_COLORS = [
+  "#6f7cff",
+  "#42d3ff",
+  "#4fd18b",
+  "#f6c85f",
+  "#f07167",
+  "#a78bfa",
+  "#f59e0b",
+  "#94a3b8",
+];
+
+function CoveragePieChart({
+  rows,
+  total,
+  totalLabel,
+  metrics,
+}: {
+  rows: CoveragePieRow[];
+  total: number;
+  totalLabel: string;
+  metrics?: CoverageMetric[];
+}) {
+  const activeRows = rows.filter((row) => row.value > 0);
+  const pieData = activeRows.map((row, index) => ({
+    id: index,
+    value: row.value,
+    label: row.name,
+    color: COVERAGE_COLORS[index % COVERAGE_COLORS.length],
+  }));
+
+  return (
+    <div className="coverage-pie-content">
+      <div className="coverage-mui-pie-shell">
+        <PieChart
+          className="coverage-mui-pie"
+          series={[
+            {
+              data: pieData,
+              arcLabel: (item) => {
+                const percent = total > 0 ? (item.value / total) * 100 : 0;
+                return percent >= 8 ? formatPercent(percent) : "";
+              },
+              arcLabelMinAngle: 20,
+              cornerRadius: 3,
+              paddingAngle: 1,
+              valueFormatter: (item) => {
+                const percent = total > 0 ? (item.value / total) * 100 : 0;
+                return `${formatCompact(item.value)} · ${formatPercent(percent)}`;
+              },
+            },
+          ]}
+          width={180}
+          height={180}
+          hideLegend
+          margin={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        />
+      </div>
+
+      <div className="coverage-pie-legend">
+        {metrics?.map((metric) => (
+          <div className="coverage-metric-row" key={metric.label}>
+            <span>{metric.label}</span>
+            <strong>{formatCompact(metric.value)}</strong>
+          </div>
+        ))}
+
+        {activeRows.map((row, index) => {
+          const percent = total > 0 ? Math.round((row.value / total) * 100) : 0;
+
+          return (
+            <div className="coverage-legend-row" key={row.name}>
+              <span
+                className="coverage-legend-dot"
+                style={{
+                  background: COVERAGE_COLORS[index % COVERAGE_COLORS.length],
+                }}
+              />
+
+              <div>
+                <strong>{row.name}</strong>
+                <p>
+                  {formatCompact(row.value)} · {percent}%
+                </p>
+              </div>
+            </div>
+          );
+        })}
+
+        {activeRows.length === 0 && (
+          <div className="coverage-legend-row">
+            <div>
+              <strong>{totalLabel}</strong>
+              <p>No coverage data available</p>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function HomepageSummaryCards() {
   const loadSummary = useCallback(() => fetchHomeSummary(), []);
   const { data, loading, error } = useApiData(loadSummary);
@@ -97,6 +213,7 @@ export default function HomepageSummaryCards() {
             {
               title: "Market Coverage Breakdown",
               label: "Markets",
+              totalLabel: "Total Markets",
               rows: marketCategoryCoverage.map((row) => ({
                 name: formatCategoryLabel(row.category_name),
                 value: row.market_count,
@@ -104,15 +221,35 @@ export default function HomepageSummaryCards() {
             },
             {
               title: "User Coverage Breakdown",
-              label: "Users",
-              rows: summary.platform_coverage.map((row) => ({
-                name: row.platform_name,
-                value: row.user_count,
-              })),
+              label: "Whales Tracked",
+              totalLabel: "Total Number of Whales Tracked",
+              rows: [
+                {
+                  name: "Trusted Whales",
+                  value: summary.trusted_whales,
+                },
+                {
+                  name: "Other Tracked Whales",
+                  value: Math.max(summary.whales_detected - summary.trusted_whales, 0),
+                },
+              ],
+              metrics: [
+                {
+                  label: "Number of Trusted Whales",
+                  value: summary.trusted_whales,
+                },
+                {
+                  label: "Total Number of Whales Tracked",
+                  value: summary.whales_detected,
+                },
+              ],
             },
           ].map((chart) => ({
             ...chart,
-            total: chart.rows.reduce((sum, row) => sum + row.value, 0),
+            total:
+              chart.title === "User Coverage Breakdown"
+                ? summary.whales_detected
+                : chart.rows.reduce((sum, row) => sum + row.value, 0),
           }));
 
           return (
@@ -127,32 +264,6 @@ export default function HomepageSummaryCards() {
               </article>
 
               {coverageCharts.map((chart) => {
-                let offset = 0;
-                const colors = [
-                  "#6f7cff",
-                  "#42d3ff",
-                  "#4fd18b",
-                  "#f6c85f",
-                  "#f07167",
-                  "#a78bfa",
-                  "#f59e0b",
-                  "#94a3b8",
-                ];
-
-                const segments = chart.rows
-                  .map((row, index) => {
-                    const value = row.value;
-
-                    if (chart.total <= 0 || value <= 0) return null;
-
-                    const start = offset;
-                    const end = offset + (value / chart.total) * 100;
-                    offset = end;
-
-                    return `${colors[index % colors.length]} ${start}% ${end}%`;
-                  })
-                  .filter((segment): segment is string => Boolean(segment));
-
                 return (
                   <article className="summary-card" key={chart.title}>
                     <p className="summary-card-label">{chart.title}</p>
@@ -162,53 +273,12 @@ export default function HomepageSummaryCards() {
                       <strong>{formatCompact(chart.total)}</strong>
                     </div>
 
-                    <div className="coverage-pie-content">
-                      <div
-                        className="coverage-donut"
-                        style={{
-                          background:
-                            segments.length > 0
-                              ? `conic-gradient(${segments.join(", ")})`
-                              : "rgba(255, 255, 255, 0.08)",
-                        }}
-                      >
-                        <div className="coverage-donut-hole">
-                          <span>Total</span>
-                          <strong>{formatCompact(chart.total)}</strong>
-                        </div>
-                      </div>
-
-                      <div className="coverage-pie-legend">
-                        {chart.rows.map((row, index) => {
-                          const value = row.value;
-                          const percent =
-                            chart.total > 0
-                              ? Math.round((value / chart.total) * 100)
-                              : 0;
-
-                          return (
-                            <div
-                              className="coverage-legend-row"
-                              key={row.name}
-                            >
-                              <span
-                                className="coverage-legend-dot"
-                                style={{
-                                  background: colors[index % colors.length],
-                                }}
-                              />
-
-                              <div>
-                                <strong>{row.name}</strong>
-                                <p>
-                                  {formatCompact(value)} · {percent}%
-                                </p>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
+                    <CoveragePieChart
+                      rows={chart.rows}
+                      total={chart.total}
+                      totalLabel={chart.totalLabel}
+                      metrics={chart.metrics}
+                    />
                   </article>
                 );
               })}

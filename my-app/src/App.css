@@ -3415,6 +3415,30 @@ a {
   align-items: center;
 }
 
+.coverage-mui-pie-shell {
+  width: min(180px, 100%);
+  min-height: 180px;
+  margin: 0 auto;
+}
+
+.coverage-mui-pie {
+  color: #f8fafc;
+}
+
+.coverage-mui-pie text {
+  fill: #f8fafc !important;
+}
+
+.coverage-mui-pie .MuiChartsSurface-root {
+  overflow: visible;
+}
+
+.coverage-mui-pie .MuiPieArcLabel-root {
+  fill: #f8fafc;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
 .coverage-donut {
   width: 170px;
   height: 170px;
@@ -3469,7 +3493,29 @@ a {
   height: 10px;
   border-radius: 999px;
   margin-top: 5px;
-  box-shadow: 0 0 18px currentColor;
+  box-shadow: none;
+}
+
+.coverage-metric-row {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(7, 19, 38, 0.72);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.coverage-metric-row span {
+  color: rgba(226, 232, 240, 0.66);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.coverage-metric-row strong {
+  color: #f8fafc;
+  font-size: 1.12rem;
 }
 
 .coverage-legend-row strong {
