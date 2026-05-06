@@ -25,6 +25,12 @@ const definitions = [
 },
 
   {
+    term: "Notional",
+    description:
+      "The dollar value of a trade or position. It helps show how much money is behind the activity, not just how many shares were traded.",
+  },
+
+  {
   term: "Liquidity",
   description:
     "The ease with which an asset or security can be bought or sold in the market without significantly affecting its price. High liquidity indicates a large number of buyers and sellers.",
@@ -59,44 +65,44 @@ const slides = [
     type: "ml",
     definitions: [
       {
-        term: "Market Odds",
+        term: "Collect Market Data",
         description:
-          "The current Yes or No probability shown by the market. For example, 77% means the market side is priced around a 77% chance.",
+          "Orca collects Polymarket odds, market volume, notional activity, whale trades, and historical market movement.",
       },
       {
-        term: "Prediction Trend",
+        term: "Detect Whale Entry",
         description:
-          "The model’s expected odds movement after whale activity. It shows whether the market may move up or down over the forecast window.",
+          "The model looks for moments when large or trusted whales enter a market. That entry point becomes the start of the prediction trend.",
       },
       {
-        term: "Whale Entry",
+        term: "Read Market Odds",
         description:
-          "The point when a large or trusted trader starts buying into a market. Orca uses this as the starting point for the prediction trend.",
+          "The current Yes or No probability gives the model a starting price. For example, 77% means the market side is priced around a 77% chance.",
       },
       {
-        term: "12h / 24h Forecast",
+        term: "Forecast 12h / 24h",
         description:
-          "The model estimates where the market odds may move over the next 12 and 24 hours after whale activity is detected.",
+          "After whale activity is detected, the model estimates whether the market odds may move up or down over the next 12 and 24 hours.",
       },
       {
-        term: "Review Only",
+        term: "Assign Confidence",
         description:
-          "A signal shown for context, but not treated as reliable yet. It usually means the model needs more data or stronger validation for that market type.",
+          "The model labels predictions by reliability. Strong is higher confidence, Watch is useful but less certain, and Review Only means the signal needs more proof.",
       },
       {
-        term: "Validated Slice",
+        term: "Validate Against Reality",
         description:
-          "A group of similar past predictions that has enough history to compare forecasts against actual market movement.",
+          "Older predictions are compared against what actually happened later. This helps show whether the model is matching real market movement.",
       },
       {
-        term: "Low Confidence",
+        term: "Show the Trend",
         description:
-          "A prediction where the model does not have enough support to make a strong call. Users should treat it as weak or uncertain.",
+          "The dashboard shows the prediction trend next to the market trend so users can see where the model expected odds to move.",
       },
       {
-        term: "Validation",
+        term: "Update With New Data",
         description:
-          "A check that compares older predictions against what actually happened later. This helps show whether the model is matching real market movement.",
+          "As new market and whale data comes in, Orca can refresh predictions and improve future validation.",
       },
     ],
   },
