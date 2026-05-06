@@ -137,54 +137,39 @@ Client-facing formulas used by the market-profile ML explanation:
 
 - Whale pressure:
   `Whale Pressure = Trade Notional x Whale Trust Score`
-  - Trade Notional is the dollar-sized value of the whale trade. Example: buying 2,000 shares at $0.40 creates about $800 of notional.
-  - Whale Trust Score is the weight assigned to that wallet based on historical behavior, such as past signal quality, trade size, consistency, and realized performance.
-  - Whale Pressure is the weighted size of the whale action. A large trade from a highly trusted whale creates more pressure than the same trade from a lower-trust wallet.
-  - This does not mean the market must move. It means the model sees stronger whale evidence for that side of the market.
+  - Trade Notional is the dollar value of the trade, such as shares bought times price.
+  - Whale Trust Score is the wallet's reliability weight based on past behavior and performance.
+  - Larger trades from more trusted whales create stronger model pressure.
 - Net whale pressure:
   `Net Pressure = Buy Pressure - Sell Pressure`
-  - Buy Pressure is the sum of weighted whale buy activity for the market side being forecast.
-  - Sell Pressure is the sum of weighted whale sell or exit activity for that same side.
-  - Net Pressure compares whether trusted whale activity is mostly entering or leaving.
-  - Positive net pressure means whales are leaning into the side. Negative net pressure means whales are reducing or exiting exposure.
-  - Example: if buy pressure is 12,000 and sell pressure is 4,000, net pressure is +8,000, which suggests whale activity is more bullish for that side.
+  - Buy Pressure is total weighted whale buying for the side being forecast.
+  - Sell Pressure is total weighted whale selling or exiting for that side.
+  - Positive net pressure means whales are leaning in; negative net pressure means whales are moving out.
 - Predicted odds:
   `Predicted Future Odds = Current Odds + Predicted Odds Change`
-  - Current Odds is the market's Yes or No probability at the prediction start time. On the dashboard, this is usually the probability at the whale entry time or latest prediction snapshot.
-  - Predicted Odds Change is the model's estimated movement over the forecast window, measured in percentage points. A `+4 pts` change means the model expects the probability to rise by 4 percentage points, not multiply by 4%.
-  - Predicted Future Odds is the model's expected probability after the selected timeframe, usually 12h or 24h.
-  - Example: if Current Odds are 62% and the Predicted Odds Change is +4 pts, then Predicted Future Odds are 66%.
-  - Example: if Current Odds are 62% and the Predicted Odds Change is -5 pts, then Predicted Future Odds are 57%.
+  - Current Odds is the market's Yes/No probability at prediction time.
+  - Predicted Odds Change is the model's expected movement over 12h or 24h, measured in percentage points.
+  - Example: 62% current odds plus a `+4 pts` predicted change gives a 66% predicted future odds.
 - Prediction error:
   `Error = Actual Odds - Predicted Odds`
-  - Actual Odds is the real market probability observed after the same forecast window. For a 12h forecast, this is the market probability 12 hours after the prediction start time when that data is available.
-  - Predicted Odds is the model's forecast for that same future time.
-  - Error keeps the sign, so it shows whether the prediction was too low or too high.
-  - Positive error means the actual market ended higher than the model predicted, so the model underpredicted.
-  - Negative error means the actual market ended lower than the model predicted, so the model overpredicted.
-  - Example: if the model predicted 66% and the actual 12h odds were 70%, the error is +4 pts.
+  - Actual Odds is the real market probability after the forecast window.
+  - Predicted Odds is the model's forecast for that same time.
+  - Positive error means the model predicted too low; negative error means it predicted too high.
 - Absolute error:
   `Absolute Error = |Actual Odds - Predicted Odds|`
-  - Absolute Error measures how far off the model was, ignoring direction.
-  - Smaller absolute error means the predicted probability was closer to the real market probability.
-  - This is useful when the team cares about closeness, not whether the model was too high or too low.
-  - Example: if the model predicted 66% and actual odds were 70%, the absolute error is 4 pts. If the actual odds were 62%, the absolute error is also 4 pts.
+  - Absolute Error measures how far off the model was, ignoring whether it was too high or too low.
+  - Smaller absolute error means the forecast was closer to the real market probability.
+  - Example: predicted 66% and actual 70% gives a 4-point absolute error.
 - Direction accuracy:
   `Accuracy = Correct Direction Predictions / Total Validated Predictions`
-  - A correct direction means the model predicted the same up/down movement direction that actually happened during the validation window.
-  - Total Validated Predictions are predictions that already reached their 12h or 24h validation time and have enough actual market data to compare against.
-  - If the model predicts the Yes probability will rise and the actual Yes probability rises, that counts as correct direction.
-  - If the model predicts the Yes probability will rise but the actual Yes probability falls, that counts as incorrect direction.
-  - This is the main accuracy number shown for validated trend direction, but it does not measure how close the predicted percentage was. Direction accuracy and absolute error should be read together.
+  - A correct direction means the model's up/down call matched the actual market movement.
+  - Total Validated Predictions are forecasts that have reached their 12h or 24h check time.
+  - This measures direction quality, while Absolute Error measures closeness.
 - Historical signal reliability:
   `Reliability = Historical Correct Signals / Similar Past Signals`
-  - Similar Past Signals are older predictions that look similar to the current one, usually by forecast window, confidence level, signal tier, category, and validation slice when enough data exists.
-  - Historical Correct Signals are the similar past predictions that later moved in the predicted direction.
-  - Reliability estimates how often this type of signal has worked before.
-  - This is used to show Strong, Watch, or Review before the current market has finished validating.
-  - Strong means similar signals have historically been more reliable.
-  - Watch means the signal has enough support to monitor, but the model is less certain than Strong.
-  - Review means the signal does not have enough validation support yet, or it belongs to a weaker/low-data slice.
+  - Similar Past Signals are older forecasts with similar window, confidence, tier, category, or validation slice.
+  - Historical Correct Signals are the similar forecasts that later moved in the predicted direction.
+  - This supports the Strong, Watch, or Review label before the current market finishes validating.
 
 These equations are used for dashboard explanation and validation reporting. The trained models also use additional engineered features, calibration, and rolling validation checks.
 
