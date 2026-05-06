@@ -159,7 +159,7 @@ export default function LeaderboardPage() {
                 }}
               >
                 <option value="trust">Trust score</option>
-                <option value="profitability">Profitability</option>
+                <option value="profitability">Profit</option>
                 <option value="trades">Trade count</option>
               </select>
             </label>

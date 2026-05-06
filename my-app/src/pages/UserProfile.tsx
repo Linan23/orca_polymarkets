@@ -167,10 +167,6 @@ function OverviewTab({
               <strong>{score ? score.trust_score.toFixed(3) : "--"}</strong>
             </div>
             <div>
-              <span>Profitability Score</span>
-              <strong>{score ? score.profitability_score.toFixed(3) : "--"}</strong>
-            </div>
-            <div>
               <span>Sample Trades</span>
               <strong>{score?.sample_trade_count ?? 0}</strong>
             </div>
@@ -411,9 +407,6 @@ export default function UserProfile() {
         {data?.is_likely_insider ? "Insider" : "Not Insider"}
       </span>
 
-      <span className="profile-user-tag">
-        Profitability: {formatPercent(score?.profitability_score)}
-      </span>
     </div>
   </aside>
 

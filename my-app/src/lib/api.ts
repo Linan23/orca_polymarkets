@@ -241,6 +241,7 @@ export type WhaleScoreRow = {
   scoring_version: string;
   trust_score: number;
   profitability_score: number;
+  realized_pnl: number | null;
   sample_trade_count: number;
   is_whale: boolean;
   is_trusted_whale: boolean;

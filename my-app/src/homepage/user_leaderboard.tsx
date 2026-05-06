@@ -13,7 +13,20 @@ import {
   matchesUserIdentityQuery,
 } from "../lib/userIdentity";
 import { useApiData } from "../hooks/useApiData";
-import { formatProfitabilityScorePercent, formatTrustScorePercent } from "../lib/scoreFormatting";
+import { formatTrustScorePercent } from "../lib/scoreFormatting";
+
+function formatSignedCurrency(value: number | null | undefined) {
+  if (value === null || value === undefined) return "--";
+  const formatted = new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    notation: "compact",
+    maximumFractionDigits: 1,
+  }).format(Math.abs(value));
+  if (value > 0) return `+${formatted}`;
+  if (value < 0) return `-${formatted}`;
+  return formatted;
+}
 
 function getRankClass(rank: number) {
   if (rank === 1) return "gold";
@@ -30,20 +43,31 @@ type UserLeaderboardProps = {
   sortBy: "trust" | "profitability" | "trades";
 };
 
-function UserRows({ items }: { items: WhaleScoreRow[] }) {
+function pnlSortValue(user: WhaleScoreRow) {
+  return user.realized_pnl ?? Number.NEGATIVE_INFINITY;
+}
+
+function UserRows({
+  items,
+  sortBy,
+}: {
+  items: WhaleScoreRow[];
+  sortBy: UserLeaderboardProps["sortBy"];
+}) {
   return (
     <div className="leaderboard-list">
       {items.map((user, index) => {
         const rank = index + 1;
         const tier = deriveWhaleTier(user);
         const identity = deriveUserIdentity(user);
+        const isProfitSort = sortBy === "profitability";
 
         return (
-            <div key={`${user.user_id}-${user.external_user_ref}`} className="leaderboard-row">
-              <div className={`leaderboard-rank ${getRankClass(rank)}`}>{rank}</div>
-              <div className="leaderboard-avatar">
-                {tier === "trusted" ? "★" : tier === "whale" ? "◉" : tier === "potential" ? "◎" : "·"}
-              </div>
+          <div key={`${user.user_id}-${user.external_user_ref}`} className="leaderboard-row">
+            <div className={`leaderboard-rank ${getRankClass(rank)}`}>{rank}</div>
+            <div className="leaderboard-avatar">
+              {tier === "trusted" ? "★" : tier === "whale" ? "◉" : tier === "potential" ? "◎" : "·"}
+            </div>
 
             <div className="leaderboard-main">
               <div className="leaderboard-main-top">
@@ -56,11 +80,19 @@ function UserRows({ items }: { items: WhaleScoreRow[] }) {
                   </div>
                 </div>
 
-                <div className="leaderboard-score">{formatTrustScorePercent(user.trust_score)}</div>
+                <div className="leaderboard-score">
+                  {isProfitSort
+                    ? formatSignedCurrency(user.realized_pnl)
+                    : formatTrustScorePercent(user.trust_score)}
+                </div>
               </div>
 
               <div className="leaderboard-meta">
-                <span className="meta-pill">Profit {formatProfitabilityScorePercent(user.profitability_score)}</span>
+                <span className="meta-pill">
+                  {isProfitSort
+                    ? `Trust ${formatTrustScorePercent(user.trust_score)}`
+                    : `Profit ${formatSignedCurrency(user.realized_pnl)}`}
+                </span>
                 <span className={`meta-pill ${deriveWhaleTierPillClass(tier)}`}>
                   {deriveWhaleTierLabel(tier)}
                 </span>
@@ -96,7 +128,10 @@ export default function UserLeaderboard({
     });
     items.sort((left, right) => {
       if (sortBy === "profitability") {
-        return right.profitability_score - left.profitability_score;
+        const leftPnl = pnlSortValue(left);
+        const rightPnl = pnlSortValue(right);
+        if (rightPnl !== leftPnl) return rightPnl > leftPnl ? 1 : -1;
+        return right.trust_score - left.trust_score;
       }
       if (sortBy === "trades") {
         return right.sample_trade_count - left.sample_trade_count;
@@ -125,7 +160,7 @@ export default function UserLeaderboard({
             : "No whale scores are available yet."}
         </div>
       )}
-      {!loading && !error && filtered.length > 0 && <UserRows items={filtered} />}
+      {!loading && !error && filtered.length > 0 && <UserRows items={filtered} sortBy={sortBy} />}
     </section>
   );
 }

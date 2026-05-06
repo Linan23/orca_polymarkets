@@ -3104,6 +3104,7 @@ def latest_whale_scores(
         statement = statement.where(WhaleScoreSnapshot.is_whale.is_(True))
 
     rows = session.execute(statement).all()
+    resolved_performance_by_user, _ = load_resolved_user_performance(session)
     items = [
         {
             "user_id": account.user_id,
@@ -3116,6 +3117,11 @@ def latest_whale_scores(
             "scoring_version": score.scoring_version,
             "trust_score": float(score.trust_score or 0),
             "profitability_score": float(score.profitability_score or 0),
+            "realized_pnl": (
+                float(resolved_performance_by_user[account.user_id].realized_pnl)
+                if account.user_id in resolved_performance_by_user
+                else None
+            ),
             "sample_trade_count": int(score.sample_trade_count or 0),
             "is_whale": bool(score.is_whale),
             "is_trusted_whale": bool(score.is_trusted_whale),
