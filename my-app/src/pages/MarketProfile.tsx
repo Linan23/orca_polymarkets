@@ -278,31 +278,6 @@ function CurrentMarketProbabilityPanel({
   );
 }
 
-function LiveWhaleEntrySummary({ trend }: { trend: MarketProfileMlPredictionTrend | undefined }) {
-  const anchor = trend?.prediction_anchor;
-  const sequence = trend?.live_whale_sequence;
-  if (!anchor?.available) return null;
-
-  return (
-    <div className="market-ml-live-entry">
-      <div>
-        <h3>{anchor?.available ? `${formatLabel(anchor.side_label)} whale entry` : "Recent whale activity"}</h3>
-        <div className="market-ml-summary-row">
-          <span>Entry {formatDateTime(anchor?.event_time)}</span>
-          <span>Entry odds {formatOddsPercent(anchor?.odds_pct)}</span>
-          <span>Notional {formatCurrency(anchor?.notional_value ?? null)}</span>
-          <span>{anchor?.is_trusted_whale ? "Trusted whale" : "Whale"}</span>
-        </div>
-      </div>
-      <div className="market-ml-live-stats">
-        <span>{formatCompactNumber(sequence?.sequence_count, 0)} market-side sequences</span>
-        <span>{formatCompactNumber(sequence?.queried_event_rows, 0)} whale events</span>
-        <span>as of {formatDateTime(sequence?.as_of)}</span>
-      </div>
-    </div>
-  );
-}
-
 function MarketPredictionTrendChart({ cases }: { cases: MarketProfileMlPredictionCase[] }) {
   if (cases.length === 0) return null;
 
@@ -379,21 +354,8 @@ function MarketPredictionTrendChart({ cases }: { cases: MarketProfileMlPredictio
   const xFor = (hour: number) => left + (Math.min(Math.max(hour, 0), 24) / 24) * plotWidth;
   const predictedLinePoints = predictedPoints.map((point) => `${xFor(point.hour)},${yFor(point.odds)}`).join(" ");
   const actualLinePoints = actualPoints.map((point) => `${xFor(point.hour)},${yFor(point.odds)}`).join(" ");
-  const entryTime = base.whale_entry_time ?? base.prediction_start_time ?? base.observation_time;
-  const entryRows = binaryProbabilityRows(base, entryOdds);
-  const forecastSummary = cases
-    .map((item) => `${item.window} ${formatOddsPercent(modelFutureOdds(item))}`)
-    .join(" | ");
-
   return (
     <div className="market-ml-chart-shell">
-      <div className="market-ml-chart-context">
-        <span>Whale entry {formatDateTime(entryTime)}</span>
-        <span>
-          Entry {entryRows.map((row) => `${row.label} ${formatOddsPercent(row.value)}`).join(" / ")}
-        </span>
-        <span>{forecastSummary}</span>
-      </div>
       {actualPoints.length > 0 && (
         <div className="market-ml-chart-legend">
           <span><i className="market-ml-legend-predicted" /> Predicted</span>
@@ -599,7 +561,6 @@ function MarketMlPredictionTrendPanel({
   const trend = trendPayload ?? undefined;
   const cases = profileTrendCases(trend);
   const primaryCases = primaryTrendCases(cases, trend?.primary_side_label ?? preferredSideLabel);
-  const anchor = trend?.prediction_anchor;
   const [activeTab, setActiveTab] = useState<"trend" | "whales">("trend");
   const marketStatus =
     trend?.live_polymarket_closed === true ? "Closed" : trend?.live_polymarket_closed === false ? "Open" : "Status pending";
@@ -652,25 +613,15 @@ function MarketMlPredictionTrendPanel({
       ) : trendError ? (
         <div className="market-ml-empty">Unable to load prediction trend: {trendError}</div>
       ) : cases.length === 0 ? (
-        <>
-          <LiveWhaleEntrySummary trend={trend} />
-          <div className="market-ml-empty">
-            <strong>No 12h/24h ML prediction snapshot for this market yet.</strong>
-            <span>{formatLabel(trend?.prediction_status ?? trend?.reason ?? "market_not_in_ml_prediction_snapshot")}</span>
-          </div>
-        </>
+        <div className="market-ml-empty">
+          <strong>No 12h/24h ML prediction snapshot for this market yet.</strong>
+          <span>{formatLabel(trend?.prediction_status ?? trend?.reason ?? "market_not_in_ml_prediction_snapshot")}</span>
+        </div>
       ) : (
         <>
-          <LiveWhaleEntrySummary trend={trend} />
           <div className="market-ml-chart-layout">
             <div>
               <h3>{formatLabel(primaryCases[0]?.side_label)} probability trend</h3>
-              <div className="market-ml-summary-row">
-                <span>Whale entry {formatDateTime(primaryCases[0]?.whale_entry_time ?? anchor?.event_time)}</span>
-                <span>Entry odds {formatOddsPercent(primaryCases[0]?.whale_entry_odds_pct)}</span>
-                <span>{formatLabel(primaryCases[0]?.focused_fit_category)}</span>
-                <span>{formatLabel(primaryCases[0]?.display_tier)}</span>
-              </div>
               <CurrentMarketProbabilityPanel outcomes={outcomeProbabilities} price={price} odds={odds} />
               <MarketPredictionOutcomeSummary cases={primaryCases} />
             </div>

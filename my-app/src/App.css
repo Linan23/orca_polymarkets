@@ -4811,24 +4811,6 @@ font-weight:700;
   color: #f8fafc;
 }
 
-.market-ml-live-entry {
-  display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(220px, 0.8fr);
-  gap: 16px;
-  align-items: stretch;
-  border: 1px solid rgba(45, 212, 191, 0.18);
-  background: rgba(20, 184, 166, 0.08);
-  border-radius: 18px;
-  padding: 16px;
-  margin-bottom: 16px;
-}
-
-.market-ml-live-entry h3 {
-  margin: 0;
-  color: #f8fafc;
-  font-size: 1.25rem;
-}
-
 .market-ml-live-stats {
   display: flex;
   flex-direction: column;
@@ -4951,23 +4933,6 @@ font-weight:700;
   justify-content: flex-end;
   gap: 12px;
   padding: 2px 4px 6px;
-}
-
-.market-ml-chart-context {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-
-.market-ml-chart-context span {
-  border-radius: 999px;
-  border: 1px solid rgba(148, 163, 184, 0.14);
-  background: rgba(15, 23, 42, 0.62);
-  color: #dbeafe;
-  padding: 7px 10px;
-  font-size: 0.8rem;
-  font-weight: 700;
 }
 
 .market-ml-chart-legend span {
@@ -5297,7 +5262,6 @@ font-weight:700;
 
 @media (max-width: 920px) {
   .market-ml-chart-layout,
-  .market-ml-live-entry,
   .market-ml-prediction-grid,
   .market-ml-outcome-summary,
   .market-ml-whale-row {
