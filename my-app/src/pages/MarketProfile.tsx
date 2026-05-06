@@ -324,12 +324,12 @@ function MarketPredictionTrendChart({ cases }: { cases: MarketProfileMlPredictio
   const maxOdds = paddedMax - paddedMin < minRange ? Math.min(100, Math.ceil(midpoint + minRange / 2)) : paddedMax;
   const width = 520;
   const height = 320;
-  const left = 42;
-  const right = 18;
-  const top = 20;
-  const axisLabelY = height - 3;
-  const axisY = axisLabelY - 16;
-  const plotBottom = axisY - 24;
+  const left = 58;
+  const right = 44;
+  const top = 24;
+  const axisLabelY = height - 10;
+  const axisY = axisLabelY - 18;
+  const plotBottom = axisY - 26;
   const plotWidth = width - left - right;
   const plotHeight = plotBottom - top;
   const yFor = (odds: number) => top + ((maxOdds - odds) / Math.max(maxOdds - minOdds, 1)) * plotHeight;
@@ -339,9 +339,9 @@ function MarketPredictionTrendChart({ cases }: { cases: MarketProfileMlPredictio
     const isRightEdge = hour >= 22;
     const isLeftEdge = hour <= 2;
     const lineY = yFor(odds);
-    const labelTop = top + 16;
-    const labelBottom = plotBottom - 16;
-    const labelGap = 22;
+    const labelTop = top + 18;
+    const labelBottom = plotBottom - 20;
+    const labelGap = 28;
     const aboveY = lineY - labelGap;
     const belowY = lineY + labelGap;
     const hasAboveRoom = aboveY >= labelTop;
@@ -359,16 +359,22 @@ function MarketPredictionTrendChart({ cases }: { cases: MarketProfileMlPredictio
             ? aboveY
             : Math.max(labelTop, Math.min(belowY, labelBottom));
 
-    if (Math.abs(y - lineY) < 16) {
+    if (Math.abs(y - lineY) < 22) {
       const fallbackY = lineY < (labelTop + labelBottom) / 2 ? belowY : aboveY;
       y = Math.max(labelTop, Math.min(fallbackY, labelBottom));
     }
 
     return {
-      x: isRightEdge ? x - 8 : isLeftEdge ? x + 8 : x,
+      x: isRightEdge ? x - 10 : isLeftEdge ? x + 10 : x,
       y,
       textAnchor: isRightEdge ? "end" : isLeftEdge ? "start" : "middle",
     } as const;
+  };
+  const axisLabelProps = (hour: number) => {
+    const x = xFor(hour);
+    if (hour === 0) return { x: x + 4, textAnchor: "start" } as const;
+    if (hour === 24) return { x: x - 4, textAnchor: "end" } as const;
+    return { x, textAnchor: "middle" } as const;
   };
   const predictedLinePoints = predictedPoints.map((point) => `${xFor(point.hour)},${yFor(point.odds)}`).join(" ");
   const actualLinePoints = actualPoints.map((point) => `${xFor(point.hour)},${yFor(point.odds)}`).join(" ");
@@ -396,7 +402,7 @@ function MarketPredictionTrendChart({ cases }: { cases: MarketProfileMlPredictio
         ))}
         <line className="market-ml-axis-line" x1={left} x2={width - right} y1={axisY} y2={axisY} />
         {[0, 12, 24].map((hour) => (
-          <text className="market-ml-axis-label" key={`axis-${hour}`} x={xFor(hour)} y={axisLabelY} textAnchor="middle">
+          <text className="market-ml-axis-label" key={`axis-${hour}`} {...axisLabelProps(hour)} y={axisLabelY}>
             {hour === 0 ? "Start" : `${hour}h later`}
           </text>
         ))}
