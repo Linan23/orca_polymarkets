@@ -102,65 +102,35 @@ function CoveragePieChart({
 
   return (
     <div className="coverage-pie-content">
-      <div className="coverage-mui-pie-shell">
-        <PieChart
-          className="coverage-mui-pie"
-          series={[
-            {
-              data: pieData,
-              cornerRadius: 3,
-              paddingAngle: 1,
-              highlightScope: { fade: "global", highlight: "item" },
-              faded: { innerRadius: 30, additionalRadius: -30, color: "gray" },
-              valueFormatter: (item) => {
-                const percent = total > 0 ? (item.value / total) * 100 : 0;
-                return `${formatCompact(item.value)} · ${formatPercent(percent)}`;
+      {activeRows.length > 0 ? (
+        <div className="coverage-mui-pie-shell">
+          <PieChart
+            className="coverage-mui-pie"
+            series={[
+              {
+                data: pieData,
+                cornerRadius: 3,
+                paddingAngle: 1,
+                highlightScope: { fade: "global", highlight: "item" },
+                faded: { innerRadius: 30, additionalRadius: -30, color: "gray" },
+                valueFormatter: (item) => {
+                  const percent = total > 0 ? (item.value / total) * 100 : 0;
+                  return `${formatCompact(item.value)} · ${formatPercent(percent)}`;
+                },
               },
-            },
-          ]}
-          width={180}
-          height={180}
-          hideLegend
-          margin={{ top: 8, bottom: 8, left: 8, right: 8 }}
-        />
-      </div>
-
-      <div className="coverage-pie-legend">
-        {activeRows.map((row, index) => {
-          const percent = total > 0 ? Math.round((row.value / total) * 100) : 0;
-
-          return (
-            <div
-              className="coverage-legend-row"
-              key={row.name}
-              title={`${row.name}: ${formatCompact(row.value)} · ${percent}%`}
-            >
-              <span
-                className="coverage-legend-dot"
-                style={{
-                  background: COVERAGE_COLORS[index % COVERAGE_COLORS.length],
-                }}
-              />
-
-              <div>
-                <strong>{row.name}</strong>
-                <p>
-                  {formatCompact(row.value)} · {percent}%
-                </p>
-              </div>
-            </div>
-          );
-        })}
-
-        {activeRows.length === 0 && (
-          <div className="coverage-legend-row">
-            <div>
-              <strong>{totalLabel}</strong>
-              <p>No coverage data available</p>
-            </div>
-          </div>
-        )}
-      </div>
+            ]}
+            width={220}
+            height={220}
+            hideLegend
+            margin={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          />
+        </div>
+      ) : (
+        <div className="coverage-empty-state">
+          <strong>{totalLabel}</strong>
+          <span>No coverage data available</span>
+        </div>
+      )}
     </div>
   );
 }

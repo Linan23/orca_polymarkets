@@ -3409,15 +3409,15 @@ a {
 }
 
 .coverage-pie-content {
-  display: grid;
-  grid-template-columns: minmax(180px, 200px) minmax(0, 1fr);
-  gap: 28px;
+  display: flex;
   align-items: center;
+  justify-content: center;
+  min-height: 230px;
 }
 
 .coverage-mui-pie-shell {
-  width: min(200px, 100%);
-  min-height: 200px;
+  width: min(230px, 100%);
+  min-height: 230px;
   margin: 0 auto;
 }
 
@@ -3431,6 +3431,19 @@ a {
 
 .coverage-mui-pie .MuiChartsSurface-root {
   overflow: visible;
+}
+
+.coverage-empty-state {
+  display: grid;
+  gap: 8px;
+  place-items: center;
+  min-height: 180px;
+  text-align: center;
+  color: rgba(226, 232, 240, 0.68);
+}
+
+.coverage-empty-state strong {
+  color: #f8fafc;
 }
 
 .coverage-donut {
@@ -4037,8 +4050,7 @@ font-weight:700;
 
 /* Make the donut cards fit inside each third */
 .summary-grid-three .coverage-pie-content {
-  grid-template-columns: minmax(150px, 170px) minmax(0, 1fr);
-  gap: 22px;
+  min-height: 230px;
 }
 
 .summary-grid-three .coverage-donut {
