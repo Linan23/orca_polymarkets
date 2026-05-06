@@ -1113,17 +1113,25 @@ def _latest_market_prediction_snapshot_payload(session: Session, market_slug: st
     if not normalized_slug or not _ml_prediction_snapshot_table_exists(session):
         return None
     latest_generated_at = session.scalar(
-        select(func.max(MlMarketPredictionSnapshot.prediction_generated_at)).where(
-            func.lower(MlMarketPredictionSnapshot.market_slug) == normalized_slug
-        )
+        select(MlMarketPredictionSnapshot.prediction_generated_at)
+        .where(MlMarketPredictionSnapshot.market_slug == normalized_slug)
+        .order_by(desc(MlMarketPredictionSnapshot.prediction_generated_at))
+        .limit(1)
     )
+    if latest_generated_at is None:
+        latest_generated_at = session.scalar(
+            select(MlMarketPredictionSnapshot.prediction_generated_at)
+            .where(func.lower(MlMarketPredictionSnapshot.market_slug) == normalized_slug)
+            .order_by(desc(MlMarketPredictionSnapshot.prediction_generated_at))
+            .limit(1)
+        )
     if latest_generated_at is None:
         return None
     rows = list(
         session.scalars(
             select(MlMarketPredictionSnapshot)
             .where(
-                func.lower(MlMarketPredictionSnapshot.market_slug) == normalized_slug,
+                MlMarketPredictionSnapshot.market_slug == normalized_slug,
                 MlMarketPredictionSnapshot.prediction_generated_at == latest_generated_at,
             )
             .order_by(
@@ -1133,6 +1141,21 @@ def _latest_market_prediction_snapshot_payload(session: Session, market_slug: st
             )
         )
     )
+    if not rows:
+        rows = list(
+            session.scalars(
+                select(MlMarketPredictionSnapshot)
+                .where(
+                    func.lower(MlMarketPredictionSnapshot.market_slug) == normalized_slug,
+                    MlMarketPredictionSnapshot.prediction_generated_at == latest_generated_at,
+                )
+                .order_by(
+                    MlMarketPredictionSnapshot.prediction_window_hours,
+                    MlMarketPredictionSnapshot.side_label,
+                    MlMarketPredictionSnapshot.ml_market_prediction_snapshot_id,
+                )
+            )
+        )
     if not rows:
         return None
 

@@ -518,6 +518,7 @@ function MarketWatchlistRows({
     <div className="watchlist-list">
       {items.map((market) => {
         const closedMarket = closedMarketBySlug.get(market.market_slug.toLowerCase());
+        const marketStatusLabel = closedMarket?.market_status_label ?? market.market_status_label;
         return (
           <article key={market.market_slug} className="watchlist-card">
             <div className="watchlist-card-main">
@@ -532,8 +533,8 @@ function MarketWatchlistRows({
                 <span className="meta-pill">Trusted Whales {market.trusted_whale_count}</span>
               </div>
               <div className="watchlist-card-tags">
-                <span className={`following-pill following-status-pill ${statusPillClass(market.market_status_label)}`}>
-                  {market.market_status_label}
+                <span className={`following-pill following-status-pill ${statusPillClass(marketStatusLabel)}`}>
+                  {marketStatusLabel}
                 </span>
                 {closedMarket && (
                   <span className="following-pill following-result-pill">{closedMarket.result_label}</span>
