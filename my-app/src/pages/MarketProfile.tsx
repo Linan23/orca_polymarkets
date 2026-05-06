@@ -72,6 +72,19 @@ function formatCurrency(value: number | null) {
   return `$${value.toLocaleString()}`;
 }
 
+function polymarketMarketUrl(marketUrl: string | null | undefined, marketSlug: string | null | undefined) {
+  if (marketUrl) {
+    try {
+      const parsed = new URL(marketUrl);
+      if (parsed.hostname.endsWith("polymarket.com")) return parsed.toString();
+    } catch {
+      if (marketUrl.startsWith("/")) return `https://polymarket.com${marketUrl}`;
+    }
+  }
+  if (!marketSlug) return null;
+  return `https://polymarket.com/market/${encodeURIComponent(marketSlug)}`;
+}
+
 function profileTrendCases(trend: MarketProfileMlPredictionTrend | undefined) {
   if (!trend?.available || !trend.windows) return [];
   return PREDICTION_WINDOWS.flatMap((windowName) =>
@@ -469,6 +482,7 @@ export default function MarketProfile() {
   const { isMarketFollowed, toggleMarket } = useWatchlist();
   const loadMarket = useCallback(() => fetchMarketProfile(marketSlug), [marketSlug]);
   const { data, loading, error } = useApiData(loadMarket);
+  const externalMarketUrl = data ? polymarketMarketUrl(data.market_url, data.market_slug) : null;
 
   return (
     <div className="page market-profile-page">
@@ -476,7 +490,15 @@ export default function MarketProfile() {
         <div className="hero-top-row">
           <div>
             <p className="eyebrow">Market Profile</p>
-            <h1 className="market-title">{data?.question ?? marketSlug}</h1>
+            <h1 className="market-title">
+              {externalMarketUrl ? (
+                <a href={externalMarketUrl} target="_blank" rel="noreferrer">
+                  {data?.question ?? marketSlug}
+                </a>
+              ) : (
+                data?.question ?? marketSlug
+              )}
+            </h1>
             <p className="hero-text">Latest dashboard-backed market snapshot and whale concentration details.</p>
           </div>
 

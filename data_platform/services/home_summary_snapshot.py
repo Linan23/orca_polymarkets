@@ -174,6 +174,58 @@ _PLATFORM_COVERAGE_SQL = text(
     """
 )
 
+_MARKET_CATEGORY_COVERAGE_SQL = text(
+    """
+    WITH market_text AS (
+      SELECT LOWER(CONCAT_WS(
+        ' ',
+        me.title,
+        me.slug,
+        me.category,
+        mc.question,
+        mc.market_slug,
+        mc.outcome_a_label,
+        mc.outcome_b_label
+      )) AS haystack
+      FROM analytics.market_contract mc
+      JOIN analytics.market_event me
+        ON me.event_id = mc.event_id
+      JOIN analytics.platform p
+        ON p.platform_id = mc.platform_id
+      WHERE p.platform_name = 'polymarket'
+    ),
+    classified AS (
+      SELECT
+        CASE
+          WHEN haystack ~ '(video[ -]?games?|videogames?|gaming|gta|grand theft auto|nintendo|playstation|xbox|steam|esports?|counter[ -]?strike|cs2|fortnite|call of duty|rockstar|rocket league|league of legends|valorant|dota)'
+            THEN 'Video Game'
+          WHEN haystack ~ '(crypto|cryptocurrenc|bitcoin|ethereum|solana|doge|dogecoin|xrp|btc|eth|token|airdrop|coinbase|kraken|stablecoin|microstrategy|mstr|blockchain|defi)'
+            THEN 'Crypto'
+          WHEN haystack ~ '(technology|tech|openai|gpt|llm|artificial intelligence|\\bai\\b|nvidia|amd|microsoft|google|alphabet|meta|apple|anthropic|sam altman|semiconductor|chips?|software|hardware)'
+            THEN 'Technology'
+          WHEN haystack ~ '(geopolit|world affairs|foreign policy|diplom|ceasefire|military|nato|ukraine|russia|putin|zelensky|china|taiwan|iran|israel|gaza|syria|middle east|\\bwar\\b)'
+            THEN 'Geopolitics'
+          WHEN haystack ~ '(politic|elections?|government|president|presidential|prime minister|congress|senate|parliament|cabinet|minister|tariff|trump|biden|starmer|macron|supreme court|us government)'
+            THEN 'Politics'
+          ELSE 'Other'
+        END AS category_name
+      FROM market_text
+    )
+    SELECT category_name, COUNT(*)::integer AS market_count
+    FROM classified
+    GROUP BY category_name
+    ORDER BY
+      CASE category_name
+        WHEN 'Video Game' THEN 1
+        WHEN 'Technology' THEN 2
+        WHEN 'Crypto' THEN 3
+        WHEN 'Geopolitics' THEN 4
+        WHEN 'Politics' THEN 5
+        ELSE 6
+      END
+    """
+)
+
 _LATEST_DASHBOARD_TIME_SQL = text(
     """
     SELECT generated_at
@@ -186,6 +238,18 @@ _LATEST_DASHBOARD_TIME_SQL = text(
 
 def _iso(value: datetime | None) -> str | None:
     return value.isoformat() if value is not None else None
+
+
+def market_category_coverage_payload(session: Session) -> list[dict[str, Any]]:
+    """Return Polymarket market counts grouped by the project focus categories."""
+    rows = session.execute(_MARKET_CATEGORY_COVERAGE_SQL).mappings().all()
+    return [
+        {
+            "category_name": row["category_name"],
+            "market_count": int(row["market_count"] or 0),
+        }
+        for row in rows
+    ]
 
 
 def _latest_successful_scrape_time(session: Session) -> datetime | None:
@@ -287,6 +351,7 @@ def compose_home_summary_payload(session: Session) -> dict[str, Any]:
 
     resolved_row = session.execute(_RESOLVED_COVERAGE_SQL).mappings().one()
     platform_rows = session.execute(_PLATFORM_COVERAGE_SQL).mappings().all()
+    market_category_coverage = market_category_coverage_payload(session)
     latest_dashboard_time = session.execute(_LATEST_DASHBOARD_TIME_SQL).scalar_one_or_none()
     payload = {
         "scoring_version": scoring_version,
@@ -298,6 +363,7 @@ def compose_home_summary_payload(session: Session) -> dict[str, Any]:
         "top_trusted_whale": top_trusted_whale,
         "most_whale_concentrated_market": most_whale_concentrated_market,
         "latest_ingestion": _latest_scrape_run_payload(session, last_successful_ingest_at=last_successful_ingest_at),
+        "market_category_coverage": market_category_coverage,
         "platform_coverage": [
             {
                 "platform_name": row["platform_name"],
@@ -366,6 +432,7 @@ def latest_home_summary_snapshot_payload(session: Session) -> dict[str, Any] | N
         session,
         last_successful_ingest_at=last_successful_ingest_at,
     )
+    payload["market_category_coverage"] = market_category_coverage_payload(session)
     payload.update(
         _freshness_metadata(
             observed_at=row.generated_at,

@@ -1,4 +1,8 @@
+
 import TopNavbar from "../homepage/TopNavbar";
+import { useState } from "react";
+
+
 
 const definitions = [
   {
@@ -43,7 +47,42 @@ const definitions = [
   },
 ];
 
+const slides = [
+  {
+    title: "Key Definitions",
+    eyebrow: "Glossary",
+    type: "definitions",
+  },
+  {
+    title: "How the ML Works",
+    eyebrow: "Machine Learning",
+    type: "ml",
+    points: [
+      "Orca collects market and trader behavior data.",
+      "The model looks for patterns in whale activity, volume, and past trades.",
+      "It compares current behavior to historical outcomes.",
+      "The goal is to help estimate which traders may give stronger market signals.",
+    ],
+  },
+  {
+    title: "How the Trust Score Works",
+    eyebrow: "Trust Score",
+    type: "trust",
+    points: [
+      "The trust score ranks traders based on consistency and past performance.",
+      "Higher scores suggest stronger historical signal quality.",
+      "The score can use factors like win rate, volume, timing, and profitability.",
+      "Trusted whales are users with stronger scores and more reliable behavior patterns.",
+    ],
+  },
+];
+
+
+
 export default function DefinitionsPage() {
+
+const [activeSlide, setActiveSlide] = useState(0);
+
   return (
     <div className="page page-definitions">
       <TopNavbar />
@@ -72,8 +111,22 @@ export default function DefinitionsPage() {
         </div>
       </section>
 
-      <section className="definitions-section">
-        <div className="definitions-panel">
+<section className="definitions-section">
+  <div className="carousel-container">
+    <button
+      className="carousel-btn left"
+      onClick={() => setActiveSlide((prev) => Math.max(prev - 1, 0))}
+    >
+      ‹
+    </button>
+
+    <div
+      className="carousel-track"
+      style={{ transform: `translateX(-${activeSlide * 100}%)` }}
+    >
+      {/* SLIDE 1: DEFINITIONS */}
+      <div className="carousel-slide">
+        <div className="carousel-card definitions-panel">
           <div className="definitions-panel-header">
             <p className="eyebrow">Glossary</p>
             <h2>Key Definitions</h2>
@@ -88,7 +141,73 @@ export default function DefinitionsPage() {
             ))}
           </div>
         </div>
-      </section>
+      </div>
+
+      {/* SLIDE 2: ML */}
+      <div className="carousel-slide">
+        <div className=" carousel-card definitions-panel">
+        <div className="definitions-panel-header">
+  <p className="eyebrow">Machine Learning</p>
+  <h2>How the ML Works</h2>
+</div>
+
+          <div className="definitions-list">
+  {slides[1].points?.map((point, i) => (
+    <div className="definition-row" key={point}>
+      <h3>{i + 1}</h3>
+      <p>{point}</p>
+    </div>
+  ))}
+</div>
+
+
+        </div>
+      </div>
+
+      {/* SLIDE 3: TRUST */}
+      <div className="carousel-slide">
+        <div className="carousel-card definitions-panel">
+     <div className="definitions-panel-header">
+  <p className="eyebrow">Trust Score</p>
+  <h2>How the Trust Score Works</h2>
+</div>
+
+       <div className="definitions-list">
+  {slides[2].points?.map((point, i) => (
+    <div className="definition-row" key={point}>
+      <h3>{i + 1}</h3>
+      <p>{point}</p>
+    </div>
+  ))}
+</div>
+
+        </div>
+      </div>
+    </div>
+
+    <button
+      className="carousel-btn right"
+      onClick={() =>
+        setActiveSlide((prev) => Math.min(prev + 1, slides.length - 1))
+      }
+    >
+      ›
+    </button>
+
+    {/* DOTS */}
+    <div className="carousel-dots">
+      {slides.map((_, i) => (
+        <div
+          key={i}
+          className={`dot ${activeSlide === i ? "active" : ""}`}
+          onClick={() => setActiveSlide(i)}
+        />
+      ))}
+    </div>
+  </div>
+</section>
+
     </div>
   );
+
 }
