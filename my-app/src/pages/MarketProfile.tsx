@@ -32,12 +32,12 @@ function formatOddsPercent(value: number | null | undefined, digits = 1) {
 function formatSignedPoints(value: number | null | undefined, digits = 1) {
   if (typeof value !== "number" || !Number.isFinite(value)) return "--";
   const sign = value > 0 ? "+" : "";
-  return `${sign}${value.toFixed(digits)} pts`;
+  return `${sign}${value.toFixed(digits)} points`;
 }
 
 function formatPointMagnitude(value: number | null | undefined, digits = 1) {
   if (typeof value !== "number" || !Number.isFinite(value)) return "--";
-  return `${Math.abs(value).toFixed(digits)} pts`;
+  return `${Math.abs(value).toFixed(digits)} points`;
 }
 
 function formatCompactNumber(value: number | string | null | undefined, digits = 1) {
@@ -132,21 +132,21 @@ function primaryTrendCases(cases: MarketProfileMlPredictionCase[], preferredSide
 }
 
 function forecastDirectionTag(item: MarketProfileMlPredictionCase) {
-  if (item.predicted_direction === "up") return "Up forecast";
-  if (item.predicted_direction === "down") return "Down forecast";
-  return "Flat forecast";
+  if (item.predicted_direction === "up") return "Expected to rise";
+  if (item.predicted_direction === "down") return "Expected to fall";
+  return "Expected to stay near current odds";
 }
 
 function historicalValidationTag(item: MarketProfileMlPredictionCase) {
   if (item.historical_validation_tier === "high_confidence_historical_slice") {
     const pct = item.historical_validation_direction_match_pct;
-    return typeof pct === "number" ? `Validated slice ${pct.toFixed(1)}%` : "Validated slice";
+    return typeof pct === "number" ? `Past match ${pct.toFixed(1)}%` : "Past match available";
   }
-  if (item.historical_validation_tier === "strong_model_signal") return "Strong signal";
-  if (item.historical_validation_tier === "review_only") return "Review only";
-  if (item.historical_validation_tier === "insufficient_validated_accuracy") return "Low validation";
-  if (item.direction_signal_tier === "watch") return "Watch signal";
-  if (item.direction_signal_tier === "abstain") return "Review only";
+  if (item.historical_validation_tier === "strong_model_signal") return "High confidence";
+  if (item.historical_validation_tier === "review_only") return "Needs review";
+  if (item.historical_validation_tier === "insufficient_validated_accuracy") return "Limited past proof";
+  if (item.direction_signal_tier === "watch") return "Watch closely";
+  if (item.direction_signal_tier === "abstain") return "Needs review";
   return formatLabel(item.direction_signal_tier);
 }
 
@@ -159,7 +159,7 @@ function modelDelta(item: MarketProfileMlPredictionCase) {
 }
 
 function predictionForecastSummary(item: MarketProfileMlPredictionCase) {
-  return `${item.window} ${formatOddsPercent(modelFutureOdds(item))} (${formatSignedPoints(modelDelta(item))})`;
+  return `${item.window} forecast ${formatOddsPercent(modelFutureOdds(item))} (${formatSignedPoints(modelDelta(item))})`;
 }
 
 function oppositeSideLabel(value: string | null | undefined) {
@@ -350,16 +350,16 @@ function MarketPredictionTrendChart({ cases }: { cases: MarketProfileMlPredictio
   return (
     <div className="market-ml-chart-shell">
       <div className="market-ml-chart-summary">
-        <span>Entry {formatDateTime(entryTime)}</span>
-        <span>{formatLabel(base.side_label)} entry {formatOddsPercent(entryOdds)}</span>
+        <span>Whale entered {formatDateTime(entryTime)}</span>
+        <span>Starting {formatLabel(base.side_label)} odds {formatOddsPercent(entryOdds)}</span>
         {forecastSummaries.map((summary) => (
           <span key={summary}>{summary}</span>
         ))}
       </div>
       {actualPoints.length > 0 && (
         <div className="market-ml-chart-legend">
-          <span><i className="market-ml-legend-predicted" /> Predicted</span>
-          <span><i className="market-ml-legend-actual" /> Actual</span>
+          <span><i className="market-ml-legend-predicted" /> Model forecast</span>
+          <span><i className="market-ml-legend-actual" /> Actual odds</span>
         </div>
       )}
       <svg className="market-ml-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="ML prediction trend">
@@ -372,7 +372,7 @@ function MarketPredictionTrendChart({ cases }: { cases: MarketProfileMlPredictio
         <line className="market-ml-axis-line" x1={left} x2={width - right} y1={axisY} y2={axisY} />
         {[0, 12, 24].map((hour) => (
           <text className="market-ml-axis-label" key={`axis-${hour}`} x={xFor(hour)} y={axisLabelY} textAnchor="middle">
-            {hour === 0 ? "entry" : `+${hour}h`}
+            {hour === 0 ? "Start" : `${hour}h later`}
           </text>
         ))}
         <polyline className="market-ml-chart-line" points={predictedLinePoints} />
@@ -412,7 +412,7 @@ function MarketPredictionOutcomeSummary({ cases }: { cases: MarketProfileMlPredi
           <article className="market-ml-outcome-card" key={`outcome-${item.window}-${item.side_label}`}>
             <div className="market-ml-outcome-card-header">
               <span>{item.window}</span>
-              <strong>Model prediction</strong>
+              <strong>Expected odds</strong>
             </div>
             <div className="market-ml-model-probability-grid">
               {predictedRows.map((row) => (
@@ -422,10 +422,10 @@ function MarketPredictionOutcomeSummary({ cases }: { cases: MarketProfileMlPredi
               ))}
             </div>
             <div className="market-ml-outcome-footer">
-              <span>{forecastDirectionTag(item)}</span>
-              <span>{historicalValidationTag(item)}</span>
-              <span>{formatSignedPoints(comparison?.model_predicted_delta_pts ?? modelDelta(item))}</span>
-              {hasValidation && <span>Error {formatPointMagnitude(comparison?.prediction_absolute_error_pts ?? item.prediction_absolute_error_pts)}</span>}
+              <span>Direction: {forecastDirectionTag(item)}</span>
+              <span>Confidence: {historicalValidationTag(item)}</span>
+              <span>Odds change: {formatSignedPoints(comparison?.model_predicted_delta_pts ?? modelDelta(item))}</span>
+              {hasValidation && <span>Past error: {formatPointMagnitude(comparison?.prediction_absolute_error_pts ?? item.prediction_absolute_error_pts)}</span>}
             </div>
           </article>
         );
@@ -581,11 +581,11 @@ function MarketMlPredictionTrendPanel({
       <div className="card-header market-ml-header">
         <div>
           <p className="card-label">ML Trend</p>
-          <h2>{activeTab === "whales" ? "Top Market Whales" : "Prediction Trend"}</h2>
+          <h2>{activeTab === "whales" ? "Top Market Whales" : "Whale-Based Forecast"}</h2>
           <p className="card-subtext">
             {activeTab === "whales"
               ? "Top 5 whales active in this market, ranked by latest trust score."
-              : "Whale entry time followed by server-backed 12h and 24h trend predictions."}
+              : "Shows when whales entered, current odds, and where the model expects odds to move in 12 and 24 hours."}
           </p>
         </div>
         <div className="market-ml-actions">
@@ -600,7 +600,7 @@ function MarketMlPredictionTrendPanel({
               role="tab"
               aria-selected={activeTab === "trend"}
             >
-              Prediction Trend
+              Forecast
             </button>
             <button
               type="button"
