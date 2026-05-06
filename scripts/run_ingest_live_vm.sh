@@ -28,4 +28,9 @@ if [[ "$has_focus_domain" -eq 0 ]]; then
   )
 fi
 
-exec python data_platform/jobs/run_live_ingest.py "${focus_args[@]}" "$@"
+window_args=(
+  --window-start "${LIVE_INGEST_WINDOW_START:-00:00}"
+  --window-end "${LIVE_INGEST_WINDOW_END:-00:00}"
+)
+
+exec python data_platform/jobs/run_live_ingest.py "${focus_args[@]}" "${window_args[@]}" "$@"
