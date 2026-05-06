@@ -225,6 +225,7 @@ export type MarketProfileMlPredictionTrend = {
   primary_side_label?: string | null;
   live_polymarket_updated_at?: string | null;
   live_polymarket_closed?: boolean | null;
+  recent_12h_validation?: MarketProfileMlPredictionValidationSummary | null;
   prediction_anchor?: MarketProfileWhaleEntryAnchor;
   live_whale_sequence?: {
     available?: boolean;
@@ -243,6 +244,18 @@ export type MarketProfileMlPredictionTrend = {
     "24h"?: MarketProfileMlPredictionCase[];
     [key: string]: MarketProfileMlPredictionCase[] | undefined;
   };
+};
+
+export type MarketProfileMlPredictionValidationSummary = {
+  window_hours: number;
+  sample_size: number;
+  sample_limit: number;
+  direction_match_count: number;
+  direction_match_rate_pct: number;
+  avg_absolute_error_pts: number | null;
+  latest_validated_at?: string | null;
+  latest_actual_observed_at?: string | null;
+  summary_label?: string | null;
 };
 
 export type MarketProfileTopWhale = {

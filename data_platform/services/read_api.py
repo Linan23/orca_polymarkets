@@ -880,6 +880,65 @@ def _latest_completed_prediction_validations(
     }
 
 
+def _recent_prediction_validation_summary(
+    session: Session,
+    *,
+    market_slug: str,
+    window_hours: int = 12,
+    limit: int = 12,
+) -> dict[str, Any] | None:
+    """Return recent completed model-vs-actual validation metrics for one market."""
+    if not _ml_prediction_validation_table_exists(session):
+        return None
+    row = session.execute(
+        text(
+            """
+            WITH recent AS (
+              SELECT
+                v.direction_match,
+                v.absolute_error_pts,
+                v.actual_observed_at,
+                v.validated_at
+              FROM analytics.ml_market_prediction_validation v
+              WHERE lower(v.market_slug) = :market_slug
+                AND v.prediction_window_hours = :window_hours
+                AND v.validation_status = 'validated'
+                AND v.actual_future_odds_pct IS NOT NULL
+              ORDER BY
+                COALESCE(v.actual_observed_at, v.validated_at) DESC,
+                v.ml_market_prediction_validation_id DESC
+              LIMIT :limit
+            )
+            SELECT
+              COUNT(*) AS completed_count,
+              COALESCE(SUM(CASE WHEN direction_match IS TRUE THEN 1 ELSE 0 END), 0) AS direction_match_count,
+              AVG(absolute_error_pts) AS avg_absolute_error_pts,
+              MAX(validated_at) AS latest_validated_at,
+              MAX(actual_observed_at) AS latest_actual_observed_at
+            FROM recent
+            """
+        ),
+        {"market_slug": market_slug, "window_hours": window_hours, "limit": limit},
+    ).mappings().first()
+    if not row or int(row["completed_count"] or 0) <= 0:
+        return None
+    completed_count = int(row["completed_count"] or 0)
+    direction_match_count = int(row["direction_match_count"] or 0)
+    direction_match_rate_pct = round((direction_match_count / completed_count) * 100.0, 1)
+    avg_absolute_error_pts = _float_or_none(row["avg_absolute_error_pts"])
+    return {
+        "window_hours": int(window_hours),
+        "sample_size": completed_count,
+        "sample_limit": int(limit),
+        "direction_match_count": direction_match_count,
+        "direction_match_rate_pct": direction_match_rate_pct,
+        "avg_absolute_error_pts": round(avg_absolute_error_pts, 2) if avg_absolute_error_pts is not None else None,
+        "latest_validated_at": _isoformat(row["latest_validated_at"]),
+        "latest_actual_observed_at": _isoformat(row["latest_actual_observed_at"]),
+        "summary_label": f"Last {completed_count} completed {window_hours}h checks",
+    }
+
+
 def _latest_market_prediction_snapshot_payload(session: Session, market_slug: str) -> dict[str, Any] | None:
     """Return the latest persisted ML prediction snapshot payload for one market."""
     normalized_slug = str(market_slug or "").strip().casefold()
@@ -1255,6 +1314,12 @@ def _market_profile_ml_trend_payload(
         baseline_available = any(windows.get(window_name) for window_name in ("12h", "24h"))
         chart_available = baseline_available
     windows = _apply_live_polymarket_prediction_overlay(windows, live_market=live_market)
+    recent_12h_validation = _recent_prediction_validation_summary(
+        session,
+        market_slug=str(market_slug or "").strip().casefold(),
+        window_hours=12,
+        limit=12,
+    )
     market_is_closed = bool(live_market.closed) if live_market is not None else bool(contract and contract.is_closed)
     model_prediction_available = bool(local_prediction.get("model_prediction_available", chart_available))
     base_prediction_status = str(local_prediction.get("prediction_status") or "")
@@ -1289,6 +1354,7 @@ def _market_profile_ml_trend_payload(
         "primary_side_label": live_market.primary_side_label() if live_market is not None else None,
         "live_polymarket_updated_at": live_market.updated_at.isoformat() if live_market and live_market.updated_at else None,
         "live_polymarket_closed": market_is_closed,
+        "recent_12h_validation": recent_12h_validation,
         "prediction_anchor": anchor,
         "live_whale_sequence": {
             "available": bool(live_sequence.get("available")),

@@ -4856,9 +4856,7 @@ font-weight:700;
   margin-top: 14px;
 }
 
-.market-ml-summary-row span,
-.market-ml-row-metrics span,
-.market-ml-row-detail span {
+.market-ml-summary-row span {
   border-radius: 999px;
   border: 1px solid rgba(148, 163, 184, 0.14);
   background: rgba(15, 23, 42, 0.62);
@@ -4885,6 +4883,7 @@ font-weight:700;
   display: grid;
   gap: 6px;
   min-width: 0;
+  overflow-wrap: anywhere;
   border: 1px solid rgba(148, 163, 184, 0.14);
   background: rgba(15, 23, 42, 0.62);
   border-radius: 14px;
@@ -4918,7 +4917,7 @@ font-weight:700;
   border: 1px solid rgba(148, 163, 184, 0.14);
   background: rgba(2, 6, 23, 0.34);
   border-radius: 18px;
-  padding: 10px;
+  padding: 8px;
   min-width: 0;
 }
 
@@ -4951,18 +4950,6 @@ font-weight:700;
   border-radius: 999px;
 }
 
-.market-ml-chart-note,
-.market-ml-outcome-meta {
-  margin: 0;
-  color: #94a3b8;
-  font-size: 0.78rem;
-  line-height: 1.4;
-}
-
-.market-ml-chart-note {
-  padding: 0 4px 6px;
-}
-
 .market-ml-legend-predicted {
   background: #2dd4bf;
 }
@@ -4973,7 +4960,7 @@ font-weight:700;
 
 .market-ml-chart {
   width: 100%;
-  min-height: 220px;
+  min-height: 178px;
   display: block;
 }
 
@@ -5029,6 +5016,7 @@ font-weight:700;
   border-radius: 14px;
   padding: 12px;
   min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .market-ml-outcome-card-header,
@@ -5044,6 +5032,7 @@ font-weight:700;
 .market-ml-outcome-footer span {
   color: #94a3b8;
   font-size: 0.78rem;
+  min-width: 0;
 }
 
 .market-ml-outcome-card-header strong {
@@ -5051,81 +5040,46 @@ font-weight:700;
   font-size: 0.86rem;
 }
 
-.market-ml-outcome-columns {
+.market-ml-validation-summary {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.market-ml-outcome-columns div {
-  display: grid;
-  gap: 6px;
-  border-radius: 10px;
-  background: rgba(2, 6, 23, 0.3);
-  padding: 8px;
-}
-
-.market-ml-outcome-columns p {
-  margin: 0;
-  color: #7dd3fc;
-  font-size: 0.72rem;
-  font-weight: 800;
-  text-transform: uppercase;
-}
-
-.market-ml-outcome-columns span {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  color: #cbd5e1;
-  font-size: 0.82rem;
-}
-
-.market-ml-outcome-columns strong {
-  color: #f8fafc;
-}
-
-.market-ml-prediction-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 14px;
-  margin-top: 16px;
-}
-
-.market-ml-prediction-row {
-  display: grid;
-  gap: 12px;
+  align-items: center;
   border: 1px solid rgba(148, 163, 184, 0.14);
-  background: rgba(15, 23, 42, 0.58);
+  background: rgba(15, 23, 42, 0.5);
   border-radius: 18px;
   padding: 16px;
+  margin-top: 14px;
+  min-width: 0;
 }
 
-.market-ml-row-title,
-.market-ml-row-metrics,
-.market-ml-row-detail {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-}
-
-.market-ml-row-title strong {
+.market-ml-validation-summary h3 {
+  margin: 0;
   color: #f8fafc;
-  font-size: 1.1rem;
+  font-size: 1.2rem;
 }
 
-.market-ml-row-title span {
-  color: #cbd5e1;
+.market-ml-validation-summary span {
+  color: #94a3b8;
+  font-size: 0.82rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 
-.market-ml-prediction-row p {
+.market-ml-validation-stats {
   display: flex;
   flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 8px;
-  align-items: baseline;
-  margin: 8px 0 0;
-  color: #dbeafe;
+}
+
+.market-ml-validation-stats span {
+  border-radius: 999px;
+  border: 1px solid rgba(45, 212, 191, 0.18);
+  background: rgba(45, 212, 191, 0.08);
+  color: #ccfbf1;
+  padding: 7px 10px;
+  font-weight: 700;
 }
 
 .market-ml-whales-panel {
@@ -5262,8 +5216,8 @@ font-weight:700;
 
 @media (max-width: 920px) {
   .market-ml-chart-layout,
-  .market-ml-prediction-grid,
   .market-ml-outcome-summary,
+  .market-ml-validation-summary,
   .market-ml-whale-row {
     grid-template-columns: 1fr;
   }
@@ -5279,6 +5233,10 @@ font-weight:700;
 
   .market-ml-tabs button {
     flex: 1;
+  }
+
+  .market-ml-validation-stats {
+    justify-content: flex-start;
   }
 
   .market-ml-whale-meta {
