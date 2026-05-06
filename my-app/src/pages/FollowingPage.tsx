@@ -517,7 +517,7 @@ function MarketWatchlistRows({
   return (
     <div className="watchlist-list">
       {items.map((market) => {
-        const closedMarket = closedMarketBySlug.get(market.market_slug);
+        const closedMarket = closedMarketBySlug.get(market.market_slug.toLowerCase());
         return (
           <article key={market.market_slug} className="watchlist-card">
             <div className="watchlist-card-main">
@@ -583,7 +583,12 @@ export default function FollowingPage() {
     [data?.overview.trader_focus, watchlist.users],
   );
   const visibleRecentClosedMarkets = useMemo(
-    () => (data?.overview.recent_closed_markets ?? []).filter((item) => watchlist.markets.includes(item.market_slug)),
+    () => {
+      const followedMarketSlugs = new Set(watchlist.markets.map((marketSlug) => marketSlug.toLowerCase()));
+      return (data?.overview.recent_closed_markets ?? []).filter((item) =>
+        followedMarketSlugs.has(item.market_slug.toLowerCase()),
+      );
+    },
     [data?.overview.recent_closed_markets, watchlist.markets],
   );
   const visibleUsers = useMemo(
@@ -591,7 +596,12 @@ export default function FollowingPage() {
     [data?.users, watchlist.users],
   );
   const visibleMarkets = useMemo(
-    () => (data?.markets ?? []).filter((market) => watchlist.markets.includes(market.market_slug)),
+    () => {
+      const followedMarketSlugs = new Set(watchlist.markets.map((marketSlug) => marketSlug.toLowerCase()));
+      return (data?.markets ?? []).filter((market) =>
+        followedMarketSlugs.has(market.market_slug.toLowerCase()),
+      );
+    },
     [data?.markets, watchlist.markets],
   );
   const visibleMarketFocusRecent = useMemo(
@@ -603,7 +613,7 @@ export default function FollowingPage() {
     [visibleTraderFocus],
   );
   const closedMarketBySlug = useMemo(
-    () => new Map(visibleRecentClosedMarkets.map((item) => [item.market_slug, item])),
+    () => new Map(visibleRecentClosedMarkets.map((item) => [item.market_slug.toLowerCase(), item])),
     [visibleRecentClosedMarkets],
   );
   const traderFocusCategoryCount = useMemo(

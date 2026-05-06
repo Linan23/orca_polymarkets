@@ -854,7 +854,20 @@ def _attach_entry_anchor_to_prediction_case(
         if isinstance(side_sequence, dict) and isinstance(side_sequence.get("entry_anchor"), dict)
         else None
     )
-    selected_anchor = entry_anchor or (fallback_anchor if fallback_anchor.get("available") else {})
+    existing_anchor = (
+        {
+            "event_time": item.get("whale_entry_time"),
+            "age_hours": item.get("whale_entry_age_hours"),
+            "odds_pct": item.get("whale_entry_odds_pct"),
+            "notional_value": item.get("whale_entry_notional"),
+            "weighted_notional": item.get("whale_entry_weighted_notional"),
+            "trust_score": item.get("whale_entry_trust_score"),
+            "is_trusted_whale": item.get("whale_entry_is_trusted"),
+        }
+        if item.get("whale_entry_time")
+        else {}
+    )
+    selected_anchor = entry_anchor or existing_anchor or (fallback_anchor if fallback_anchor.get("available") else {})
     anchor_time = str(selected_anchor.get("event_time") or item.get("observation_time") or "")
     window_hours = _prediction_window_hours(str(item.get("window") or ""))
     item["whale_entry_time"] = selected_anchor.get("event_time")
@@ -875,6 +888,43 @@ def _attach_entry_anchor_to_prediction_case(
     if isinstance(side_sequence, dict):
         item["live_window_features"] = side_sequence.get("window_features") or {}
     return item
+
+
+def _prediction_windows_have_entry_anchor(windows: dict[str, Any]) -> bool:
+    """Return true when saved prediction rows already include whale entry timing."""
+    for rows in windows.values():
+        for row in rows or []:
+            if isinstance(row, dict) and row.get("whale_entry_time"):
+                return True
+    return False
+
+
+def _prediction_anchor_from_windows(windows: dict[str, Any]) -> dict[str, Any]:
+    """Build a primary whale-entry anchor from saved prediction rows."""
+    anchors: list[dict[str, Any]] = []
+    for rows in windows.values():
+        for row in rows or []:
+            if not isinstance(row, dict) or not row.get("whale_entry_time"):
+                continue
+            anchors.append(
+                {
+                    "available": True,
+                    "event_type": "entry",
+                    "event_time": row.get("whale_entry_time"),
+                    "age_hours": row.get("whale_entry_age_hours"),
+                    "odds_pct": row.get("whale_entry_odds_pct"),
+                    "notional_value": row.get("whale_entry_notional"),
+                    "weighted_notional": row.get("whale_entry_weighted_notional"),
+                    "trust_score": row.get("whale_entry_trust_score"),
+                    "is_trusted_whale": row.get("whale_entry_is_trusted"),
+                    "side_label": row.get("side_label"),
+                    "market_slug": row.get("market_slug"),
+                    "source": "persisted_ml_prediction_snapshot",
+                }
+            )
+    if not anchors:
+        return {"available": False, "reason": "no_saved_whale_entry_anchor"}
+    return max(anchors, key=lambda item: str(item.get("event_time") or ""))
 
 
 def _ml_prediction_snapshot_table_exists(session: Session) -> bool:
@@ -1396,20 +1446,35 @@ def _market_profile_ml_trend_payload(
     live_market = fetch_live_polymarket_market_by_slug(market_slug)
     persisted_prediction = _latest_market_prediction_snapshot_payload(session, market_slug)
     local_prediction = persisted_prediction or market_profile_ml_trend(market_slug)
-    live_sequence = whale_event_sequence_for_market(
-        session,
-        market_slug=market_slug,
-        lookback_hours=72,
-        bucket_hours=1,
-        trusted_only=False,
-        platform_name="polymarket",
-    )
+    saved_windows = local_prediction.get("windows") if isinstance(local_prediction.get("windows"), dict) else {}
+    has_saved_entry_anchor = _prediction_windows_have_entry_anchor(saved_windows)
+    if has_saved_entry_anchor:
+        live_sequence = {
+            "available": False,
+            "reason": "using_saved_ml_prediction_whale_entry_anchor",
+            "semi_live": False,
+            "source": "persisted_ml_prediction_snapshot",
+            "items": [],
+        }
+    else:
+        live_sequence = whale_event_sequence_for_market(
+            session,
+            market_slug=market_slug,
+            lookback_hours=72,
+            bucket_hours=1,
+            trusted_only=False,
+            platform_name="polymarket",
+        )
     compact_items = [_compact_sequence_item(item) for item in live_sequence.get("items") or [] if isinstance(item, dict)]
     sequence_by_side = {
         _normalize_side_label(str(item.get("side_label") or "")): item
         for item in compact_items
     }
-    anchor = _primary_whale_entry_anchor({"items": compact_items, "reason": live_sequence.get("reason")})
+    anchor = (
+        _prediction_anchor_from_windows(saved_windows)
+        if has_saved_entry_anchor
+        else _primary_whale_entry_anchor({"items": compact_items, "reason": live_sequence.get("reason")})
+    )
 
     windows: dict[str, list[dict[str, Any]]] = {"12h": [], "24h": []}
     for window_name, rows in ((local_prediction.get("windows") or {}).items() if local_prediction.get("available") else []):
@@ -3246,8 +3311,14 @@ def following_overview(
                     """
                     SELECT COUNT(*)
                     FROM analytics.market_contract mc
+                    JOIN analytics.market_event me
+                      ON me.event_id = mc.event_id
                     WHERE LOWER(COALESCE(mc.market_slug, '')) = ANY(:market_slugs)
-                      AND mc.is_closed = TRUE
+                      AND (
+                        mc.is_closed = TRUE
+                        OR me.closed_time IS NOT NULL
+                        OR (mc.end_time IS NOT NULL AND mc.end_time <= NOW())
+                      )
                     """
                 ),
                 {"market_slugs": normalized_market_slugs},
@@ -3270,7 +3341,11 @@ def following_overview(
                 JOIN analytics.market_event me
                   ON me.event_id = mc.event_id
                 WHERE LOWER(COALESCE(mc.market_slug, '')) = ANY(:market_slugs)
-                  AND mc.is_closed = TRUE
+                  AND (
+                    mc.is_closed = TRUE
+                    OR me.closed_time IS NOT NULL
+                    OR (mc.end_time IS NOT NULL AND mc.end_time <= NOW())
+                  )
                 ORDER BY COALESCE(me.closed_time, mc.end_time, mc.updated_at) DESC NULLS LAST,
                          mc.market_contract_id DESC
                 LIMIT 5
@@ -3397,7 +3472,11 @@ def following_market_cards(
                 dm.price,
                 dm.whale_count,
                 dm.trusted_whale_count,
-                mc.is_closed,
+                (
+                  mc.is_closed = TRUE
+                  OR me.closed_time IS NOT NULL
+                  OR (mc.end_time IS NOT NULL AND mc.end_time <= NOW())
+                ) AS is_closed,
                 ROW_NUMBER() OVER (
                   PARTITION BY LOWER(COALESCE(dm.market_slug, ''))
                   ORDER BY dm.read_time DESC NULLS LAST, dm.market_id DESC
@@ -3405,6 +3484,8 @@ def following_market_cards(
               FROM analytics.dashboard_market dm
               JOIN analytics.market_contract mc
                 ON mc.market_contract_id = dm.market_contract_id
+              JOIN analytics.market_event me
+                ON me.event_id = mc.event_id
               WHERE dm.dashboard_id = (SELECT dashboard_id FROM latest_dashboard)
                 AND LOWER(COALESCE(dm.market_slug, '')) = ANY(:market_slugs)
             )
@@ -3447,7 +3528,11 @@ def following_market_cards(
                     dm.price,
                     dm.whale_count,
                     dm.trusted_whale_count,
-                    mc.is_closed,
+                    (
+                      mc.is_closed = TRUE
+                      OR me.closed_time IS NOT NULL
+                      OR (mc.end_time IS NOT NULL AND mc.end_time <= NOW())
+                    ) AS is_closed,
                     ROW_NUMBER() OVER (
                       PARTITION BY LOWER(COALESCE(dm.market_slug, ''))
                       ORDER BY d.generated_at DESC,
@@ -3459,6 +3544,8 @@ def following_market_cards(
                     ON d.dashboard_id = dm.dashboard_id
                   JOIN analytics.market_contract mc
                     ON mc.market_contract_id = dm.market_contract_id
+                  JOIN analytics.market_event me
+                    ON me.event_id = mc.event_id
                   WHERE LOWER(COALESCE(dm.market_slug, '')) = ANY(:market_slugs)
                 )
                 SELECT
@@ -3498,12 +3585,18 @@ def following_market_cards(
                     mc.market_slug,
                     mc.question,
                     mc.last_trade_price AS price,
-                    mc.is_closed,
+                    (
+                      mc.is_closed = TRUE
+                      OR me.closed_time IS NOT NULL
+                      OR (mc.end_time IS NOT NULL AND mc.end_time <= NOW())
+                    ) AS is_closed,
                     ROW_NUMBER() OVER (
                       PARTITION BY LOWER(COALESCE(mc.market_slug, ''))
                       ORDER BY mc.updated_at DESC NULLS LAST, mc.market_contract_id DESC
                     ) AS row_num
                   FROM analytics.market_contract mc
+                  JOIN analytics.market_event me
+                    ON me.event_id = mc.event_id
                   WHERE LOWER(COALESCE(mc.market_slug, '')) = ANY(:market_slugs)
                 )
                 SELECT
