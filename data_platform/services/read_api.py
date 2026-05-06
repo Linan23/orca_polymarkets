@@ -854,19 +854,7 @@ def _attach_entry_anchor_to_prediction_case(
         if isinstance(side_sequence, dict) and isinstance(side_sequence.get("entry_anchor"), dict)
         else None
     )
-    existing_anchor = (
-        {
-            "event_time": item.get("whale_entry_time"),
-            "age_hours": item.get("whale_entry_age_hours"),
-            "odds_pct": item.get("whale_entry_odds_pct"),
-            "notional_value": item.get("whale_entry_notional"),
-            "weighted_notional": item.get("whale_entry_weighted_notional"),
-            "trust_score": item.get("whale_entry_trust_score"),
-            "is_trusted_whale": item.get("whale_entry_is_trusted"),
-        }
-        if item.get("whale_entry_time")
-        else {}
-    )
+    existing_anchor = _entry_anchor_from_prediction_row(item)
     selected_anchor = entry_anchor or existing_anchor or (fallback_anchor if fallback_anchor.get("available") else {})
     anchor_time = str(selected_anchor.get("event_time") or item.get("observation_time") or "")
     window_hours = _prediction_window_hours(str(item.get("window") or ""))
@@ -890,11 +878,34 @@ def _attach_entry_anchor_to_prediction_case(
     return item
 
 
+def _entry_anchor_from_prediction_row(row: dict[str, Any]) -> dict[str, Any]:
+    """Return a saved whale entry anchor from a prediction row when one exists."""
+    whale_anchor = row.get("whale_anchor") if isinstance(row.get("whale_anchor"), dict) else {}
+    live_features = row.get("live_window_features") if isinstance(row.get("live_window_features"), dict) else {}
+    event_time = row.get("whale_entry_time") or whale_anchor.get("latest_entry_time") or live_features.get("latest_entry_time")
+    if not event_time:
+        return {}
+    return {
+        "available": True,
+        "event_type": "entry",
+        "event_time": event_time,
+        "age_hours": row.get("whale_entry_age_hours"),
+        "odds_pct": row.get("whale_entry_odds_pct"),
+        "notional_value": row.get("whale_entry_notional") or whale_anchor.get("side_entry_pressure"),
+        "weighted_notional": row.get("whale_entry_weighted_notional") or whale_anchor.get("side_total_pressure"),
+        "trust_score": row.get("whale_entry_trust_score"),
+        "is_trusted_whale": row.get("whale_entry_is_trusted"),
+        "side_label": row.get("side_label"),
+        "market_slug": row.get("market_slug"),
+        "source": "persisted_ml_prediction_snapshot",
+    }
+
+
 def _prediction_windows_have_entry_anchor(windows: dict[str, Any]) -> bool:
     """Return true when saved prediction rows already include whale entry timing."""
     for rows in windows.values():
         for row in rows or []:
-            if isinstance(row, dict) and row.get("whale_entry_time"):
+            if isinstance(row, dict) and _entry_anchor_from_prediction_row(row):
                 return True
     return False
 
@@ -904,24 +915,11 @@ def _prediction_anchor_from_windows(windows: dict[str, Any]) -> dict[str, Any]:
     anchors: list[dict[str, Any]] = []
     for rows in windows.values():
         for row in rows or []:
-            if not isinstance(row, dict) or not row.get("whale_entry_time"):
+            if not isinstance(row, dict):
                 continue
-            anchors.append(
-                {
-                    "available": True,
-                    "event_type": "entry",
-                    "event_time": row.get("whale_entry_time"),
-                    "age_hours": row.get("whale_entry_age_hours"),
-                    "odds_pct": row.get("whale_entry_odds_pct"),
-                    "notional_value": row.get("whale_entry_notional"),
-                    "weighted_notional": row.get("whale_entry_weighted_notional"),
-                    "trust_score": row.get("whale_entry_trust_score"),
-                    "is_trusted_whale": row.get("whale_entry_is_trusted"),
-                    "side_label": row.get("side_label"),
-                    "market_slug": row.get("market_slug"),
-                    "source": "persisted_ml_prediction_snapshot",
-                }
-            )
+            anchor = _entry_anchor_from_prediction_row(row)
+            if anchor:
+                anchors.append(anchor)
     if not anchors:
         return {"available": False, "reason": "no_saved_whale_entry_anchor"}
     return max(anchors, key=lambda item: str(item.get("event_time") or ""))
@@ -1471,10 +1469,14 @@ def _market_profile_ml_trend_payload(
     local_prediction = persisted_prediction or market_profile_ml_trend(market_slug)
     saved_windows = local_prediction.get("windows") if isinstance(local_prediction.get("windows"), dict) else {}
     has_saved_entry_anchor = _prediction_windows_have_entry_anchor(saved_windows)
-    if has_saved_entry_anchor:
+    if has_saved_entry_anchor or persisted_prediction:
         live_sequence = {
             "available": False,
-            "reason": "using_saved_ml_prediction_whale_entry_anchor",
+            "reason": (
+                "using_saved_ml_prediction_whale_entry_anchor"
+                if has_saved_entry_anchor
+                else "using_saved_ml_prediction_without_live_sequence_scan"
+            ),
             "semi_live": False,
             "source": "persisted_ml_prediction_snapshot",
             "items": [],
