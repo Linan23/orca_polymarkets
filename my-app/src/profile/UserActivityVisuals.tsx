@@ -141,8 +141,7 @@ export function HourlyActivityChart({ buckets }: { buckets: HourlyActivityBucket
         ]}
         yAxis={[
           {
-            label: "Trades",
-            width: 46,
+            position: "none",
           },
         ]}
         series={[
@@ -155,7 +154,6 @@ export function HourlyActivityChart({ buckets }: { buckets: HourlyActivityBucket
         ]}
         height={300}
         margin={{ top: 18, right: 16, bottom: 46, left: 4 }}
-        grid={{ horizontal: true }}
         hideLegend
       />
       <p className="chart-footnote">Most active: {peakLabel}. Activity hours are shown in UTC.</p>

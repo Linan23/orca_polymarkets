@@ -2258,11 +2258,22 @@ a {
 
 .trading-hours-chart .MuiChartsAxis-tickLabel,
 .trading-hours-chart .MuiChartsAxis-label {
-  fill: rgba(226, 232, 240, 0.74);
+  fill: #f8fafc;
+  color: #f8fafc;
 }
 
-.trading-hours-chart .MuiChartsGrid-line {
-  stroke: rgba(148, 163, 184, 0.12);
+.MuiChartsTooltip-paper {
+  background: rgba(2, 6, 23, 0.94) !important;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  color: #f8fafc !important;
+}
+
+.MuiChartsTooltip-table,
+.MuiChartsTooltip-cell,
+.MuiChartsTooltip-labelCell,
+.MuiChartsTooltip-valueCell,
+.MuiChartsTooltip-axisValueCell {
+  color: #f8fafc !important;
 }
 
 .chart-footnote {
