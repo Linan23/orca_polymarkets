@@ -365,8 +365,8 @@ function MarketPredictionTrendChart({ cases }: { cases: MarketProfileMlPredictio
   const paddedMax = Math.min(100, Math.ceil(rawMax + 8));
   const minOdds = paddedMax - paddedMin < 20 ? Math.max(0, paddedMin - 10) : paddedMin;
   const maxOdds = paddedMax - paddedMin < 20 ? Math.min(100, paddedMax + 10) : paddedMax;
-  const width = 760;
-  const height = 280;
+  const width = 520;
+  const height = 230;
   const left = 46;
   const right = 32;
   const top = 24;
@@ -661,15 +661,13 @@ function MarketMlPredictionTrendPanel({
         <>
           <LiveWhaleEntrySummary trend={trend} />
           <div className="market-ml-chart-layout">
-            <div className="market-ml-trend-context">
-              <div className="market-ml-trend-heading">
-                <h3>{formatLabel(primaryCases[0]?.side_label)} probability trend</h3>
-                <div className="market-ml-summary-row">
-                  <span>Whale entry {formatDateTime(primaryCases[0]?.whale_entry_time ?? anchor?.event_time)}</span>
-                  <span>Entry odds {formatOddsPercent(primaryCases[0]?.whale_entry_odds_pct)}</span>
-                  <span>{formatLabel(primaryCases[0]?.focused_fit_category)}</span>
-                  <span>{formatLabel(primaryCases[0]?.display_tier)}</span>
-                </div>
+            <div>
+              <h3>{formatLabel(primaryCases[0]?.side_label)} probability trend</h3>
+              <div className="market-ml-summary-row">
+                <span>Whale entry {formatDateTime(primaryCases[0]?.whale_entry_time ?? anchor?.event_time)}</span>
+                <span>Entry odds {formatOddsPercent(primaryCases[0]?.whale_entry_odds_pct)}</span>
+                <span>{formatLabel(primaryCases[0]?.focused_fit_category)}</span>
+                <span>{formatLabel(primaryCases[0]?.display_tier)}</span>
               </div>
               <CurrentMarketProbabilityPanel outcomes={outcomeProbabilities} price={price} odds={odds} />
               <MarketPredictionOutcomeSummary cases={primaryCases} />
