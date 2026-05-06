@@ -52,7 +52,7 @@ export function TagExposureDonut({ slices }: { slices: TagExposureSlice[] }) {
               valueFormatter: (item) => {
                 const slice = activeSlices[Number(item.id)];
                 const percent = totalTrades > 0 ? item.value / totalTrades : 0;
-                return `${item.label}: ${formatCompact(slice?.trade_count ?? item.value)} trades · ${formatPercent(percent)}`;
+                return `${formatCompact(slice?.trade_count ?? item.value)} trades · ${formatPercent(percent)}`;
               },
             },
           ]}

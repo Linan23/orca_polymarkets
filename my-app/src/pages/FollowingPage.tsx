@@ -331,11 +331,11 @@ function InflowRows({ items }: { items: FollowingInflowRow[] }) {
             <p className="watchlist-card-subtitle following-row-subtitle">
               {item.distinct_trader_count} traders · {formatCurrency(item.total_notional)} · {formatDateTime(item.latest_trade_time)}
             </p>
-          </div>
-          <div className="following-pill-row">
-            <span className={`following-pill following-status-pill ${statusPillClass(item.market_status_label)}`}>
-              {item.market_status_label}
-            </span>
+            <div className="following-pill-row">
+              <span className={`following-pill following-status-pill ${statusPillClass(item.market_status_label)}`}>
+                {item.market_status_label}
+              </span>
+            </div>
           </div>
         </article>
       ))}

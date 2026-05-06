@@ -2469,7 +2469,7 @@ a {
 
 .following-data-row {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr);
   gap: 14px;
   align-items: flex-start;
   padding: 14px 0;
@@ -2508,12 +2508,13 @@ a {
 }
 
 .following-row-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
   min-width: 0;
 }
 
 .following-tight-panel .following-row-main {
-  display: flex;
-  flex-direction: column;
   gap: 2px;
 }
 
@@ -2592,7 +2593,8 @@ a {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-top: 8px;
+  margin-top: 6px;
+  min-width: 0;
 }
 
 .following-tight-panel .following-pill-row {
@@ -2600,7 +2602,7 @@ a {
 }
 
 .following-tight-panel .following-data-row .following-pill-row {
-  grid-column: 2;
+  grid-column: auto;
 }
 
 .following-pill {
@@ -4152,19 +4154,19 @@ font-weight:700;
 
 /* Optional: make Last Updated match the other cards better */
 .last-updated-card {
+  display: flex;
+  align-items: center;
+  min-height: 190px;
   margin-top: 18px;
 }
 
-.last-updated-card h3 {
-  margin: 0;
-  font-size: 1.15rem;
-  color: #f8fbff;
-}
-
 .last-updated-card p {
-  margin-top: 24px;
-  color: #9fb7dd;
-  font-size: 1rem;
+  margin: 0;
+  color: #f8fbff;
+  font-size: clamp(2rem, 4vw, 3.1rem);
+  font-weight: 850;
+  line-height: 1.05;
+  letter-spacing: -0.04em;
 }
 
 /* Tablet/mobile */
