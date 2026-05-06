@@ -4919,6 +4919,7 @@ font-weight:700;
   border-radius: 18px;
   padding: 8px;
   min-width: 0;
+  overflow: hidden;
 }
 
 .market-ml-chart-panel {
@@ -4932,6 +4933,27 @@ font-weight:700;
   justify-content: flex-end;
   gap: 12px;
   padding: 2px 4px 6px;
+}
+
+.market-ml-chart-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 2px 4px 8px;
+}
+
+.market-ml-chart-summary span {
+  min-width: 0;
+  max-width: 100%;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  background: rgba(15, 23, 42, 0.62);
+  color: #cbd5e1;
+  padding: 6px 9px;
+  font-size: 0.76rem;
+  font-weight: 700;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
 }
 
 .market-ml-chart-legend span {
@@ -4967,6 +4989,11 @@ font-weight:700;
 .market-ml-chart line {
   stroke: rgba(148, 163, 184, 0.18);
   stroke-width: 1;
+}
+
+.market-ml-chart .market-ml-axis-line {
+  stroke: rgba(203, 213, 225, 0.38);
+  stroke-width: 1.5;
 }
 
 .market-ml-chart text {
