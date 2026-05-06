@@ -467,7 +467,7 @@ function MarketPredictionOutcomeSummary({ cases }: { cases: MarketProfileMlPredi
             </div>
             <div className="market-ml-outcome-footer">
               <span>Direction: {forecastDirectionTag(item)}</span>
-              <span>Accuracy: {historicalValidationTag(item)}</span>
+              <span>Historical Accuracy: {historicalValidationTag(item)}</span>
               <span>Odds change: {formatSignedPoints(comparison?.model_predicted_delta_pts ?? modelDelta(item))}</span>
               {hasValidation && <span>Past error: {formatPointMagnitude(comparison?.prediction_absolute_error_pts ?? item.prediction_absolute_error_pts)}</span>}
             </div>

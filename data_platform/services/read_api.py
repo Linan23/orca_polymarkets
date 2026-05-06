@@ -27,6 +27,7 @@ from data_platform.models import (
     WhaleScoreSnapshot,
 )
 from data_platform.services.home_summary_snapshot import latest_home_summary_snapshot_payload, market_category_coverage_payload
+from data_platform.ml.prediction_confidence import DEFAULT_CONFIDENCE_MODEL_PATH, load_confidence_artifact
 from data_platform.services.ml_reports import market_profile_ml_trend
 from data_platform.services.polymarket_live import LivePolymarketMarket
 from data_platform.services.polymarket_live import fetch_live_polymarket_market_by_slug
@@ -43,6 +44,7 @@ HIGH_CONFIDENCE_DIRECTION_WINDOW_HOURS = 12
 HIGH_CONFIDENCE_DIRECTION_MIN_DELTA_PTS = 5.0
 HIGH_CONFIDENCE_24H_MIN_DELTA_PTS = 6.0
 HIGH_CONFIDENCE_24H_MIN_TOTAL_PRESSURE = 1000.0
+_CONFIDENCE_ARTIFACT_CACHE: tuple[float | None, dict[str, Any] | None] = (None, None)
 MARKET_CATEGORY_SQL = """
 CASE
   WHEN LOWER(CONCAT_WS(' ', me.title, me.slug, me.category, mc.question, mc.market_slug, mc.outcome_a_label, mc.outcome_b_label)) ~ '(video[ -]?games?|videogames?|gaming|gta|grand theft auto|nintendo|playstation|xbox|steam|esports?|counter[ -]?strike|cs2|fortnite|call of duty|rockstar|rocket league|league of legends|valorant|dota)'
@@ -240,6 +242,48 @@ def _append_unique(values: list[str], value: str) -> list[str]:
     return values
 
 
+def _confidence_artifact() -> dict[str, Any] | None:
+    """Return the current trained confidence artifact, reloading when the file changes."""
+    global _CONFIDENCE_ARTIFACT_CACHE
+    try:
+        mtime = DEFAULT_CONFIDENCE_MODEL_PATH.stat().st_mtime
+    except OSError:
+        _CONFIDENCE_ARTIFACT_CACHE = (None, None)
+        return None
+    cached_mtime, cached_artifact = _CONFIDENCE_ARTIFACT_CACHE
+    if cached_mtime == mtime:
+        return cached_artifact
+    artifact = load_confidence_artifact(DEFAULT_CONFIDENCE_MODEL_PATH)
+    _CONFIDENCE_ARTIFACT_CACHE = (mtime, artifact)
+    return artifact
+
+
+def _historical_accuracy_from_confidence_artifact(item: dict[str, Any]) -> float | None:
+    """Return historical Strong/Watch precision for a trained prediction row."""
+    artifact = _confidence_artifact()
+    if not artifact:
+        return None
+    try:
+        window_hours = int(item.get("prediction_window_hours") or str(item.get("window") or "").replace("h", ""))
+    except (TypeError, ValueError):
+        return None
+    window_model = (artifact.get("windows") or {}).get(str(window_hours))
+    if not isinstance(window_model, dict):
+        return None
+    thresholds = window_model.get("thresholds") if isinstance(window_model.get("thresholds"), dict) else {}
+    tier = str(item.get("historical_validation_tier") or item.get("direction_signal_tier") or "")
+    threshold_name = ""
+    if tier in {"trained_strong_confidence", "strong"}:
+        threshold_name = "strong"
+    elif tier in {"trained_watch_confidence", "watch"}:
+        threshold_name = "watch"
+    if not threshold_name:
+        return None
+    threshold_detail = thresholds.get(threshold_name) if isinstance(thresholds.get(threshold_name), dict) else {}
+    precision = _coerce_float(threshold_detail.get("precision"))
+    return round(precision * 100.0, 2) if precision is not None else None
+
+
 def _apply_market_profile_reliability_policy(item: dict[str, Any]) -> None:
     """Annotate profile predictions with the currently validated reliable slice."""
     if item.get("trained_confidence_available") is True:
@@ -247,7 +291,12 @@ def _apply_market_profile_reliability_policy(item: dict[str, Any]) -> None:
         if score is not None:
             item["direction_signal_confidence"] = round(score, 4)
         accuracy_pct = _coerce_float(item.get("validation_accuracy_pct") or item.get("direction_signal_accuracy_pct"))
+        if accuracy_pct is None:
+            accuracy_pct = _historical_accuracy_from_confidence_artifact(item)
         if accuracy_pct is not None:
+            item["validation_accuracy_pct"] = round(accuracy_pct, 2)
+            item["direction_signal_accuracy_pct"] = round(accuracy_pct, 2)
+            item.setdefault("accuracy_source", "current_confidence_artifact_threshold_precision")
             item["historical_validation_direction_match_pct"] = round(accuracy_pct, 2)
         if item.get("confidence_training_window_rows") is not None:
             item["historical_validation_sample_size"] = item.get("confidence_training_window_rows")
