@@ -643,7 +643,7 @@ export default function FollowingPage() {
             </div>
 
             <div className="following-panel-grid">
-              <section className="leaderboard-card following-panel">
+              <section className="leaderboard-card following-panel following-flow-panel">
                 <div className="leaderboard-top">
                   <p className="leaderboard-kicker">Flow</p>
                   <h2>Whales Entering Markets in the Last 24 Hours</h2>

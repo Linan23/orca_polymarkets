@@ -2403,6 +2403,36 @@ a {
   overflow: hidden;
 }
 
+.following-flow-panel {
+  display: flex;
+  flex-direction: column;
+}
+
+.following-flow-panel .leaderboard-top {
+  padding: 20px 22px 12px;
+}
+
+.following-flow-panel .following-row-list {
+  gap: 10px;
+  padding: 4px 18px 18px;
+}
+
+.following-flow-panel .following-data-row {
+  gap: 18px;
+  padding: 12px 14px;
+  border: 1px solid rgba(148, 163, 184, 0.1);
+  border-radius: 16px;
+  background: rgba(8, 15, 29, 0.42);
+}
+
+.following-flow-panel .following-data-row:first-child {
+  padding-top: 12px;
+}
+
+.following-flow-panel .following-rank {
+  margin-top: 2px;
+}
+
 .following-tight-panel .leaderboard-top {
   padding: 18px 20px 10px;
 }
