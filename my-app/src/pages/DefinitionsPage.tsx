@@ -172,9 +172,7 @@ const [activeSlide, setActiveSlide] = useState(0);
           <h2>Built to educate users.</h2>
           <p>
             Orca helps users learn from market data, whale behavior,
-            leaderboards, and trading signals. The goal is to make complex
-            market activity easier to understand — not to provide financial
-            advice.
+            leaderboards, and trading-signals. Disclaimer: Dashboard does not provide financial advice or surveil users.
           </p>
         </div>
       </section>
