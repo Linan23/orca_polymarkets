@@ -744,7 +744,8 @@ Week 6 scoring methodology (`week6_v3`):
   - minimum `3` active trade days
   - minimum notional `5000`
   - insider-flagged users are excluded
-  - final `is_whale` label = top `30%` of eligible users by trust score
+  - final `is_whale` label = all users meeting the eligibility thresholds
+  - top `30%` of eligible users by trust score is retained as a scoring/ranking subset, not as the whale count definition
 - trusted whale classification:
   - already whale-eligible
   - minimum `15` trades

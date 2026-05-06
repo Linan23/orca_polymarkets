@@ -81,6 +81,7 @@ def main() -> int:
     ]
     ranked_scores = compute_whale_scores(ranked_metrics, resolved_performance_by_user={})
     assert all(item.is_whale for item in ranked_scores)
+    assert sum(1 for item in ranked_scores if item.is_top_trust_whale) == 3
 
     print("whale scoring volume check passed")
     return 0

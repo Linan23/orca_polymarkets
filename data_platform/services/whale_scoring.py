@@ -28,6 +28,7 @@ TRUSTED_MIN_WIN_RATE = 0.60
 RESOLUTION_PRICE_HIGH = 0.98
 RESOLUTION_PRICE_LOW = 0.02
 INSIDER_PENALTY = 0.25
+WHALE_TOP_TRUST_FRACTION = 0.30
 TRUSTED_TOP_FRACTION = 0.05
 
 
@@ -81,6 +82,7 @@ class WhaleScoreResult:
     profitability_score: float
     trust_score: float
     insider_penalty: float
+    is_top_trust_whale: bool
     is_whale: bool
     is_trusted_whale: bool
 
@@ -663,6 +665,7 @@ def _compute_platform_scores(
                 profitability_score=profitability_score,
                 trust_score=trust_score,
                 insider_penalty=insider_penalty,
+                is_top_trust_whale=False,
                 is_whale=False,
                 is_trusted_whale=False,
             )
@@ -676,7 +679,6 @@ def _compute_platform_scores(
         and item.metric.total_notional >= WHALE_MIN_NOTIONAL
         and not item.metric.is_likely_insider
     ]
-    whale_ids = {item.metric.user_id for item in eligible_whales}
     eligible_whales.sort(
         key=lambda item: (
             item.trust_score,
@@ -685,6 +687,11 @@ def _compute_platform_scores(
         ),
         reverse=True,
     )
+    whale_ids = {item.metric.user_id for item in eligible_whales}
+    top_trust_whale_ids = {
+        item.metric.user_id
+        for item in eligible_whales[: _top_count(len(eligible_whales), WHALE_TOP_TRUST_FRACTION)]
+    }
 
     eligible_trusted = [
         item
@@ -721,6 +728,7 @@ def _compute_platform_scores(
                 profitability_score=item.profitability_score,
                 trust_score=item.trust_score,
                 insider_penalty=item.insider_penalty,
+                is_top_trust_whale=item.metric.user_id in top_trust_whale_ids,
                 is_whale=item.metric.user_id in whale_ids,
                 is_trusted_whale=item.metric.user_id in trusted_ids,
             )
@@ -766,6 +774,7 @@ def build_whale_score_snapshot(session: Session, *, scoring_version: str = SCORI
         platform_summaries[platform_name] = {
             "scored_users": len(scored_results),
             "whales": sum(1 for item in scored_results if item.is_whale),
+            "top_trust_whales": sum(1 for item in scored_results if item.is_top_trust_whale),
             "trusted_whales": sum(1 for item in scored_results if item.is_trusted_whale),
             "profitability_users": sum(
                 1 for item in scored_results if item.resolved_performance.resolved_market_count > 0
