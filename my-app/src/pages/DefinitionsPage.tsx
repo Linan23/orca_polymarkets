@@ -106,39 +106,34 @@ const slides = [
     type: "trust",
     definitions: [
       {
-        term: "Whale",
+        term: "Find Whale Activity",
         description:
-          "A trader or wallet with large positions, high volume, or meaningful activity that may influence how a market moves.",
+          "Orca first looks for traders with large positions, high volume, or repeated activity in Polymarket markets.",
       },
       {
-        term: "Potential Whale",
+        term: "Check Trade History",
         description:
-          "A trader who shows some whale-like behavior but does not yet have enough history or trust score strength to be labeled as a whale.",
+          "The system reviews each trader’s past markets, profit and loss, timing, buying behavior, selling behavior, and trading frequency.",
       },
       {
-        term: "Trust Score",
+        term: "Score Reliability",
         description:
-          "A score that estimates how reliable a whale has been based on past trading behavior, performance, and consistency.",
+          "A higher trust score means the trader has shown stronger historical signal quality. A lower score means the trader has weaker or less consistent history.",
       },
       {
-        term: "Trusted Whale",
+        term: "Separate Whale Types",
         description:
-          "A trader whose history shows stronger signal quality than most users. These whales can carry more weight in the ML prediction.",
+          "A whale has meaningful activity. A potential whale shows some whale-like behavior but needs more history. A trusted whale has stronger evidence of useful past signals.",
       },
       {
-        term: "P&L History",
+        term: "Apply Model Weight",
         description:
-          "The trader’s profit and loss over time. Stronger P&L can help show whether a whale has been making useful market decisions.",
+          "Trusted whales can carry more influence in the ML model than weaker whales. This helps the model avoid treating every large trader the same.",
       },
       {
-        term: "Trading Pattern",
+        term: "Update Over Time",
         description:
-          "How often a whale buys or sells, when they enter markets, how long they usually hold, and how they behave before markets move.",
-      },
-      {
-        term: "Weight",
-        description:
-          "The influence a whale has in the model. A more trusted whale can have a larger effect than a whale with weaker or less consistent history.",
+          "Trust scores can change as new trades are collected. Better future performance can strengthen a score, while weak or inconsistent behavior can reduce it.",
       },
     ],
   },
