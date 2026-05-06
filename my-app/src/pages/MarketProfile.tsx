@@ -253,6 +253,31 @@ function outcomeProbabilityRows(
   ];
 }
 
+function CurrentMarketProbabilityPanel({
+  outcomes,
+  price,
+  odds,
+}: {
+  outcomes: MarketOutcomeProbability[] | null | undefined;
+  price: number | null;
+  odds: number | null;
+}) {
+  const rows = outcomeProbabilityRows(outcomes, price, odds).slice(0, 2);
+  return (
+    <div className="market-ml-current-probability">
+      <p className="market-ml-side-label">Current market probability</p>
+      <div className="market-ml-probability-grid">
+        {rows.map((outcome, index) => (
+          <div className={`market-ml-probability-tile ${index === 0 ? "is-yes" : "is-no"}`} key={outcome.label}>
+            <span>{formatLabel(outcome.label)}</span>
+            <strong>{formatPercent(outcome.probability)}</strong>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function LiveWhaleEntrySummary({ trend }: { trend: MarketProfileMlPredictionTrend | undefined }) {
   const anchor = trend?.prediction_anchor;
   const sequence = trend?.live_whale_sequence;
@@ -410,46 +435,32 @@ function MarketPredictionOutcomeSummary({ cases }: { cases: MarketProfileMlPredi
       {cases.map((item) => {
         const comparison = completedValidation(item);
         const predictedValue = comparison?.model_predicted_future_odds_pct ?? modelFutureOdds(item);
-        const actualValue = comparison?.actual_future_odds_pct ?? item.actual_future_odds_pct;
         const predictedRows = binaryProbabilityRows(item, predictedValue);
-        const actualRows = binaryProbabilityRows(item, actualValue);
-        const hasActual = typeof actualValue === "number";
+        const hasValidation = comparison !== null;
         const isDirectionMatch = comparison?.prediction_direction_match ?? item.prediction_direction_match;
         return (
           <article className="market-ml-outcome-card" key={`outcome-${item.window}-${item.side_label}`}>
             <div className="market-ml-outcome-card-header">
               <span>{item.window}</span>
-              <strong>{hasActual ? "Prediction Check" : "Predicted"}</strong>
+              <strong>Model prediction</strong>
             </div>
             <p className="market-ml-outcome-meta">
-              {hasActual
-                ? `${comparisonLabel(item)}: ${formatDateTime(comparison?.observation_time)} to ${formatDateTime(comparison?.prediction_target_time)}`
-                : "Actual trend pending until the forecast window completes."}
+              {hasValidation
+                ? `${comparisonLabel(item)} checked ${formatDateTime(comparison?.prediction_target_time)}`
+                : "Actual trend check is pending until this forecast window completes."}
             </p>
-            <div className="market-ml-outcome-columns">
-              <div>
-                <p>Model</p>
-                {predictedRows.map((row) => (
-                  <span key={`predicted-${item.window}-${row.label}`}>
-                    {row.label} <strong>{formatOddsPercent(row.value)}</strong>
-                  </span>
-                ))}
-              </div>
-              <div>
-                <p>Actual</p>
-                {actualRows.map((row) => (
-                  <span key={`actual-${item.window}-${row.label}`}>
-                    {row.label} <strong>{hasActual ? formatOddsPercent(row.value) : "Pending"}</strong>
-                  </span>
-                ))}
-              </div>
+            <div className="market-ml-model-probability-grid">
+              {predictedRows.map((row) => (
+                <span key={`predicted-${item.window}-${row.label}`}>
+                  {row.label} <strong>{formatOddsPercent(row.value)}</strong>
+                </span>
+              ))}
             </div>
             <div className="market-ml-outcome-footer">
               <span>Model move {formatSignedPoints(comparison?.model_predicted_delta_pts ?? modelDelta(item))}</span>
-              <span>Actual move {formatSignedPoints(comparison?.actual_delta_pts ?? item.actual_delta_pts)}</span>
-              <span>Error {formatSignedPoints(comparison?.prediction_absolute_error_pts ?? item.prediction_absolute_error_pts)}</span>
-              {hasActual && <span>{isDirectionMatch ? "Trend matched" : "Trend missed"}</span>}
-              <span>{formatLabel(comparison?.prediction_validation_status ?? item.prediction_validation_status ?? (hasActual ? "validated" : "pending_actual"))}</span>
+              {hasValidation && <span>Error {formatSignedPoints(comparison?.prediction_absolute_error_pts ?? item.prediction_absolute_error_pts)}</span>}
+              {hasValidation && <span>{isDirectionMatch ? "Trend matched" : "Trend missed"}</span>}
+              <span>{formatLabel(comparison?.prediction_validation_status ?? item.prediction_validation_status ?? (hasValidation ? "validated" : "pending_actual"))}</span>
             </div>
           </article>
         );
@@ -557,9 +568,15 @@ function TopMarketWhalesPanel({ marketSlug }: { marketSlug: string }) {
 function MarketMlPredictionTrendPanel({
   marketSlug,
   preferredSideLabel,
+  outcomeProbabilities,
+  price,
+  odds,
 }: {
   marketSlug: string;
   preferredSideLabel?: string | null;
+  outcomeProbabilities?: MarketOutcomeProbability[] | null;
+  price: number | null;
+  odds: number | null;
 }) {
   const loadTrend = useCallback(
     () => (marketSlug ? fetchMarketProfileMlTrend(marketSlug) : Promise.resolve(emptyMlTrend(marketSlug))),
@@ -641,10 +658,11 @@ function MarketMlPredictionTrendPanel({
                 <span>{formatLabel(primaryCases[0]?.focused_fit_category)}</span>
                 <span>{formatLabel(primaryCases[0]?.display_tier)}</span>
               </div>
+              <CurrentMarketProbabilityPanel outcomes={outcomeProbabilities} price={price} odds={odds} />
+              <MarketPredictionOutcomeSummary cases={primaryCases} />
             </div>
             <div className="market-ml-chart-panel">
               <MarketPredictionTrendChart cases={primaryCases} />
-              <MarketPredictionOutcomeSummary cases={primaryCases} />
             </div>
           </div>
 
@@ -751,7 +769,7 @@ export default function MarketProfile() {
         <>
           <section className="market-summary-card">
             <div className="market-summary-left">
-              <p className="summary-label">Current Market Probability</p>
+              <p className="summary-label">Market Details</p>
 
               <div className="summary-stats">
                 <div className="stat-chip">
@@ -776,24 +794,14 @@ export default function MarketProfile() {
                 </div>
               </div>
             </div>
-
-            <div className="market-summary-right">
-              {outcomeProbabilityRows(data.outcome_probabilities, data.price, data.odds).map((outcome, index) => (
-                <button
-                  className={`trade-btn ${index === 0 ? "trade-btn-yes" : "trade-btn-no"}`}
-                  type="button"
-                  key={outcome.label}
-                >
-                  <span className="trade-label">{formatLabel(outcome.label)} Probability</span>
-                  <strong>{formatPercent(outcome.probability)}</strong>
-                </button>
-              ))}
-            </div>
           </section>
 
           <MarketMlPredictionTrendPanel
             marketSlug={data.market_slug}
             preferredSideLabel={data.primary_side_label ?? data.selected_side_label}
+            outcomeProbabilities={data.outcome_probabilities}
+            price={data.price}
+            odds={data.odds}
           />
         </>
       )}
