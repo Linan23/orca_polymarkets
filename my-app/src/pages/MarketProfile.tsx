@@ -329,15 +329,16 @@ function MarketPredictionTrendChart({ cases }: { cases: MarketProfileMlPredictio
   const top = 12;
   const bottom = 10;
   const axisY = height - bottom;
+  const plotBottom = axisY - 24;
   const plotWidth = width - left - right;
-  const plotHeight = axisY - top;
+  const plotHeight = plotBottom - top;
   const yFor = (odds: number) => top + ((maxOdds - odds) / Math.max(maxOdds - minOdds, 1)) * plotHeight;
   const xFor = (hour: number) => left + (Math.min(Math.max(hour, 0), 24) / 24) * plotWidth;
   const pointTextProps = (hour: number, odds: number, offset: number) => {
     const x = xFor(hour);
     const isRightEdge = hour >= 22;
     const isLeftEdge = hour <= 2;
-    const y = Math.min(Math.max(yFor(odds) + offset, top + 12), axisY - 10);
+    const y = Math.min(Math.max(yFor(odds) + offset, top + 12), plotBottom - 8);
     return {
       x: isRightEdge ? x - 8 : isLeftEdge ? x + 8 : x,
       y,
