@@ -781,6 +781,105 @@ def _ml_prediction_validation_table_exists(session: Session) -> bool:
     return bool(row and row.get("table_exists"))
 
 
+def _isoformat(value: Any) -> str | None:
+    """Return an ISO timestamp for datetime-like values."""
+    return value.isoformat() if hasattr(value, "isoformat") else None
+
+
+def _float_or_none(value: Any) -> float | None:
+    """Return a nullable float for DB numeric fields."""
+    return float(value) if value is not None else None
+
+
+def _validation_reference_payload(row: Any) -> dict[str, Any]:
+    """Return a compact latest-completed prediction validation payload."""
+    mapping = row._mapping if hasattr(row, "_mapping") else row
+    window_hours = int(mapping["prediction_window_hours"])
+    return {
+        "ml_market_prediction_snapshot_id": int(mapping["ml_market_prediction_snapshot_id"]),
+        "window": f"{window_hours}h",
+        "side_label": mapping["side_label"],
+        "observation_time": _isoformat(mapping["observation_time"]),
+        "prediction_start_time": _isoformat(mapping["observation_time"]),
+        "prediction_target_time": _isoformat(mapping["prediction_target_time"]),
+        "prediction_generated_at": _isoformat(mapping["prediction_generated_at"]),
+        "prediction_window_hours": window_hours,
+        "current_odds_pct": _float_or_none(mapping["current_odds_pct"]),
+        "model_predicted_future_odds_pct": _float_or_none(mapping["predicted_future_odds_pct"]),
+        "model_predicted_delta_pts": _float_or_none(mapping["predicted_delta_pts"]),
+        "predicted_direction": mapping["predicted_direction"],
+        "actual_future_odds_pct": _float_or_none(mapping["actual_future_odds_pct"]),
+        "actual_delta_pts": _float_or_none(mapping["actual_delta_pts"]),
+        "actual_direction": mapping["actual_direction"],
+        "prediction_signed_error_pts": _float_or_none(mapping["signed_error_pts"]),
+        "prediction_absolute_error_pts": _float_or_none(mapping["absolute_error_pts"]),
+        "prediction_direction_match": mapping["direction_match"],
+        "prediction_validation_status": mapping["validation_status"],
+        "actual_source": mapping["actual_source"],
+        "actual_observed_at": _isoformat(mapping["actual_observed_at"]),
+        "comparison_type": "latest_completed_window",
+    }
+
+
+def _latest_completed_prediction_validations(
+    session: Session,
+    *,
+    market_slug: str,
+) -> dict[tuple[int, str], dict[str, Any]]:
+    """Return latest validated prediction checks by window and side for one market."""
+    if not _ml_prediction_validation_table_exists(session):
+        return {}
+    rows = session.execute(
+        text(
+            """
+            WITH ranked AS (
+              SELECT
+                s.ml_market_prediction_snapshot_id,
+                s.side_label,
+                s.prediction_window_hours,
+                s.observation_time,
+                s.prediction_target_time,
+                s.prediction_generated_at,
+                s.current_odds_pct,
+                s.predicted_future_odds_pct,
+                s.predicted_delta_pts,
+                v.actual_future_odds_pct,
+                v.actual_delta_pts,
+                v.signed_error_pts,
+                v.absolute_error_pts,
+                v.predicted_direction,
+                v.actual_direction,
+                v.direction_match,
+                v.validation_status,
+                v.actual_source,
+                v.actual_observed_at,
+                ROW_NUMBER() OVER (
+                  PARTITION BY s.prediction_window_hours, lower(s.side_label)
+                  ORDER BY
+                    COALESCE(s.prediction_target_time, s.prediction_generated_at) DESC,
+                    v.validated_at DESC,
+                    s.ml_market_prediction_snapshot_id DESC
+                ) AS rn
+              FROM analytics.ml_market_prediction_snapshot s
+              JOIN analytics.ml_market_prediction_validation v
+                ON v.ml_market_prediction_snapshot_id = s.ml_market_prediction_snapshot_id
+              WHERE lower(s.market_slug) = :market_slug
+                AND v.validation_status = 'validated'
+                AND v.actual_future_odds_pct IS NOT NULL
+            )
+            SELECT *
+            FROM ranked
+            WHERE rn = 1
+            """
+        ),
+        {"market_slug": market_slug},
+    ).fetchall()
+    return {
+        (int(row.prediction_window_hours), str(row.side_label or "").strip().casefold()): _validation_reference_payload(row)
+        for row in rows
+    }
+
+
 def _latest_market_prediction_snapshot_payload(session: Session, market_slug: str) -> dict[str, Any] | None:
     """Return the latest persisted ML prediction snapshot payload for one market."""
     normalized_slug = str(market_slug or "").strip().casefold()
@@ -825,6 +924,7 @@ def _latest_market_prediction_snapshot_payload(session: Session, market_slug: st
             row.ml_market_prediction_snapshot_id: row
             for row in validation_rows
         }
+    latest_validation_by_key = _latest_completed_prediction_validations(session, market_slug=normalized_slug)
 
     windows: dict[str, list[dict[str, Any]]] = {"12h": [], "24h": []}
     model_prediction_available = False
@@ -884,6 +984,11 @@ def _latest_market_prediction_snapshot_payload(session: Session, market_slug: st
             payload["prediction_validation_status"] = validation.validation_status
             payload["actual_source"] = validation.actual_source
             payload["actual_observed_at"] = validation.actual_observed_at.isoformat() if validation.actual_observed_at else None
+            payload["prediction_validation_comparison_type"] = "current_snapshot"
+        validation_key = (int(row.prediction_window_hours), str(row.side_label or "").strip().casefold())
+        latest_reference = latest_validation_by_key.get(validation_key)
+        if latest_reference is not None:
+            payload["latest_completed_validation"] = latest_reference
         payload.setdefault("predicted_direction", "flat")
         payload.setdefault("direction_signal_tier", row.signal_tier)
         payload.setdefault("display_tier", row.display_tier)
@@ -1150,9 +1255,10 @@ def _market_profile_ml_trend_payload(
         baseline_available = any(windows.get(window_name) for window_name in ("12h", "24h"))
         chart_available = baseline_available
     windows = _apply_live_polymarket_prediction_overlay(windows, live_market=live_market)
+    market_is_closed = bool(live_market.closed) if live_market is not None else bool(contract and contract.is_closed)
     model_prediction_available = bool(local_prediction.get("model_prediction_available", chart_available))
     base_prediction_status = str(local_prediction.get("prediction_status") or "")
-    if live_market is not None and live_market.closed and chart_available:
+    if market_is_closed and chart_available:
         model_prediction_available = False
         prediction_status = "market_closed_live_outcome"
     elif baseline_available:
@@ -1182,7 +1288,7 @@ def _market_profile_ml_trend_payload(
         "outcome_probabilities": live_market.outcome_probabilities() if live_market is not None else None,
         "primary_side_label": live_market.primary_side_label() if live_market is not None else None,
         "live_polymarket_updated_at": live_market.updated_at.isoformat() if live_market and live_market.updated_at else None,
-        "live_polymarket_closed": bool(live_market.closed) if live_market is not None else None,
+        "live_polymarket_closed": market_is_closed,
         "prediction_anchor": anchor,
         "live_whale_sequence": {
             "available": bool(live_sequence.get("available")),

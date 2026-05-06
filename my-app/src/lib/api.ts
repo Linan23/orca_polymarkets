@@ -145,7 +145,34 @@ export type MarketProfileMlPredictionCase = {
   crypto_direction_source_selector_reason?: string;
   live_polymarket_updated_at?: string | null;
   live_polymarket_closed?: boolean | null;
+  latest_completed_validation?: MarketProfileMlPredictionValidationReference | null;
+  prediction_validation_comparison_type?: string | null;
   local_backtest_only?: boolean;
+};
+
+export type MarketProfileMlPredictionValidationReference = {
+  ml_market_prediction_snapshot_id: number;
+  window: "12h" | "24h" | string;
+  side_label: string;
+  observation_time: string | null;
+  prediction_start_time?: string | null;
+  prediction_target_time: string | null;
+  prediction_generated_at: string | null;
+  prediction_window_hours: number;
+  current_odds_pct: number | null;
+  model_predicted_future_odds_pct: number | null;
+  model_predicted_delta_pts: number | null;
+  predicted_direction?: string | null;
+  actual_future_odds_pct: number | null;
+  actual_delta_pts: number | null;
+  actual_direction?: string | null;
+  prediction_signed_error_pts?: number | null;
+  prediction_absolute_error_pts?: number | null;
+  prediction_direction_match?: boolean | null;
+  prediction_validation_status?: string | null;
+  actual_source?: string | null;
+  actual_observed_at?: string | null;
+  comparison_type?: string | null;
 };
 
 export type MarketOutcomeProbability = {

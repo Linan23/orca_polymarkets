@@ -202,6 +202,43 @@ function binaryProbabilityRows(item: MarketProfileMlPredictionCase, value: numbe
   ];
 }
 
+function completedValidation(item: MarketProfileMlPredictionCase) {
+  const hasCurrentActual = typeof item.actual_future_odds_pct === "number" && Number.isFinite(item.actual_future_odds_pct);
+  if (hasCurrentActual) {
+    return {
+      window: item.window,
+      side_label: item.side_label,
+      observation_time: item.observation_time,
+      prediction_start_time: item.prediction_start_time ?? item.observation_time,
+      prediction_target_time: item.prediction_target_time ?? null,
+      prediction_window_hours: item.prediction_window_hours ?? windowHours(item.window),
+      current_odds_pct: item.current_odds_pct,
+      model_predicted_future_odds_pct: modelFutureOdds(item),
+      model_predicted_delta_pts: modelDelta(item),
+      actual_future_odds_pct: item.actual_future_odds_pct ?? null,
+      actual_delta_pts: item.actual_delta_pts ?? null,
+      prediction_absolute_error_pts: item.prediction_absolute_error_pts ?? null,
+      prediction_direction_match: item.prediction_direction_match ?? null,
+      prediction_validation_status: item.prediction_validation_status ?? "validated",
+      actual_source: item.actual_source ?? null,
+      actual_observed_at: item.actual_observed_at ?? null,
+      comparison_type: "current_snapshot",
+    };
+  }
+  const latest = item.latest_completed_validation;
+  if (latest && typeof latest.actual_future_odds_pct === "number" && Number.isFinite(latest.actual_future_odds_pct)) {
+    return latest;
+  }
+  return null;
+}
+
+function comparisonLabel(item: MarketProfileMlPredictionCase) {
+  const comparison = completedValidation(item);
+  if (!comparison) return "Pending";
+  if (comparison.comparison_type === "current_snapshot") return "Current snapshot";
+  return `Latest completed ${comparison.window} check`;
+}
+
 function outcomeProbabilityRows(
   outcomes: MarketOutcomeProbability[] | null | undefined,
   price: number | null,
@@ -246,8 +283,29 @@ function MarketPredictionTrendChart({ cases }: { cases: MarketProfileMlPredictio
   if (cases.length === 0) return null;
 
   const base = cases[0];
-  const entryOdds = base.whale_entry_odds_pct ?? base.current_odds_pct ?? 50;
-  const predictedPoints = [
+  const validationComparisons = cases
+    .map((item) => ({ item, comparison: completedValidation(item) }))
+    .filter(
+      (entry) =>
+        entry.comparison &&
+        typeof entry.comparison.actual_future_odds_pct === "number" &&
+        typeof entry.comparison.model_predicted_future_odds_pct === "number",
+    );
+  const useCompletedValidation = validationComparisons.length > 0;
+  const baseComparison = validationComparisons[0]?.comparison;
+  const entryOdds = useCompletedValidation
+    ? baseComparison?.current_odds_pct ?? base.whale_entry_odds_pct ?? base.current_odds_pct ?? 50
+    : base.whale_entry_odds_pct ?? base.current_odds_pct ?? 50;
+  const predictedPoints = useCompletedValidation
+    ? [
+        { hour: 0, odds: entryOdds, label: "entry" },
+        ...validationComparisons.map(({ item, comparison }) => ({
+          hour: comparison?.prediction_window_hours ?? item.prediction_window_hours ?? windowHours(item.window),
+          odds: comparison?.model_predicted_future_odds_pct ?? entryOdds,
+          label: item.window,
+        })),
+      ]
+    : [
     { hour: 0, odds: entryOdds, label: "entry" },
     ...cases
       .filter((item) => typeof modelFutureOdds(item) === "number")
@@ -257,13 +315,19 @@ function MarketPredictionTrendChart({ cases }: { cases: MarketProfileMlPredictio
         label: item.window,
       })),
   ];
-  const actualPoints = cases
-    .filter((item) => typeof item.actual_future_odds_pct === "number")
-    .map((item) => ({
-      hour: item.prediction_window_hours ?? windowHours(item.window),
-      odds: item.actual_future_odds_pct ?? entryOdds,
-      label: item.window,
-    }));
+  const actualPoints = useCompletedValidation
+    ? validationComparisons.map(({ item, comparison }) => ({
+        hour: comparison?.prediction_window_hours ?? item.prediction_window_hours ?? windowHours(item.window),
+        odds: comparison?.actual_future_odds_pct ?? entryOdds,
+        label: item.window,
+      }))
+    : cases
+        .filter((item) => typeof item.actual_future_odds_pct === "number")
+        .map((item) => ({
+          hour: item.prediction_window_hours ?? windowHours(item.window),
+          odds: item.actual_future_odds_pct ?? entryOdds,
+          label: item.window,
+        }));
   const intervalValues = cases.flatMap((item) => [
     item.interval_low_future_odds_pct,
     item.interval_high_future_odds_pct,
@@ -297,6 +361,11 @@ function MarketPredictionTrendChart({ cases }: { cases: MarketProfileMlPredictio
           <span><i className="market-ml-legend-predicted" /> Predicted</span>
           <span><i className="market-ml-legend-actual" /> Actual</span>
         </div>
+      )}
+      {useCompletedValidation && (
+        <p className="market-ml-chart-note">
+          Latest completed validation: model forecast from the prior window compared with the actual market trend.
+        </p>
       )}
       <svg className="market-ml-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="ML prediction trend">
         {[minOdds, Math.round((minOdds + maxOdds) / 2), maxOdds].map((odds) => (
@@ -339,15 +408,24 @@ function MarketPredictionOutcomeSummary({ cases }: { cases: MarketProfileMlPredi
   return (
     <div className="market-ml-outcome-summary">
       {cases.map((item) => {
-        const predictedRows = binaryProbabilityRows(item, modelFutureOdds(item));
-        const actualRows = binaryProbabilityRows(item, item.actual_future_odds_pct);
-        const hasActual = typeof item.actual_future_odds_pct === "number";
+        const comparison = completedValidation(item);
+        const predictedValue = comparison?.model_predicted_future_odds_pct ?? modelFutureOdds(item);
+        const actualValue = comparison?.actual_future_odds_pct ?? item.actual_future_odds_pct;
+        const predictedRows = binaryProbabilityRows(item, predictedValue);
+        const actualRows = binaryProbabilityRows(item, actualValue);
+        const hasActual = typeof actualValue === "number";
+        const isDirectionMatch = comparison?.prediction_direction_match ?? item.prediction_direction_match;
         return (
           <article className="market-ml-outcome-card" key={`outcome-${item.window}-${item.side_label}`}>
             <div className="market-ml-outcome-card-header">
               <span>{item.window}</span>
-              <strong>{hasActual ? "Predicted vs Actual" : "Predicted"}</strong>
+              <strong>{hasActual ? "Prediction Check" : "Predicted"}</strong>
             </div>
+            <p className="market-ml-outcome-meta">
+              {hasActual
+                ? `${comparisonLabel(item)}: ${formatDateTime(comparison?.observation_time)} to ${formatDateTime(comparison?.prediction_target_time)}`
+                : "Actual trend pending until the forecast window completes."}
+            </p>
             <div className="market-ml-outcome-columns">
               <div>
                 <p>Model</p>
@@ -367,9 +445,11 @@ function MarketPredictionOutcomeSummary({ cases }: { cases: MarketProfileMlPredi
               </div>
             </div>
             <div className="market-ml-outcome-footer">
-              <span>Move {formatSignedPoints(modelDelta(item))}</span>
-              <span>Error {formatSignedPoints(item.prediction_absolute_error_pts)}</span>
-              <span>{formatLabel(item.prediction_validation_status ?? (hasActual ? "validated" : "pending_actual"))}</span>
+              <span>Model move {formatSignedPoints(comparison?.model_predicted_delta_pts ?? modelDelta(item))}</span>
+              <span>Actual move {formatSignedPoints(comparison?.actual_delta_pts ?? item.actual_delta_pts)}</span>
+              <span>Error {formatSignedPoints(comparison?.prediction_absolute_error_pts ?? item.prediction_absolute_error_pts)}</span>
+              {hasActual && <span>{isDirectionMatch ? "Trend matched" : "Trend missed"}</span>}
+              <span>{formatLabel(comparison?.prediction_validation_status ?? item.prediction_validation_status ?? (hasActual ? "validated" : "pending_actual"))}</span>
             </div>
           </article>
         );
@@ -491,6 +571,10 @@ function MarketMlPredictionTrendPanel({
   const primaryCases = primaryTrendCases(cases, trend?.primary_side_label ?? preferredSideLabel);
   const anchor = trend?.prediction_anchor;
   const [activeTab, setActiveTab] = useState<"trend" | "whales">("trend");
+  const marketStatus =
+    trend?.live_polymarket_closed === true ? "Closed" : trend?.live_polymarket_closed === false ? "Open" : "Status pending";
+  const marketStatusClass =
+    trend?.live_polymarket_closed === true ? "is-closed" : trend?.live_polymarket_closed === false ? "is-open" : "";
 
   return (
     <section className="card profile-card market-ml-trend-card">
@@ -504,25 +588,30 @@ function MarketMlPredictionTrendPanel({
               : "Whale entry time followed by server-backed 12h and 24h trend predictions."}
           </p>
         </div>
-        <div className="market-ml-tabs" role="tablist" aria-label="Market ML profile views">
-          <button
-            type="button"
-            className={activeTab === "trend" ? "active" : ""}
-            onClick={() => setActiveTab("trend")}
-            role="tab"
-            aria-selected={activeTab === "trend"}
-          >
-            Prediction Trend
-          </button>
-          <button
-            type="button"
-            className={activeTab === "whales" ? "active" : ""}
-            onClick={() => setActiveTab("whales")}
-            role="tab"
-            aria-selected={activeTab === "whales"}
-          >
-            Top Whales
-          </button>
+        <div className="market-ml-actions">
+          <span className={`market-ml-status-pill ${marketStatusClass}`}>
+            Market {marketStatus}
+          </span>
+          <div className="market-ml-tabs" role="tablist" aria-label="Market ML profile views">
+            <button
+              type="button"
+              className={activeTab === "trend" ? "active" : ""}
+              onClick={() => setActiveTab("trend")}
+              role="tab"
+              aria-selected={activeTab === "trend"}
+            >
+              Prediction Trend
+            </button>
+            <button
+              type="button"
+              className={activeTab === "whales" ? "active" : ""}
+              onClick={() => setActiveTab("whales")}
+              role="tab"
+              aria-selected={activeTab === "whales"}
+            >
+              Top Whales
+            </button>
+          </div>
         </div>
       </div>
 
