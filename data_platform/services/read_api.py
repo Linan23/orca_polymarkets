@@ -15,6 +15,7 @@ from data_platform.models import (
     MarketContract,
     MarketProfile,
     MlMarketPredictionSnapshot,
+    MlMarketPredictionValidation,
     OrderbookSnapshot,
     Platform,
     PositionSnapshot,
@@ -769,6 +770,17 @@ def _ml_prediction_snapshot_table_exists(session: Session) -> bool:
     return bool(row and row.get("table_exists"))
 
 
+def _ml_prediction_validation_table_exists(session: Session) -> bool:
+    """Return whether the persistent ML validation table is installed."""
+    try:
+        row = session.execute(
+            text("SELECT to_regclass('analytics.ml_market_prediction_validation') IS NOT NULL AS table_exists")
+        ).mappings().first()
+    except SQLAlchemyError:
+        return False
+    return bool(row and row.get("table_exists"))
+
+
 def _latest_market_prediction_snapshot_payload(session: Session, market_slug: str) -> dict[str, Any] | None:
     """Return the latest persisted ML prediction snapshot payload for one market."""
     normalized_slug = str(market_slug or "").strip().casefold()
@@ -798,6 +810,22 @@ def _latest_market_prediction_snapshot_payload(session: Session, market_slug: st
     if not rows:
         return None
 
+    validation_by_snapshot_id: dict[int, MlMarketPredictionValidation] = {}
+    if _ml_prediction_validation_table_exists(session):
+        validation_rows = list(
+            session.scalars(
+                select(MlMarketPredictionValidation).where(
+                    MlMarketPredictionValidation.ml_market_prediction_snapshot_id.in_(
+                        [row.ml_market_prediction_snapshot_id for row in rows]
+                    )
+                )
+            )
+        )
+        validation_by_snapshot_id = {
+            row.ml_market_prediction_snapshot_id: row
+            for row in validation_rows
+        }
+
     windows: dict[str, list[dict[str, Any]]] = {"12h": [], "24h": []}
     model_prediction_available = False
     statuses: set[str] = set()
@@ -822,6 +850,40 @@ def _latest_market_prediction_snapshot_payload(session: Session, market_slug: st
             payload["predicted_future_odds_pct"] = predicted_future_odds_pct
         if payload.get("predicted_delta_pts") is None:
             payload["predicted_delta_pts"] = float(row.predicted_delta_pts) if row.predicted_delta_pts is not None else 0.0
+        payload["ml_market_prediction_snapshot_id"] = row.ml_market_prediction_snapshot_id
+        payload["model_predicted_future_odds_pct"] = predicted_future_odds_pct
+        payload["model_predicted_delta_pts"] = (
+            float(row.predicted_delta_pts)
+            if row.predicted_delta_pts is not None
+            else payload.get("predicted_delta_pts")
+        )
+        validation = validation_by_snapshot_id.get(row.ml_market_prediction_snapshot_id)
+        if validation is not None:
+            payload["actual_future_odds_pct"] = (
+                float(validation.actual_future_odds_pct)
+                if validation.actual_future_odds_pct is not None
+                else None
+            )
+            payload["actual_delta_pts"] = (
+                float(validation.actual_delta_pts)
+                if validation.actual_delta_pts is not None
+                else None
+            )
+            payload["prediction_signed_error_pts"] = (
+                float(validation.signed_error_pts)
+                if validation.signed_error_pts is not None
+                else None
+            )
+            payload["prediction_absolute_error_pts"] = (
+                float(validation.absolute_error_pts)
+                if validation.absolute_error_pts is not None
+                else None
+            )
+            payload["prediction_direction_match"] = validation.direction_match
+            payload["actual_direction"] = validation.actual_direction
+            payload["prediction_validation_status"] = validation.validation_status
+            payload["actual_source"] = validation.actual_source
+            payload["actual_observed_at"] = validation.actual_observed_at.isoformat() if validation.actual_observed_at else None
         payload.setdefault("predicted_direction", "flat")
         payload.setdefault("direction_signal_tier", row.signal_tier)
         payload.setdefault("display_tier", row.display_tier)
@@ -890,6 +952,12 @@ def _apply_live_polymarket_prediction_overlay(
                 original_delta = original_future - original_current
             if original_delta is None:
                 original_delta = 0.0
+            model_future = _coerce_float(item.get("model_predicted_future_odds_pct"))
+            model_delta = _coerce_float(item.get("model_predicted_delta_pts"))
+            item["model_predicted_future_odds_pct"] = (
+                model_future if model_future is not None else original_future
+            )
+            item["model_predicted_delta_pts"] = model_delta if model_delta is not None else original_delta
 
             if live_market.question:
                 item["question"] = f"{live_market.question} [{side_label}]" if side_label else live_market.question

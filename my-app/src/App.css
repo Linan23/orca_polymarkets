@@ -4860,6 +4860,43 @@ font-weight:700;
   min-width: 0;
 }
 
+.market-ml-chart-panel {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.market-ml-chart-legend {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 2px 4px 6px;
+}
+
+.market-ml-chart-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #cbd5e1;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.market-ml-chart-legend i {
+  display: inline-block;
+  width: 18px;
+  height: 3px;
+  border-radius: 999px;
+}
+
+.market-ml-legend-predicted {
+  background: #2dd4bf;
+}
+
+.market-ml-legend-actual {
+  background: #f59e0b;
+}
+
 .market-ml-chart {
   width: 100%;
   min-height: 220px;
@@ -4890,8 +4927,87 @@ font-weight:700;
   stroke-linejoin: round;
 }
 
+.market-ml-chart-actual-line {
+  stroke: #f59e0b;
+  stroke-dasharray: 7 5;
+}
+
+.market-ml-chart-actual-dot {
+  fill: #f59e0b !important;
+}
+
 .market-ml-axis-label {
   fill: #cbd5e1;
+}
+
+.market-ml-outcome-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.market-ml-outcome-card {
+  display: grid;
+  gap: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  background: rgba(15, 23, 42, 0.58);
+  border-radius: 14px;
+  padding: 12px;
+  min-width: 0;
+}
+
+.market-ml-outcome-card-header,
+.market-ml-outcome-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.market-ml-outcome-card-header span,
+.market-ml-outcome-footer span {
+  color: #94a3b8;
+  font-size: 0.78rem;
+}
+
+.market-ml-outcome-card-header strong {
+  color: #f8fafc;
+  font-size: 0.86rem;
+}
+
+.market-ml-outcome-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.market-ml-outcome-columns div {
+  display: grid;
+  gap: 6px;
+  border-radius: 10px;
+  background: rgba(2, 6, 23, 0.3);
+  padding: 8px;
+}
+
+.market-ml-outcome-columns p {
+  margin: 0;
+  color: #7dd3fc;
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.market-ml-outcome-columns span {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: #cbd5e1;
+  font-size: 0.82rem;
+}
+
+.market-ml-outcome-columns strong {
+  color: #f8fafc;
 }
 
 .market-ml-prediction-grid {
@@ -5073,6 +5189,7 @@ font-weight:700;
   .market-ml-chart-layout,
   .market-ml-live-entry,
   .market-ml-prediction-grid,
+  .market-ml-outcome-summary,
   .market-ml-whale-row {
     grid-template-columns: 1fr;
   }

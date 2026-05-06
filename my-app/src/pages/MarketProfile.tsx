@@ -171,6 +171,37 @@ function whaleAnchorValue(item: MarketProfileMlPredictionCase, key: string) {
   return item.whale_anchor?.[key];
 }
 
+function modelFutureOdds(item: MarketProfileMlPredictionCase) {
+  return item.model_predicted_future_odds_pct ?? item.predicted_future_odds_pct ?? null;
+}
+
+function modelDelta(item: MarketProfileMlPredictionCase) {
+  return item.model_predicted_delta_pts ?? item.predicted_delta_pts ?? null;
+}
+
+function oppositeSideLabel(value: string | null | undefined) {
+  const normalized = normalizeSideLabel(value);
+  if (normalized === "yes") return "No";
+  if (normalized === "no") return "Yes";
+  if (normalized === "up") return "Down";
+  if (normalized === "down") return "Up";
+  return "Other";
+}
+
+function binaryProbabilityRows(item: MarketProfileMlPredictionCase, value: number | null | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return [
+      { label: formatLabel(item.side_label), value: null },
+      { label: oppositeSideLabel(item.side_label), value: null },
+    ];
+  }
+  const sideLabel = formatLabel(item.side_label);
+  return [
+    { label: sideLabel, value },
+    { label: oppositeSideLabel(item.side_label), value: Math.min(Math.max(100 - value, 0), 100) },
+  ];
+}
+
 function outcomeProbabilityRows(
   outcomes: MarketOutcomeProbability[] | null | undefined,
   price: number | null,
@@ -216,21 +247,28 @@ function MarketPredictionTrendChart({ cases }: { cases: MarketProfileMlPredictio
 
   const base = cases[0];
   const entryOdds = base.whale_entry_odds_pct ?? base.current_odds_pct ?? 50;
-  const points = [
+  const predictedPoints = [
     { hour: 0, odds: entryOdds, label: "entry" },
     ...cases
-      .filter((item) => typeof item.predicted_future_odds_pct === "number")
+      .filter((item) => typeof modelFutureOdds(item) === "number")
       .map((item) => ({
         hour: item.prediction_window_hours ?? windowHours(item.window),
-        odds: item.predicted_future_odds_pct ?? entryOdds,
+        odds: modelFutureOdds(item) ?? entryOdds,
         label: item.window,
       })),
   ];
+  const actualPoints = cases
+    .filter((item) => typeof item.actual_future_odds_pct === "number")
+    .map((item) => ({
+      hour: item.prediction_window_hours ?? windowHours(item.window),
+      odds: item.actual_future_odds_pct ?? entryOdds,
+      label: item.window,
+    }));
   const intervalValues = cases.flatMap((item) => [
     item.interval_low_future_odds_pct,
     item.interval_high_future_odds_pct,
   ]);
-  const values = [...points.map((point) => point.odds), ...intervalValues].filter(
+  const values = [...predictedPoints.map((point) => point.odds), ...actualPoints.map((point) => point.odds), ...intervalValues].filter(
     (value): value is number => typeof value === "number" && Number.isFinite(value),
   );
   const rawMin = Math.min(...values);
@@ -249,10 +287,17 @@ function MarketPredictionTrendChart({ cases }: { cases: MarketProfileMlPredictio
   const plotHeight = height - top - bottom;
   const yFor = (odds: number) => top + ((maxOdds - odds) / Math.max(maxOdds - minOdds, 1)) * plotHeight;
   const xFor = (hour: number) => left + (Math.min(Math.max(hour, 0), 24) / 24) * plotWidth;
-  const linePoints = points.map((point) => `${xFor(point.hour)},${yFor(point.odds)}`).join(" ");
+  const predictedLinePoints = predictedPoints.map((point) => `${xFor(point.hour)},${yFor(point.odds)}`).join(" ");
+  const actualLinePoints = actualPoints.map((point) => `${xFor(point.hour)},${yFor(point.odds)}`).join(" ");
 
   return (
     <div className="market-ml-chart-shell">
+      {actualPoints.length > 0 && (
+        <div className="market-ml-chart-legend">
+          <span><i className="market-ml-legend-predicted" /> Predicted</span>
+          <span><i className="market-ml-legend-actual" /> Actual</span>
+        </div>
+      )}
       <svg className="market-ml-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="ML prediction trend">
         {[minOdds, Math.round((minOdds + maxOdds) / 2), maxOdds].map((odds) => (
           <g key={`grid-${odds}`}>
@@ -265,8 +310,9 @@ function MarketPredictionTrendChart({ cases }: { cases: MarketProfileMlPredictio
             {hour === 0 ? "entry" : `+${hour}h`}
           </text>
         ))}
-        <polyline className="market-ml-chart-line" points={linePoints} />
-        {points.map((point) => (
+        <polyline className="market-ml-chart-line" points={predictedLinePoints} />
+        {actualLinePoints && <polyline className="market-ml-chart-line market-ml-chart-actual-line" points={actualLinePoints} />}
+        {predictedPoints.map((point) => (
           <g key={`${point.label}-${point.hour}`}>
             <circle cx={xFor(point.hour)} cy={yFor(point.odds)} r={point.hour === 0 ? 4 : 6} />
             <text x={xFor(point.hour) + 8} y={yFor(point.odds) - 8}>
@@ -274,7 +320,60 @@ function MarketPredictionTrendChart({ cases }: { cases: MarketProfileMlPredictio
             </text>
           </g>
         ))}
+        {actualPoints.map((point) => (
+          <g key={`actual-${point.label}-${point.hour}`}>
+            <circle className="market-ml-chart-actual-dot" cx={xFor(point.hour)} cy={yFor(point.odds)} r={5} />
+            <text x={xFor(point.hour) + 8} y={yFor(point.odds) + 16}>
+              {formatOddsPercent(point.odds)}
+            </text>
+          </g>
+        ))}
       </svg>
+    </div>
+  );
+}
+
+function MarketPredictionOutcomeSummary({ cases }: { cases: MarketProfileMlPredictionCase[] }) {
+  if (cases.length === 0) return null;
+
+  return (
+    <div className="market-ml-outcome-summary">
+      {cases.map((item) => {
+        const predictedRows = binaryProbabilityRows(item, modelFutureOdds(item));
+        const actualRows = binaryProbabilityRows(item, item.actual_future_odds_pct);
+        const hasActual = typeof item.actual_future_odds_pct === "number";
+        return (
+          <article className="market-ml-outcome-card" key={`outcome-${item.window}-${item.side_label}`}>
+            <div className="market-ml-outcome-card-header">
+              <span>{item.window}</span>
+              <strong>{hasActual ? "Predicted vs Actual" : "Predicted"}</strong>
+            </div>
+            <div className="market-ml-outcome-columns">
+              <div>
+                <p>Model</p>
+                {predictedRows.map((row) => (
+                  <span key={`predicted-${item.window}-${row.label}`}>
+                    {row.label} <strong>{formatOddsPercent(row.value)}</strong>
+                  </span>
+                ))}
+              </div>
+              <div>
+                <p>Actual</p>
+                {actualRows.map((row) => (
+                  <span key={`actual-${item.window}-${row.label}`}>
+                    {row.label} <strong>{hasActual ? formatOddsPercent(row.value) : "Pending"}</strong>
+                  </span>
+                ))}
+              </div>
+            </div>
+            <div className="market-ml-outcome-footer">
+              <span>Move {formatSignedPoints(modelDelta(item))}</span>
+              <span>Error {formatSignedPoints(item.prediction_absolute_error_pts)}</span>
+              <span>{formatLabel(item.prediction_validation_status ?? (hasActual ? "validated" : "pending_actual"))}</span>
+            </div>
+          </article>
+        );
+      })}
     </div>
   );
 }
@@ -454,7 +553,10 @@ function MarketMlPredictionTrendPanel({
                 <span>{formatLabel(primaryCases[0]?.display_tier)}</span>
               </div>
             </div>
-            <MarketPredictionTrendChart cases={primaryCases} />
+            <div className="market-ml-chart-panel">
+              <MarketPredictionTrendChart cases={primaryCases} />
+              <MarketPredictionOutcomeSummary cases={primaryCases} />
+            </div>
           </div>
 
           <div className="market-ml-prediction-grid">
@@ -472,9 +574,9 @@ function MarketMlPredictionTrendPanel({
                       <span>{formatLabel(item.side_label)}</span>
                     </div>
                     <p>
-                      {formatOddsPercent(item.current_odds_pct)} to {formatOddsPercent(item.predicted_future_odds_pct)}
-                      <span className={(item.predicted_delta_pts ?? 0) >= 0 ? "market-ml-up" : "market-ml-down"}>
-                        {formatSignedPoints(item.predicted_delta_pts)}
+                      {formatOddsPercent(item.current_odds_pct)} to {formatOddsPercent(modelFutureOdds(item))}
+                      <span className={(modelDelta(item) ?? 0) >= 0 ? "market-ml-up" : "market-ml-down"}>
+                        {formatSignedPoints(modelDelta(item))}
                       </span>
                     </p>
                   </div>

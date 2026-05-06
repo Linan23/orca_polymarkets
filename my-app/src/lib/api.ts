@@ -99,6 +99,8 @@ export type MarketProfileMlPredictionCase = {
   predicted_future_odds_pct: number | null;
   predicted_delta_pts: number | null;
   predicted_direction: string;
+  model_predicted_future_odds_pct?: number | null;
+  model_predicted_delta_pts?: number | null;
   prediction_source: string;
   prediction_status?: string;
   display_tier: "show" | "review" | "hidden" | string;
@@ -129,6 +131,12 @@ export type MarketProfileMlPredictionCase = {
   actual_future_odds_pct?: number;
   actual_delta_pts?: number;
   actual_direction?: string;
+  prediction_signed_error_pts?: number | null;
+  prediction_absolute_error_pts?: number | null;
+  prediction_direction_match?: boolean | null;
+  prediction_validation_status?: string | null;
+  actual_source?: string | null;
+  actual_observed_at?: string | null;
   trend_fit_error_type: string;
   trend_shape_score: number;
   whale_anchor: Record<string, number | string | null>;

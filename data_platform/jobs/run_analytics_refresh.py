@@ -28,6 +28,11 @@ def parse_args() -> argparse.Namespace:
         help="Skip server-side market-profile ML prediction snapshot generation.",
     )
     parser.add_argument(
+        "--skip-ml-prediction-validation",
+        action="store_true",
+        help="Skip actual-vs-predicted ML validation scoring.",
+    )
+    parser.add_argument(
         "--ml-prediction-snapshot-limit",
         type=int,
         default=int(os.getenv("ML_PREDICTION_SNAPSHOT_LIMIT", "0")),
@@ -37,6 +42,18 @@ def parse_args() -> argparse.Namespace:
         "--ml-prediction-snapshot-platform",
         default=os.getenv("ML_PREDICTION_SNAPSHOT_PLATFORM", "polymarket"),
         help="Platform name to snapshot for market-profile ML predictions.",
+    )
+    parser.add_argument(
+        "--ml-prediction-validation-limit",
+        type=int,
+        default=int(os.getenv("ML_PREDICTION_VALIDATION_LIMIT", "1000")),
+        help="Maximum matured ML prediction snapshots to validate per refresh cycle. Use 0 for no cap.",
+    )
+    parser.add_argument(
+        "--ml-prediction-validation-target-tolerance-minutes",
+        type=int,
+        default=int(os.getenv("ML_PREDICTION_VALIDATION_TARGET_TOLERANCE_MINUTES", "90")),
+        help="Nearest orderbook snapshot tolerance around the 12h/24h target time.",
     )
     return parser.parse_args()
 
@@ -78,6 +95,22 @@ def main() -> int:
                         args.ml_prediction_snapshot_platform,
                         "--limit",
                         str(int(args.ml_prediction_snapshot_limit)),
+                    ],
+                )
+            )
+        if not args.skip_ml_prediction_validation:
+            commands.append(
+                (
+                    "validate_ml_market_predictions",
+                    [
+                        py,
+                        "data_platform/jobs/validate_ml_market_predictions.py",
+                        "--platform-name",
+                        args.ml_prediction_snapshot_platform,
+                        "--limit",
+                        str(int(args.ml_prediction_validation_limit)),
+                        "--target-tolerance-minutes",
+                        str(int(args.ml_prediction_validation_target_tolerance_minutes)),
                     ],
                 )
             )
