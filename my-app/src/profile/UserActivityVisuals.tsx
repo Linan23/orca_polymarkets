@@ -17,14 +17,22 @@ function formatPercent(value: number) {
   return `${(value * 100).toFixed(0)}%`;
 }
 
+function formatCompact(value: number) {
+  return new Intl.NumberFormat("en-US", {
+    notation: "compact",
+    maximumFractionDigits: 1,
+  }).format(value);
+}
+
 export function TagExposureDonut({ slices }: { slices: TagExposureSlice[] }) {
   const activeSlices = slices.filter((slice) => slice.percentage > 0);
   if (activeSlices.length === 0) {
     return <div className="empty-chart-state">No market-category activity for this timeframe.</div>;
   }
+  const totalTrades = activeSlices.reduce((sum, slice) => sum + slice.trade_count, 0);
   const pieData = activeSlices.map((slice, index) => ({
     id: index,
-    value: Number((slice.percentage * 100).toFixed(4)),
+    value: slice.trade_count,
     label: slice.label,
     color: DONUT_COLORS[index % DONUT_COLORS.length],
   }));
@@ -37,35 +45,38 @@ export function TagExposureDonut({ slices }: { slices: TagExposureSlice[] }) {
           series={[
             {
               data: pieData,
-              arcLabel: (item) => `${Math.round(item.value)}%`,
-              arcLabelMinAngle: 24,
               cornerRadius: 3,
               paddingAngle: 1,
+              highlightScope: { fade: "global", highlight: "item" },
+              faded: { innerRadius: 30, additionalRadius: -30, color: "gray" },
               valueFormatter: (item) => {
                 const slice = activeSlices[Number(item.id)];
-                return `${item.value.toFixed(1)}% · ${slice?.trade_count ?? 0} trades`;
+                const percent = totalTrades > 0 ? item.value / totalTrades : 0;
+                return `${item.label}: ${formatCompact(slice?.trade_count ?? item.value)} trades · ${formatPercent(percent)}`;
               },
             },
           ]}
           width={260}
-          height={240}
+          height={250}
           hideLegend
-          margin={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          margin={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          slotProps={{
+            tooltip: {
+              trigger: "item",
+              anchor: "pointer",
+              position: "right",
+              modifiers: [
+                {
+                  name: "offset",
+                  options: {
+                    offset: [8, 8],
+                  },
+                },
+              ],
+              sx: { zIndex: 99999 },
+            },
+          }}
         />
-      </div>
-
-      <div className="chart-legend">
-        {activeSlices.map((slice, index) => (
-          <div key={slice.label} className="chart-legend-row">
-            <span className="chart-swatch" style={{ backgroundColor: DONUT_COLORS[index % DONUT_COLORS.length] }} />
-            <div className="chart-legend-main">
-              <strong>{slice.label}</strong>
-              <small>
-                {formatPercent(slice.percentage)} · {slice.trade_count} trades
-              </small>
-            </div>
-          </div>
-        ))}
       </div>
     </div>
   );

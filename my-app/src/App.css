@@ -2161,16 +2161,18 @@ a {
 }
 
 .market-category-pie-layout {
-  display: grid;
-  grid-template-columns: minmax(220px, 260px) minmax(0, 1fr);
-  gap: 22px;
+  display: flex;
   align-items: center;
+  justify-content: center;
+  min-height: 260px;
+  overflow: visible;
 }
 
 .market-category-pie-shell {
   width: min(260px, 100%);
-  min-height: 240px;
+  min-height: 250px;
   margin: 0 auto;
+  overflow: visible;
 }
 
 .market-category-pie {
@@ -2268,11 +2270,14 @@ a {
 }
 
 .MuiChartsTooltip-paper {
+  position: relative;
+  z-index: 99999 !important;
   background: rgba(2, 6, 23, 0.94) !important;
   border: 1px solid rgba(148, 163, 184, 0.2);
   color: #f8fafc !important;
   box-shadow: 0 18px 44px rgba(0, 0, 0, 0.36) !important;
   padding: 8px 10px !important;
+  transform: translateZ(0);
 }
 
 .MuiChartsTooltip-root,
@@ -2283,7 +2288,7 @@ a {
 }
 
 .MuiChartsTooltip-root {
-  z-index: 3000 !important;
+  z-index: 99999 !important;
   pointer-events: none;
 }
 

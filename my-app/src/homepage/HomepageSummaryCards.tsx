@@ -136,7 +136,7 @@ function CoveragePieChart({
                     },
                   },
                 ],
-                sx: { zIndex: 3000 },
+                sx: { zIndex: 99999 },
               },
             }}
           />
