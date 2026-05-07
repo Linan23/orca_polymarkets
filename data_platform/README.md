@@ -301,14 +301,14 @@ Compatibility option:
 
 ## Near-Live Runtime Split
 
-The runtime is now split into three jobs instead of one all-purpose crawler:
+The runtime is now split into four jobs instead of one all-purpose crawler:
 
 1. `data_platform/jobs/run_live_ingest.py`
    - fast market ingest
    - default cadence: every 2 minutes
    - Polymarket and Kalshi market/trade/orderbook collection
    - wallet positions only when wallets are configured
-   - default focus domains: `politics`, `crypto`, `technology`, `video-games`
+   - default focus domains: `politics`, `crypto`, `technology`, `video-games`, `finance`
 2. `data_platform/jobs/run_analytics_refresh.py`
    - whale score rebuild
    - dashboard rebuild
@@ -320,12 +320,18 @@ The runtime is now split into three jobs instead of one all-purpose crawler:
    - batched orphan `market_event` cleanup
    - batched unreferenced `raw.api_payload` garbage collection
    - optional backup snapshot export
+4. `data_platform/jobs/run_ml_prediction_confidence_cycle.py`
+   - validates matured 12h/24h prediction snapshots
+   - trains a candidate confidence artifact
+   - promotes only when gated holdout checks pass
+   - default cadence on the VM: every 6 hours
 
 Useful local commands:
 
 ```bash
 .venv/bin/python data_platform/jobs/run_live_ingest.py --window-start 00:00 --window-end 23:59 --max-cycles 1
 .venv/bin/python data_platform/jobs/run_analytics_refresh.py --max-cycles 1
+.venv/bin/python data_platform/jobs/run_ml_prediction_confidence_cycle.py
 .venv/bin/python data_platform/jobs/run_retention_maintenance.py --skip-snapshot
 ```
 

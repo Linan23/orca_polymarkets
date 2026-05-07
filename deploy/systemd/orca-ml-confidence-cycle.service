@@ -1,0 +1,16 @@
+[Unit]
+Description=Orca ML prediction confidence validation and promotion cycle
+After=network-online.target orca-ingest-live.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=YOUR_VM_USER
+WorkingDirectory=/home/YOUR_VM_USER/orca_polymarkets
+EnvironmentFile=/etc/orca.env
+ExecStart=/bin/bash /home/YOUR_VM_USER/orca_polymarkets/scripts/run_ml_prediction_confidence_cycle_vm.sh
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

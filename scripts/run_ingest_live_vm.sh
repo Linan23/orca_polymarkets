@@ -25,6 +25,7 @@ if [[ "$has_focus_domain" -eq 0 ]]; then
     --focus-domain crypto
     --focus-domain technology
     --focus-domain video-games
+    --focus-domain finance
   )
 fi
 

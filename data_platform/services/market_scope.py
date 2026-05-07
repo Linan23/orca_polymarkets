@@ -13,6 +13,7 @@ DEFAULT_FOCUS_DOMAINS: tuple[str, ...] = (
     "crypto",
     "technology",
     "video-games",
+    "finance",
 )
 
 FOCUS_DOMAIN_ALIASES: dict[str, str] = {
@@ -32,6 +33,16 @@ FOCUS_DOMAIN_ALIASES: dict[str, str] = {
     "videogame": "video-games",
     "videogames": "video-games",
     "gaming": "video-games",
+    "finance": "finance",
+    "financial": "finance",
+    "tradfi": "finance",
+    "stock": "finance",
+    "stocks": "finance",
+    "stock-market": "finance",
+    "markets": "finance",
+    "macro": "finance",
+    "economy": "finance",
+    "economics": "finance",
 }
 
 DOMAIN_KEYWORDS: dict[str, tuple[str, ...]] = {
@@ -119,6 +130,63 @@ DOMAIN_KEYWORDS: dict[str, tuple[str, ...]] = {
         "software",
         "hardware",
     ),
+    "finance": (
+        "finance",
+        "financial",
+        "stock",
+        "stocks",
+        "stock market",
+        "equity",
+        "equities",
+        "shares",
+        "earnings",
+        "revenue",
+        "eps",
+        "guidance",
+        "market cap",
+        "fed",
+        "federal reserve",
+        "interest rate",
+        "interest rates",
+        "rate cut",
+        "rate cuts",
+        "rate hike",
+        "rate hikes",
+        "inflation",
+        "cpi",
+        "ppi",
+        "recession",
+        "gdp",
+        "unemployment",
+        "jobs report",
+        "payrolls",
+        "commodity",
+        "commodities",
+        "oil",
+        "gold",
+        "silver",
+        "etf",
+        "etfs",
+        "bank",
+        "banks",
+        "jpmorgan",
+        "goldman",
+        "ipo",
+        "merger",
+        "acquisition",
+        "buyout",
+        "s&p 500",
+        "sp500",
+        "nasdaq",
+        "dow jones",
+        "treasury",
+        "bond",
+        "bonds",
+        "yield",
+        "yields",
+        "mortgage rate",
+        "mortgage rates",
+    ),
     "video-games": (
         "video game",
         "video games",
@@ -175,6 +243,21 @@ DOMAIN_REGEXES: dict[str, tuple[re.Pattern[str], ...]] = {
     ),
     "technology": (
         re.compile(r"(?<![a-z])ai(?![a-z])"),
+    ),
+    "finance": (
+        re.compile(r"(?<![a-z])fed(?![a-z])"),
+        re.compile(r"(?<![a-z])cpi(?![a-z])"),
+        re.compile(r"(?<![a-z])ppi(?![a-z])"),
+        re.compile(r"(?<![a-z])gdp(?![a-z])"),
+        re.compile(r"(?<![a-z])eps(?![a-z])"),
+        re.compile(r"(?<![a-z])ipo(?![a-z])"),
+        re.compile(r"(?<![a-z])etfs?(?![a-z])"),
+        re.compile(r"s&p\s*500"),
+        re.compile(r"\bspx\b"),
+        re.compile(r"\bqqq\b"),
+        re.compile(r"\bdjia\b"),
+        re.compile(r"\bm&a\b"),
+        re.compile(r"\$[a-z]{1,5}\b"),
     ),
     "video-games": (
         re.compile(r"esports"),
@@ -242,6 +325,14 @@ def _video_games_matches(haystack: str) -> bool:
     return any(_keyword_matches(haystack, keyword) for keyword in VIDEO_GAMES_STRONG_KEYWORDS)
 
 
+def _domain_terms_match(haystack: str, domain: str) -> bool:
+    keywords = DOMAIN_KEYWORDS.get(domain, ())
+    regexes = DOMAIN_REGEXES.get(domain, ())
+    return any(_keyword_matches(haystack, keyword) for keyword in keywords) or any(
+        regex.search(haystack) for regex in regexes
+    )
+
+
 def add_focus_domain_argument(parser: Any) -> None:
     """Add a repeatable ``--focus-domain`` flag to an argparse parser."""
     parser.add_argument(
@@ -249,8 +340,9 @@ def add_focus_domain_argument(parser: Any) -> None:
         action="append",
         default=[],
         help=(
-            "Repeatable market scope filter. Supported domains: politics, crypto, technology, video-games. "
-            "Aliases like geopolitics/political, cryptocurrency, tech, and 'video games' are accepted."
+            "Repeatable market scope filter. Supported domains: politics, crypto, technology, "
+            "video-games, finance. Aliases like geopolitics/political, cryptocurrency, tech, "
+            "'video games', stocks, and macro are accepted."
         ),
     )
 
@@ -307,15 +399,13 @@ def matched_focus_domains(texts: Iterable[Any], focus_domains: Iterable[str] | N
         return set()
     matches: set[str] = set()
     for domain in domains:
-        keywords = DOMAIN_KEYWORDS.get(domain, ())
-        regexes = DOMAIN_REGEXES.get(domain, ())
         if domain == "video-games":
             if _video_games_matches(haystack):
                 matches.add(domain)
             continue
-        if any(_keyword_matches(haystack, keyword) for keyword in keywords) or any(
-            regex.search(haystack) for regex in regexes
-        ):
+        if domain == "finance" and _domain_terms_match(haystack, "crypto"):
+            continue
+        if _domain_terms_match(haystack, domain):
             matches.add(domain)
     return matches
 

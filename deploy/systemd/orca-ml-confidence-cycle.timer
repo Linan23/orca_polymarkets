@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Orca ML prediction confidence cycle every 6 hours
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=6h
+Persistent=true
+Unit=orca-ml-confidence-cycle.service
+
+[Install]
+WantedBy=timers.target

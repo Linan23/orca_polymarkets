@@ -201,6 +201,8 @@ _MARKET_CATEGORY_COVERAGE_SQL = text(
             THEN 'Video Game'
           WHEN haystack ~ '(crypto|cryptocurrenc|bitcoin|ethereum|solana|doge|dogecoin|xrp|btc|eth|token|airdrop|coinbase|kraken|stablecoin|microstrategy|mstr|blockchain|defi)'
             THEN 'Crypto'
+          WHEN haystack ~ '(finance|financial|stocks?|stock market|equities|shares|earnings|revenue|eps|guidance|market cap|fed|federal reserve|interest rates?|rate cuts?|rate hikes?|inflation|\\bcpi\\b|\\bppi\\b|recession|\\bgdp\\b|unemployment|jobs report|payrolls|commodit|\\boil\\b|\\bgold\\b|\\bsilver\\b|\\betfs?\\b|banks?|jpmorgan|goldman|ipo|merger|acquisition|buyout|s&p[ -]?500|sp500|nasdaq|dow jones|treasur|bonds?|yields?|mortgage rates?)'
+            THEN 'Finance'
           WHEN haystack ~ '(technology|tech|openai|gpt|llm|artificial intelligence|\\bai\\b|nvidia|amd|microsoft|google|alphabet|meta|apple|anthropic|sam altman|semiconductor|chips?|software|hardware)'
             THEN 'Technology'
           WHEN haystack ~ '(geopolit|world affairs|foreign policy|diplom|ceasefire|military|nato|ukraine|russia|putin|zelensky|china|taiwan|iran|israel|gaza|syria|middle east|\\bwar\\b)'
@@ -219,9 +221,10 @@ _MARKET_CATEGORY_COVERAGE_SQL = text(
         WHEN 'Video Game' THEN 1
         WHEN 'Technology' THEN 2
         WHEN 'Crypto' THEN 3
-        WHEN 'Geopolitics' THEN 4
-        WHEN 'Politics' THEN 5
-        ELSE 6
+        WHEN 'Finance' THEN 4
+        WHEN 'Geopolitics' THEN 5
+        WHEN 'Politics' THEN 6
+        ELSE 7
       END
     """
 )

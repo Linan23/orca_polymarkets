@@ -4,6 +4,7 @@ This directory now contains the first model-ready dataset export and a baseline 
 
 Current scope:
 - Polymarket only
+- focused categories: Politics, Crypto, Technology, Video Game/Esports, and Finance
 - resolved `user x market` rows for the user-profitability starter
 - resolved `market x observation_time` rows for the market-outcome starter
 - conservative targets built from normalized resolved history
@@ -119,6 +120,14 @@ Validate closed/matured market-profile predictions, retrain the confidence layer
 ```bash
 .venv/bin/python data_platform/jobs/run_ml_prediction_confidence_cycle.py
 ```
+
+The production confidence cycle is designed to run every 6 hours. It writes a candidate artifact, compares it with the active artifact on chronological holdout rows, and only promotes the candidate when Watch-tier precision and MAE guardrails pass.
+
+Runtime artifact paths:
+
+- active model: `data_platform/runtime/ml/market_prediction_confidence_model.json`
+- candidates: `data_platform/runtime/ml/candidates/`
+- promotion decisions: `data_platform/runtime/ml/model_promotion_manifest.jsonl`
 
 Train only the closed-market confidence artifact used by market profiles:
 

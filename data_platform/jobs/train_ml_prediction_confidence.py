@@ -17,6 +17,8 @@ from data_platform.db.session import session_scope
 from data_platform.ml.prediction_confidence import (
     DEFAULT_CONFIDENCE_MODEL_PATH,
     MIN_TRAIN_ROWS,
+    STRONG_PRECISION_TARGET,
+    WATCH_PRECISION_TARGET,
     train_prediction_confidence_model,
     write_confidence_artifact,
 )
@@ -43,6 +45,16 @@ def parse_args() -> argparse.Namespace:
         default=float(os.getenv("ML_PREDICTION_CONFIDENCE_TEST_FRACTION", "0.25")),
         help="Newest chronological share held out for validation.",
     )
+    parser.add_argument(
+        "--watch-precision-target",
+        type=float,
+        default=float(os.getenv("ML_PREDICTION_WATCH_PRECISION_TARGET", str(WATCH_PRECISION_TARGET))),
+    )
+    parser.add_argument(
+        "--strong-precision-target",
+        type=float,
+        default=float(os.getenv("ML_PREDICTION_STRONG_PRECISION_TARGET", str(STRONG_PRECISION_TARGET))),
+    )
     return parser.parse_args()
 
 
@@ -55,6 +67,8 @@ def main() -> int:
             platform_name=str(args.platform_name),
             min_train_rows=max(int(args.min_train_rows), 1),
             test_fraction=float(args.test_fraction),
+            watch_precision_target=float(args.watch_precision_target),
+            strong_precision_target=float(args.strong_precision_target),
         )
     output_path = Path(args.output_path)
     write_confidence_artifact(artifact, output_path)

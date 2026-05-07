@@ -29,6 +29,11 @@ from data_platform.jobs.validate_ml_market_predictions import (
 from data_platform.ml.prediction_confidence import (
     DEFAULT_CONFIDENCE_MODEL_PATH,
     MIN_TRAIN_ROWS,
+    STRONG_PRECISION_TARGET,
+    WATCH_PRECISION_TARGET,
+    confidence_promotion_decision,
+    load_confidence_artifact,
+    load_validated_confidence_rows,
     train_prediction_confidence_model,
     write_confidence_artifact,
 )
@@ -54,8 +59,25 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--revalidate", action="store_true", help="Rescore already validated snapshots before training.")
     parser.add_argument(
+        "--active-model-path",
         "--confidence-model-path",
+        dest="active_model_path",
         default=os.getenv("ML_PREDICTION_CONFIDENCE_MODEL_PATH", str(DEFAULT_CONFIDENCE_MODEL_PATH)),
+        help="Active JSON confidence artifact used by market-profile prediction snapshots.",
+    )
+    parser.add_argument(
+        "--candidate-output-dir",
+        default=os.getenv("ML_PREDICTION_CONFIDENCE_CANDIDATE_DIR", "data_platform/runtime/ml/candidates"),
+    )
+    parser.add_argument(
+        "--promotion-manifest-path",
+        default=os.getenv("ML_PREDICTION_CONFIDENCE_PROMOTION_MANIFEST", "data_platform/runtime/ml/model_promotion_manifest.jsonl"),
+    )
+    parser.add_argument(
+        "--promotion-mode",
+        choices=("gated", "always", "never"),
+        default=os.getenv("ML_PREDICTION_CONFIDENCE_PROMOTION_MODE", "gated"),
+        help="Use gated promotion, always promote candidates, or never replace the active artifact.",
     )
     parser.add_argument(
         "--min-train-rows",
@@ -66,6 +88,21 @@ def parse_args() -> argparse.Namespace:
         "--test-fraction",
         type=float,
         default=float(os.getenv("ML_PREDICTION_CONFIDENCE_TEST_FRACTION", "0.25")),
+    )
+    parser.add_argument(
+        "--watch-precision-target",
+        type=float,
+        default=float(os.getenv("ML_PREDICTION_WATCH_PRECISION_TARGET", str(WATCH_PRECISION_TARGET))),
+    )
+    parser.add_argument(
+        "--strong-precision-target",
+        type=float,
+        default=float(os.getenv("ML_PREDICTION_STRONG_PRECISION_TARGET", str(STRONG_PRECISION_TARGET))),
+    )
+    parser.add_argument(
+        "--max-mae-regression-pts",
+        type=float,
+        default=float(os.getenv("ML_PREDICTION_MAX_MAE_REGRESSION_PTS", "0.5")),
     )
     parser.add_argument("--include-closed", action="store_true", help="Also snapshot closed markets for local checks.")
     parser.add_argument("--snapshot-limit", type=int, default=0, help="Maximum active markets to snapshot. Use 0 for no cap.")
@@ -80,11 +117,28 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _append_jsonl(path: Path, record: dict[str, object]) -> None:
+    """Append a compact JSON record."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(record, separators=(",", ":"), default=str))
+        handle.write("\n")
+
+
+def _candidate_artifact_path(candidate_dir: Path, *, as_of: datetime, platform_name: str) -> Path:
+    """Return a stable candidate artifact path for one training cycle."""
+    stamp = as_of.strftime("%Y%m%dT%H%M%SZ")
+    safe_platform = "".join(character if character.isalnum() or character in {"-", "_"} else "_" for character in platform_name)
+    return candidate_dir / f"{stamp}_{safe_platform}_market_prediction_confidence_candidate.json"
+
+
 def main() -> int:
     """CLI entrypoint."""
     args = parse_args()
     as_of = datetime.now(timezone.utc)
-    confidence_model_path = Path(args.confidence_model_path)
+    active_model_path = Path(args.active_model_path)
+    candidate_output_dir = Path(args.candidate_output_dir)
+    promotion_manifest_path = Path(args.promotion_manifest_path)
     with session_scope(args.database_url or None) as session:
         validation_summary = validate_predictions(
             session,
@@ -100,8 +154,55 @@ def main() -> int:
             platform_name=str(args.platform_name),
             min_train_rows=max(int(args.min_train_rows), 1),
             test_fraction=float(args.test_fraction),
+            watch_precision_target=float(args.watch_precision_target),
+            strong_precision_target=float(args.strong_precision_target),
         )
-        write_confidence_artifact(confidence_artifact, confidence_model_path)
+        candidate_path = _candidate_artifact_path(candidate_output_dir, as_of=as_of, platform_name=str(args.platform_name))
+        active_artifact = load_confidence_artifact(active_model_path)
+        validation_rows = load_validated_confidence_rows(session, platform_name=str(args.platform_name))
+        promotion = confidence_promotion_decision(
+            candidate_artifact=confidence_artifact,
+            active_artifact=active_artifact,
+            validation_rows=validation_rows,
+            min_train_rows=max(int(args.min_train_rows), 1),
+            test_fraction=float(args.test_fraction),
+            watch_precision_target=float(args.watch_precision_target),
+            max_mae_regression_pts=float(args.max_mae_regression_pts),
+        )
+        if args.promotion_mode == "always":
+            promotion["promotion_status"] = "promoted"
+            promotion["promotion_reason"] = "promotion-mode always"
+        elif args.promotion_mode == "never":
+            promotion["promotion_status"] = "rejected"
+            promotion["promotion_reason"] = "promotion-mode never"
+
+        confidence_artifact.update(
+            {
+                "promotion_status": promotion.get("promotion_status"),
+                "promotion_reason": promotion.get("promotion_reason"),
+                "previous_model_trained_at": promotion.get("previous_model_trained_at"),
+                "candidate_metrics": promotion.get("candidate_metrics"),
+                "active_metrics": promotion.get("active_metrics"),
+                "window_metrics": (promotion.get("candidate_metrics") or {}).get("windows"),
+            }
+        )
+        write_confidence_artifact(confidence_artifact, candidate_path)
+        if promotion.get("promotion_status") == "promoted":
+            write_confidence_artifact(confidence_artifact, active_model_path)
+        _append_jsonl(
+            promotion_manifest_path,
+            {
+                "as_of": as_of.isoformat(),
+                "platform": args.platform_name,
+                "promotion_mode": args.promotion_mode,
+                "candidate_path": str(candidate_path),
+                "active_model_path": str(active_model_path),
+                "promotion_status": promotion.get("promotion_status"),
+                "promotion_reason": promotion.get("promotion_reason"),
+                "candidate_metrics": promotion.get("candidate_metrics"),
+                "active_metrics": promotion.get("active_metrics"),
+            },
+        )
         snapshot_summary = generate_prediction_snapshots(
             session,
             platform_name=str(args.platform_name),
@@ -112,7 +213,7 @@ def main() -> int:
             feature_schema_version=str(args.feature_schema_version),
             create_table=bool(args.create_tables),
             live_feature_market_limit=int(args.live_feature_market_limit),
-            confidence_model_path=confidence_model_path,
+            confidence_model_path=active_model_path,
         )
 
     summary = {
@@ -122,11 +223,17 @@ def main() -> int:
         "validation": validation_summary,
         "confidence_training": {
             "ok": True,
-            "output_path": str(confidence_model_path),
+            "active_model_path": str(active_model_path),
+            "candidate_path": str(candidate_path),
+            "promotion_manifest_path": str(promotion_manifest_path),
+            "promotion_status": promotion.get("promotion_status"),
+            "promotion_reason": promotion.get("promotion_reason"),
             "model_version": confidence_artifact.get("model_version"),
             "trained_at": confidence_artifact.get("trained_at"),
             "row_count": confidence_artifact.get("row_count"),
             "windows": confidence_artifact.get("windows"),
+            "candidate_metrics": promotion.get("candidate_metrics"),
+            "active_metrics": promotion.get("active_metrics"),
         },
         "snapshot_generation": snapshot_summary,
     }

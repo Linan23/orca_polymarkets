@@ -254,7 +254,33 @@ def _error_bins(labels: list[int], probabilities: list[float], absolute_errors: 
     return bins
 
 
-def _train_window_model(rows: list[dict[str, Any]], *, min_train_rows: int, test_fraction: float) -> dict[str, Any]:
+def load_validated_confidence_rows(session: Session, *, platform_name: str = "polymarket") -> list[dict[str, Any]]:
+    """Return validated prediction rows used for confidence training and promotion checks."""
+    return [dict(row) for row in session.execute(VALIDATED_CONFIDENCE_ROWS_SQL, {"platform_name": platform_name}).mappings()]
+
+
+def _split_index(rows: list[dict[str, Any]], *, min_train_rows: int, test_fraction: float) -> int:
+    split_index = max(min_train_rows, int(len(rows) * (1.0 - test_fraction)))
+    if len(rows) - split_index < MIN_TEST_ROWS and len(rows) >= min_train_rows + MIN_TEST_ROWS:
+        split_index = len(rows) - MIN_TEST_ROWS
+    return min(max(split_index, 1), len(rows))
+
+
+def _holdout_rows(rows: list[dict[str, Any]], *, min_train_rows: int, test_fraction: float) -> list[dict[str, Any]]:
+    if len(rows) < min_train_rows:
+        return []
+    split_index = _split_index(rows, min_train_rows=min_train_rows, test_fraction=test_fraction)
+    return rows[split_index:] or rows[:split_index]
+
+
+def _train_window_model(
+    rows: list[dict[str, Any]],
+    *,
+    min_train_rows: int,
+    test_fraction: float,
+    watch_precision_target: float,
+    strong_precision_target: float,
+) -> dict[str, Any]:
     if len(rows) < min_train_rows:
         return {"status": "insufficient_rows", "row_count": len(rows), "min_train_rows": min_train_rows}
     labels = [1 if bool(row.get("direction_match")) else 0 for row in rows]
@@ -266,9 +292,7 @@ def _train_window_model(rows: list[dict[str, Any]], *, min_train_rows: int, test
     from sklearn.preprocessing import StandardScaler
 
     vectors = [_feature_vector_from_payload(_payload_dict(row.get("prediction_payload")), row) for row in rows]
-    split_index = max(min_train_rows, int(len(rows) * (1.0 - test_fraction)))
-    if len(rows) - split_index < MIN_TEST_ROWS and len(rows) >= min_train_rows + MIN_TEST_ROWS:
-        split_index = len(rows) - MIN_TEST_ROWS
+    split_index = _split_index(rows, min_train_rows=min_train_rows, test_fraction=test_fraction)
     train_vectors = vectors[:split_index]
     train_labels = labels[:split_index]
     test_vectors = vectors[split_index:] or vectors[:split_index]
@@ -286,13 +310,13 @@ def _train_window_model(rows: list[dict[str, Any]], *, min_train_rows: int, test
     watch_threshold = _select_threshold(
         test_labels,
         test_probabilities,
-        target_precision=WATCH_PRECISION_TARGET,
+        target_precision=watch_precision_target,
         fallback=0.7,
     )
     strong_threshold = _select_threshold(
         test_labels,
         test_probabilities,
-        target_precision=STRONG_PRECISION_TARGET,
+        target_precision=strong_precision_target,
         fallback=0.8,
     )
 
@@ -316,6 +340,9 @@ def _train_window_model(rows: list[dict[str, Any]], *, min_train_rows: int, test
             "holdout_ece_pct": round(100.0 * ece, 2) if ece is not None else None,
             "holdout_direction_match_pct": round(100.0 * sum(test_labels) / len(test_labels), 2),
             "holdout_mean_absolute_error_pts": round(sum(test_errors) / len(test_errors), 4) if test_errors else None,
+            "holdout_rmse_pts": round(math.sqrt(sum(error * error for error in test_errors) / len(test_errors)), 4)
+            if test_errors
+            else None,
         },
         "error_bins": _error_bins(test_labels, test_probabilities, test_errors),
     }
@@ -327,9 +354,11 @@ def train_prediction_confidence_model(
     platform_name: str = "polymarket",
     min_train_rows: int = MIN_TRAIN_ROWS,
     test_fraction: float = 0.25,
+    watch_precision_target: float = WATCH_PRECISION_TARGET,
+    strong_precision_target: float = STRONG_PRECISION_TARGET,
 ) -> dict[str, Any]:
     """Train per-window confidence models from validated prediction outcomes."""
-    raw_rows = [dict(row) for row in session.execute(VALIDATED_CONFIDENCE_ROWS_SQL, {"platform_name": platform_name}).mappings()]
+    raw_rows = load_validated_confidence_rows(session, platform_name=platform_name)
     windows: dict[str, Any] = {}
     for window_hours in PREDICTION_WINDOWS:
         window_rows = [row for row in raw_rows if _safe_int(row.get("prediction_window_hours")) == window_hours]
@@ -337,6 +366,8 @@ def train_prediction_confidence_model(
             window_rows,
             min_train_rows=max(min_train_rows, 1),
             test_fraction=max(0.05, min(test_fraction, 0.5)),
+            watch_precision_target=max(0.0, min(float(watch_precision_target), 1.0)),
+            strong_precision_target=max(0.0, min(float(strong_precision_target), 1.0)),
         )
     return {
         "model_version": CONFIDENCE_MODEL_VERSION,
@@ -347,6 +378,8 @@ def train_prediction_confidence_model(
         "row_count": len(raw_rows),
         "min_train_rows": min_train_rows,
         "test_fraction": test_fraction,
+        "watch_precision_target": watch_precision_target,
+        "strong_precision_target": strong_precision_target,
         "windows": windows,
     }
 
@@ -398,6 +431,233 @@ def _threshold_precision_pct(thresholds: dict[str, Any], tier: str) -> float | N
     threshold_detail = thresholds.get(tier) if isinstance(thresholds.get(tier), dict) else {}
     precision = threshold_detail.get("precision")
     return round(100.0 * _safe_float(precision), 2) if precision is not None else None
+
+
+def score_prediction_confidence(
+    payload: dict[str, Any],
+    artifact: dict[str, Any] | None,
+    row: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Return the trained confidence score for one prediction payload."""
+    if not artifact:
+        return {"available": False, "reason": "artifact_missing"}
+    window_hours = _prediction_window(payload, row)
+    window_model = (artifact.get("windows") or {}).get(str(window_hours))
+    if not isinstance(window_model, dict) or window_model.get("status") != "trained":
+        return {"available": False, "reason": "window_not_trained", "window_hours": window_hours}
+
+    vector = _feature_vector_from_payload(payload, row)
+    means = [_safe_float(value) for value in window_model.get("scaler_mean") or []]
+    scales = [_safe_float(value, 1.0) or 1.0 for value in window_model.get("scaler_scale") or []]
+    coefficients = [_safe_float(value) for value in window_model.get("coefficients") or []]
+    if len(vector) != len(means) or len(vector) != len(scales) or len(vector) != len(coefficients):
+        return {"available": False, "reason": "feature_schema_mismatch", "window_hours": window_hours}
+
+    linear_score = _safe_float(window_model.get("intercept"))
+    for value, mean, scale, coefficient in zip(vector, means, scales, coefficients):
+        linear_score += ((value - mean) / scale) * coefficient
+    confidence = _sigmoid(linear_score)
+    return {
+        "available": True,
+        "score": confidence,
+        "window_hours": window_hours,
+        "window_model": window_model,
+    }
+
+
+def _mean(values: list[float]) -> float | None:
+    return sum(values) / len(values) if values else None
+
+
+def _evaluation_summary(
+    rows: list[dict[str, Any]],
+    artifact: dict[str, Any] | None,
+    *,
+    window_hours: int,
+    min_train_rows: int,
+    test_fraction: float,
+) -> dict[str, Any]:
+    window_rows = [row for row in rows if _safe_int(row.get("prediction_window_hours")) == window_hours]
+    holdout_rows = _holdout_rows(
+        window_rows,
+        min_train_rows=max(min_train_rows, 1),
+        test_fraction=max(0.05, min(test_fraction, 0.5)),
+    )
+    if not holdout_rows:
+        return {
+            "status": "insufficient_rows",
+            "window_hours": window_hours,
+            "row_count": len(window_rows),
+            "holdout_rows": 0,
+        }
+
+    scored: list[dict[str, Any]] = []
+    unscored_count = 0
+    window_model: dict[str, Any] | None = None
+    for row in holdout_rows:
+        payload = _payload_dict(row.get("prediction_payload"))
+        score_detail = score_prediction_confidence(payload, artifact, row)
+        if not score_detail.get("available"):
+            unscored_count += 1
+            continue
+        window_model = score_detail.get("window_model") if isinstance(score_detail.get("window_model"), dict) else window_model
+        scored.append(
+            {
+                "score": _safe_float(score_detail.get("score")),
+                "label": 1 if bool(row.get("direction_match")) else 0,
+                "absolute_error_pts": _safe_float(row.get("absolute_error_pts")),
+                "predicted_direction": str(row.get("predicted_direction") or "").lower(),
+            }
+        )
+
+    if not scored or window_model is None:
+        return {
+            "status": "unscored",
+            "window_hours": window_hours,
+            "row_count": len(window_rows),
+            "holdout_rows": len(holdout_rows),
+            "scored_rows": 0,
+            "unscored_rows": unscored_count,
+        }
+
+    thresholds = window_model.get("thresholds") if isinstance(window_model.get("thresholds"), dict) else {}
+    watch_threshold = _safe_float((thresholds.get("watch") or {}).get("threshold"), 0.7)
+    strong_threshold = _safe_float((thresholds.get("strong") or {}).get("threshold"), 0.8)
+    directional = [item for item in scored if item["predicted_direction"] in {"up", "down"}]
+    watch_rows = [item for item in directional if item["score"] >= watch_threshold]
+    strong_rows = [item for item in directional if item["score"] >= strong_threshold]
+    score_predictions = [1 if item["score"] >= 0.5 else 0 for item in scored]
+    labels = [int(item["label"]) for item in scored]
+    errors = [float(item["absolute_error_pts"]) for item in scored]
+    watch_errors = [float(item["absolute_error_pts"]) for item in watch_rows]
+    strong_errors = [float(item["absolute_error_pts"]) for item in strong_rows]
+    return {
+        "status": "evaluated",
+        "window_hours": window_hours,
+        "row_count": len(window_rows),
+        "holdout_rows": len(holdout_rows),
+        "scored_rows": len(scored),
+        "unscored_rows": unscored_count,
+        "watch_threshold": round(watch_threshold, 4),
+        "strong_threshold": round(strong_threshold, 4),
+        "direction_accuracy_pct": round(100.0 * sum(1 for label, prediction in zip(labels, score_predictions) if label == prediction) / len(scored), 2),
+        "direction_match_base_rate_pct": round(100.0 * sum(labels) / len(labels), 2),
+        "mae_pts": round(_mean(errors) or 0.0, 4),
+        "rmse_pts": round(math.sqrt(sum(error * error for error in errors) / len(errors)), 4) if errors else None,
+        "watch_signal_count": len(watch_rows),
+        "watch_precision_pct": round(100.0 * sum(item["label"] for item in watch_rows) / len(watch_rows), 2) if watch_rows else None,
+        "watch_coverage_pct": round(100.0 * len(watch_rows) / len(scored), 2),
+        "watch_mae_pts": round(_mean(watch_errors), 4) if watch_errors else None,
+        "watch_rmse_pts": round(math.sqrt(sum(error * error for error in watch_errors) / len(watch_errors)), 4)
+        if watch_errors
+        else None,
+        "strong_signal_count": len(strong_rows),
+        "strong_precision_pct": round(100.0 * sum(item["label"] for item in strong_rows) / len(strong_rows), 2) if strong_rows else None,
+        "strong_coverage_pct": round(100.0 * len(strong_rows) / len(scored), 2),
+        "strong_mae_pts": round(_mean(strong_errors), 4) if strong_errors else None,
+        "strong_rmse_pts": round(math.sqrt(sum(error * error for error in strong_errors) / len(strong_errors)), 4)
+        if strong_errors
+        else None,
+    }
+
+
+def evaluate_confidence_artifact(
+    rows: list[dict[str, Any]],
+    artifact: dict[str, Any] | None,
+    *,
+    min_train_rows: int = MIN_TRAIN_ROWS,
+    test_fraction: float = 0.25,
+) -> dict[str, Any]:
+    """Evaluate an artifact on the same chronological holdout used for promotion."""
+    windows = {
+        str(window_hours): _evaluation_summary(
+            rows,
+            artifact,
+            window_hours=window_hours,
+            min_train_rows=min_train_rows,
+            test_fraction=test_fraction,
+        )
+        for window_hours in PREDICTION_WINDOWS
+    }
+    evaluated = [window for window in windows.values() if window.get("status") == "evaluated"]
+    watch_precisions = [
+        _safe_float(window.get("watch_precision_pct"))
+        for window in evaluated
+        if window.get("watch_precision_pct") is not None
+    ]
+    watch_maes = [_safe_float(window.get("watch_mae_pts")) for window in evaluated if window.get("watch_mae_pts") is not None]
+    return {
+        "status": "evaluated" if evaluated else "unscored",
+        "model_version": artifact.get("model_version") if artifact else None,
+        "trained_at": artifact.get("trained_at") if artifact else None,
+        "windows": windows,
+        "average_watch_precision_pct": round(_mean(watch_precisions), 2) if watch_precisions else None,
+        "average_watch_mae_pts": round(_mean(watch_maes), 4) if watch_maes else None,
+    }
+
+
+def confidence_promotion_decision(
+    *,
+    candidate_artifact: dict[str, Any],
+    active_artifact: dict[str, Any] | None,
+    validation_rows: list[dict[str, Any]],
+    min_train_rows: int = MIN_TRAIN_ROWS,
+    test_fraction: float = 0.25,
+    watch_precision_target: float = WATCH_PRECISION_TARGET,
+    max_mae_regression_pts: float = 0.5,
+) -> dict[str, Any]:
+    """Return a gated promotion decision for a candidate confidence artifact."""
+    candidate_metrics = evaluate_confidence_artifact(
+        validation_rows,
+        candidate_artifact,
+        min_train_rows=min_train_rows,
+        test_fraction=test_fraction,
+    )
+    active_metrics = evaluate_confidence_artifact(
+        validation_rows,
+        active_artifact,
+        min_train_rows=min_train_rows,
+        test_fraction=test_fraction,
+    ) if active_artifact else {"status": "missing", "windows": {}}
+
+    target_pct = 100.0 * max(0.0, min(float(watch_precision_target), 1.0))
+    reasons: list[str] = []
+    for window_hours in PREDICTION_WINDOWS:
+        key = str(window_hours)
+        candidate_window = candidate_metrics.get("windows", {}).get(key, {})
+        active_window = active_metrics.get("windows", {}).get(key, {}) if active_metrics else {}
+        if candidate_window.get("status") != "evaluated":
+            reasons.append(f"{window_hours}h candidate not evaluated")
+            continue
+        if int(candidate_window.get("watch_signal_count") or 0) <= 0:
+            reasons.append(f"{window_hours}h candidate produced no Watch/Strong holdout signals")
+            continue
+        candidate_precision = candidate_window.get("watch_precision_pct")
+        if candidate_precision is None or float(candidate_precision) < target_pct:
+            reasons.append(f"{window_hours}h candidate Watch precision below {round(target_pct, 2)}%")
+            continue
+        if active_window.get("status") != "evaluated" or active_window.get("watch_precision_pct") is None:
+            continue
+        active_precision = float(active_window.get("watch_precision_pct") or 0.0)
+        if float(candidate_precision) + 1e-9 < active_precision:
+            reasons.append(f"{window_hours}h candidate Watch precision regressed below active model")
+            continue
+        candidate_mae = candidate_window.get("watch_mae_pts")
+        active_mae = active_window.get("watch_mae_pts")
+        if candidate_mae is not None and active_mae is not None:
+            if float(candidate_mae) > float(active_mae) + max(0.0, float(max_mae_regression_pts)):
+                reasons.append(f"{window_hours}h candidate Watch MAE regressed beyond tolerance")
+
+    promoted = not reasons
+    return {
+        "promotion_status": "promoted" if promoted else "rejected",
+        "promotion_reason": "candidate passed gated holdout promotion checks" if promoted else "; ".join(reasons),
+        "candidate_metrics": candidate_metrics,
+        "active_metrics": active_metrics,
+        "previous_model_trained_at": active_artifact.get("trained_at") if active_artifact else None,
+        "watch_precision_target": watch_precision_target,
+        "max_mae_regression_pts": max_mae_regression_pts,
+    }
 
 
 def apply_trained_confidence(payload: dict[str, Any], artifact: dict[str, Any] | None) -> dict[str, Any]:

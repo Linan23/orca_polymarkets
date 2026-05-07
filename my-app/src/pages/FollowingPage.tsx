@@ -13,12 +13,11 @@ import {
   type FollowingUserCard,
   fetchFollowingDashboard,
 } from "../lib/api";
+import { formatCategoryLabel, getCategoryColor } from "../lib/categoryFormatting";
 import { formatContractPrice } from "../lib/marketFormatting";
 import { formatTrustScorePercent } from "../lib/scoreFormatting";
 import { deriveUserIdentity } from "../lib/userIdentity";
 import TopNavbar from "../homepage/TopNavbar";
-
-const FOLLOWING_CATEGORY_COLORS = ["#38bdf8", "#22c55e", "#f97316", "#eab308", "#a78bfa", "#94a3b8"];
 
 function formatCurrency(value: number | null | undefined) {
   if (value === null || value === undefined) return "--";
@@ -42,16 +41,6 @@ function formatDateTime(value: string | null | undefined) {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(date);
-}
-
-function formatCategoryLabel(value: string | null | undefined) {
-  const category = value?.trim();
-  if (!category) return "Other";
-  return category
-    .split(/[\s_-]+/)
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
-    .join(" ");
 }
 
 function sourceLabel(value: FollowedTraderFocusRow["focus_source"]) {
@@ -284,7 +273,7 @@ function TraderFocusDonut({ items }: { items: FollowedTraderFocusRow[] }) {
     id: index,
     value: item.focus_value,
     label: item.category_name,
-    color: FOLLOWING_CATEGORY_COLORS[index % FOLLOWING_CATEGORY_COLORS.length],
+    color: getCategoryColor(item.category_name, index),
   }));
 
   return (

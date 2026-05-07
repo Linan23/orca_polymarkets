@@ -204,6 +204,9 @@ Run the near-live service split locally:
 # slower analytics refresh, 15-minute cadence
 .venv/bin/python data_platform/jobs/run_analytics_refresh.py
 
+# continuous ML validation/retraining/promotion cycle
+.venv/bin/python data_platform/jobs/run_ml_prediction_confidence_cycle.py
+
 # nightly rollup/backfill/backup maintenance
 .venv/bin/python data_platform/jobs/run_retention_maintenance.py --skip-snapshot
 ```
@@ -213,12 +216,14 @@ Near-live ingest scope defaults to the focused categories used by the live VM de
 - `crypto`
 - `technology`
 - `video-games`
+- `finance`
 
 One-shot validation modes:
 
 ```bash
 .venv/bin/python data_platform/jobs/run_live_ingest.py --window-start 00:00 --window-end 23:59 --max-cycles 1
 .venv/bin/python data_platform/jobs/run_analytics_refresh.py --max-cycles 1
+.venv/bin/python data_platform/jobs/run_ml_prediction_confidence_cycle.py
 .venv/bin/python data_platform/jobs/run_retention_maintenance.py --skip-snapshot
 ```
 

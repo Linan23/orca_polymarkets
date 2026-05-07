@@ -94,7 +94,7 @@ Defaults:
 - Polymarket public crawl every cycle
 - Polymarket positions every 5 cycles when wallets are configured
 - Kalshi trades/orderbooks every cycle
-- default focus domains: `politics`, `crypto`, `technology`, `video-games`
+- default focus domains: `politics`, `crypto`, `technology`, `video-games`, `finance`
 - no whale/dashboard rebuild in this loop
 
 One-shot validation:
@@ -114,6 +114,23 @@ One-shot validation:
 ```bash
 .venv/bin/python data_platform/jobs/run_analytics_refresh.py --max-cycles 1
 ```
+
+### Continuous ML confidence cycle
+
+```bash
+.venv/bin/python data_platform/jobs/run_ml_prediction_confidence_cycle.py \
+  --promotion-mode gated \
+  --watch-precision-target 0.70 \
+  --strong-precision-target 0.80 \
+  --max-mae-regression-pts 0.5
+```
+
+What it does:
+1. validate matured 12h/24h prediction snapshots
+2. train a candidate confidence artifact
+3. compare the candidate with the active artifact on chronological holdout rows
+4. promote only when the gated accuracy/error checks pass
+5. generate fresh market-profile prediction snapshots
 
 ### Nightly maintenance
 
@@ -150,6 +167,7 @@ One-shot shadow backfill:
 VM wrapper scripts:
 - `scripts/run_ingest_live_vm.sh`
 - `scripts/run_analytics_refresh_vm.sh`
+- `scripts/run_ml_prediction_confidence_cycle_vm.sh`
 - `scripts/run_retention_rollup_vm.sh`
 
 `scripts/run_ingest_live_vm.sh` injects the focused crawl domains for the VM deployment unless you explicitly pass your own `--focus-domain` flags.
@@ -157,6 +175,8 @@ VM wrapper scripts:
 Example `systemd` units:
 - `deploy/systemd/orca-ingest-live.service`
 - `deploy/systemd/orca-analytics-refresh.service`
+- `deploy/systemd/orca-ml-confidence-cycle.service`
+- `deploy/systemd/orca-ml-confidence-cycle.timer`
 - `deploy/systemd/orca-retention-rollup.service`
 - `deploy/systemd/orca-backup-snapshot.timer`
 

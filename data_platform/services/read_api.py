@@ -51,6 +51,8 @@ CASE
     THEN 'Video Game'
   WHEN LOWER(CONCAT_WS(' ', me.title, me.slug, me.category, mc.question, mc.market_slug, mc.outcome_a_label, mc.outcome_b_label)) ~ '(crypto|cryptocurrenc|bitcoin|ethereum|solana|doge|dogecoin|xrp|btc|eth|token|airdrop|coinbase|kraken|stablecoin|microstrategy|mstr|blockchain|defi)'
     THEN 'Crypto'
+  WHEN LOWER(CONCAT_WS(' ', me.title, me.slug, me.category, mc.question, mc.market_slug, mc.outcome_a_label, mc.outcome_b_label)) ~ '(finance|financial|stocks?|stock market|equities|shares|earnings|revenue|eps|guidance|market cap|fed|federal reserve|interest rates?|rate cuts?|rate hikes?|inflation|\\bcpi\\b|\\bppi\\b|recession|\\bgdp\\b|unemployment|jobs report|payrolls|commodit|\\boil\\b|\\bgold\\b|\\bsilver\\b|\\betfs?\\b|banks?|jpmorgan|goldman|ipo|merger|acquisition|buyout|s&p[ -]?500|sp500|nasdaq|dow jones|treasur|bonds?|yields?|mortgage rates?)'
+    THEN 'Finance'
   WHEN LOWER(CONCAT_WS(' ', me.title, me.slug, me.category, mc.question, mc.market_slug, mc.outcome_a_label, mc.outcome_b_label)) ~ '(technology|tech|openai|gpt|llm|artificial intelligence|\\bai\\b|nvidia|amd|microsoft|google|alphabet|meta|apple|anthropic|sam altman|semiconductor|chips?|software|hardware)'
     THEN 'Technology'
   WHEN LOWER(CONCAT_WS(' ', me.title, me.slug, me.category, mc.question, mc.market_slug, mc.outcome_a_label, mc.outcome_b_label)) ~ '(geopolit|world affairs|foreign policy|diplom|ceasefire|military|nato|ukraine|russia|putin|zelensky|china|taiwan|iran|israel|gaza|syria|middle east|\\bwar\\b)'
@@ -2725,6 +2727,8 @@ def user_activity_insights(
                     THEN 'Video Game'
                   WHEN haystack ~ '(crypto|cryptocurrenc|bitcoin|ethereum|solana|doge|dogecoin|xrp|btc|eth|token|airdrop|coinbase|kraken|stablecoin|microstrategy|mstr|blockchain|defi)'
                     THEN 'Crypto'
+                  WHEN haystack ~ '(finance|financial|stocks?|stock market|equities|shares|earnings|revenue|eps|guidance|market cap|fed|federal reserve|interest rates?|rate cuts?|rate hikes?|inflation|\\bcpi\\b|\\bppi\\b|recession|\\bgdp\\b|unemployment|jobs report|payrolls|commodit|\\boil\\b|\\bgold\\b|\\bsilver\\b|\\betfs?\\b|banks?|jpmorgan|goldman|ipo|merger|acquisition|buyout|s&p[ -]?500|sp500|nasdaq|dow jones|treasur|bonds?|yields?|mortgage rates?)'
+                    THEN 'Finance'
                   WHEN haystack ~ '(technology|tech|openai|gpt|llm|artificial intelligence|\\bai\\b|nvidia|amd|microsoft|google|alphabet|meta|apple|anthropic|sam altman|semiconductor|chips?|software|hardware)'
                     THEN 'Technology'
                   WHEN haystack ~ '(geopolit|world affairs|foreign policy|diplom|ceasefire|military|nato|ukraine|russia|putin|zelensky|china|taiwan|iran|israel|gaza|syria|middle east|\\bwar\\b)'
@@ -2753,9 +2757,10 @@ def user_activity_insights(
                 WHEN 'Video Game' THEN 1
                 WHEN 'Technology' THEN 2
                 WHEN 'Crypto' THEN 3
-                WHEN 'Geopolitics' THEN 4
-                WHEN 'Politics' THEN 5
-                ELSE 6
+                WHEN 'Finance' THEN 4
+                WHEN 'Geopolitics' THEN 5
+                WHEN 'Politics' THEN 6
+                ELSE 7
               END,
               total_notional DESC
             """
@@ -2790,9 +2795,10 @@ def user_activity_insights(
             "Video Game": 1,
             "Technology": 2,
             "Crypto": 3,
-            "Geopolitics": 4,
-            "Politics": 5,
-            "Other": 6,
+            "Finance": 4,
+            "Geopolitics": 5,
+            "Politics": 6,
+            "Other": 7,
         }.get(str(item["label"]), 99)
     )
     tag_exposure = [item for item in tag_exposure if item["trade_count"] > 0]

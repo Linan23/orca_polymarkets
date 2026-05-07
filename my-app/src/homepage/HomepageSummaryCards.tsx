@@ -2,6 +2,7 @@ import { PieChart } from "@mui/x-charts/PieChart";
 import { useCallback, useState } from "react";
 import { useApiData } from "../hooks/useApiData";
 import { fetchHomeSummary, type HomeSummary } from "../lib/api";
+import { formatCategoryLabel, getCategoryColor } from "../lib/categoryFormatting";
 
 type HomeSummaryWithFreshness = HomeSummary & {
   is_stale?: boolean;
@@ -27,14 +28,6 @@ function formatCompact(value: number) {
 
 function formatPercent(value: number) {
   return `${Math.round(value)}%`;
-}
-
-function formatCategoryLabel(value: string) {
-  return value
-    .split(/[\s_-]+/)
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
-    .join(" ");
 }
 
 function formatLastUpdated(value?: string | number | Date | null) {
@@ -72,17 +65,6 @@ type CoveragePieRow = {
   value: number;
 };
 
-const COVERAGE_COLORS = [
-  "#6f7cff",
-  "#42d3ff",
-  "#4fd18b",
-  "#f6c85f",
-  "#f07167",
-  "#a78bfa",
-  "#f59e0b",
-  "#94a3b8",
-];
-
 function CoveragePieChart({
   rows,
   total,
@@ -102,7 +84,7 @@ function CoveragePieChart({
     id: index,
     value: row.value,
     label: row.name,
-    color: COVERAGE_COLORS[index % COVERAGE_COLORS.length],
+    color: getCategoryColor(row.name, index),
   }));
   const tooltipRow = tooltip ? activeRows[tooltip.dataIndex] : null;
   const tooltipPercent =

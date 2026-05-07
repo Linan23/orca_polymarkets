@@ -36,6 +36,7 @@ from data_platform.ml.prediction_confidence import (
 from data_platform.models import MlMarketPredictionSnapshot
 from data_platform.models.base import utc_now
 from data_platform.services.ml_reports import WHALE_ANCHORED_DELTA_JSON_PATH
+from data_platform.services.market_scope import DEFAULT_FOCUS_DOMAINS, matched_focus_domains
 
 
 DEFAULT_MODEL_VERSION = "market_profile_hybrid_whale_trend_v1"
@@ -53,6 +54,14 @@ PHYSICAL_SPORTS_TERMS = (
     "cricket", "rugby", "baseball", "basketball", "hockey", "formula 1", "f1",
 )
 ESPORTS_TERMS = ("esports", "e-sports", "video game", "video-games", "gaming")
+FOCUS_CATEGORY_LABELS = {
+    "video-games": "Video Game",
+    "crypto": "Crypto",
+    "finance": "Finance",
+    "technology": "Technology",
+    "politics": "Politics",
+}
+FOCUS_CATEGORY_PRIORITY = ("video-games", "crypto", "finance", "technology", "politics")
 
 
 def is_physical_sports_market(texts: list[Any], *, category: Any = None) -> bool:
@@ -61,6 +70,29 @@ def is_physical_sports_market(texts: list[Any], *, category: Any = None) -> bool
     if any(term in joined for term in ESPORTS_TERMS):
         return False
     return any(term in joined for term in PHYSICAL_SPORTS_TERMS)
+
+
+def _focused_category_for(row: dict[str, Any]) -> str:
+    """Return the dashboard-focused category label for prediction payloads."""
+    raw_category = str(row.get("event_category") or "").strip()
+    if raw_category.casefold() in {"geopolitics", "world politics", "world"}:
+        return "Geopolitics"
+    matches = matched_focus_domains(
+        [
+            raw_category,
+            row.get("market_slug"),
+            row.get("question"),
+            row.get("event_title"),
+            row.get("event_slug"),
+            row.get("outcome_a_label"),
+            row.get("outcome_b_label"),
+        ],
+        DEFAULT_FOCUS_DOMAINS,
+    )
+    for domain in FOCUS_CATEGORY_PRIORITY:
+        if domain in matches:
+            return FOCUS_CATEGORY_LABELS[domain]
+    return raw_category or "uncategorized"
 
 ACTIVE_MARKETS_SQL = text(
     """
@@ -527,7 +559,8 @@ def _live_prediction_for(
     interval_low = round(_clamp(predicted_future_odds_pct - interval_width, 0.0, 100.0), 4)
     interval_high = round(_clamp(predicted_future_odds_pct + interval_width, 0.0, 100.0), 4)
     target_time = generated_at + timedelta(hours=window_hours)
-    event_category = str(row.get("event_category") or "uncategorized")
+    raw_event_category = str(row.get("event_category") or "uncategorized")
+    event_category = _focused_category_for(row)
     if is_high_confidence_validated_slice:
         validation_tier = "high_confidence_historical_slice"
         validation_reason = (
@@ -580,6 +613,7 @@ def _live_prediction_for(
         "focus_category": event_category,
         "focused_fit_category": event_category,
         "market_family": event_category,
+        "source_event_category": raw_event_category,
         "current_odds_pct": round(current_odds_pct, 4),
         "predicted_future_odds_pct": predicted_future_odds_pct,
         "predicted_delta_pts": predicted_delta_pts,
@@ -636,10 +670,11 @@ def _pending_payload(
         "question": str(row.get("question") or ""),
         "side_label": side_label,
         "observation_time": generated_at.isoformat(),
-        "event_category": str(row.get("event_category") or "uncategorized"),
-        "focus_category": str(row.get("event_category") or "uncategorized"),
-        "focused_fit_category": str(row.get("event_category") or "uncategorized"),
-        "market_family": str(row.get("event_category") or "uncategorized"),
+        "event_category": _focused_category_for(row),
+        "focus_category": _focused_category_for(row),
+        "focused_fit_category": _focused_category_for(row),
+        "market_family": _focused_category_for(row),
+        "source_event_category": str(row.get("event_category") or "uncategorized"),
         "current_odds_pct": current_odds_pct,
         "predicted_future_odds_pct": None,
         "predicted_delta_pts": None,

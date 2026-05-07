@@ -20,9 +20,11 @@ cd "$VM_REPO_DIR"
 - `orca-ingest-live.service`
   - near-live ingest loop
   - 2-minute cadence
-  - focused domains: `politics`, `crypto`, `technology`, `video-games`
+  - focused domains: `politics`, `crypto`, `technology`, `video-games`, `finance`
 - `orca-analytics-refresh.service`
   - 15-minute whale/dashboard refresh
+- `orca-ml-confidence-cycle.timer`
+  - 6-hour ML validation, confidence retraining, gated promotion, and prediction snapshot refresh
 - `orca-retention-rollup.service`
   - nightly partitions, rollups, orphan-event cleanup, raw-payload GC, optional snapshot
 - `orca-backup-snapshot.timer`
@@ -36,14 +38,43 @@ git pull origin main
 source .venv/bin/activate
 python -m alembic -c alembic.ini upgrade head
 sudo systemctl restart orca-api.service orca-frontend.service orca-ingest-live.service orca-analytics-refresh.service
+sudo systemctl enable --now orca-ml-confidence-cycle.timer
 ```
 
 Verify:
 
 ```bash
 curl -s http://127.0.0.1:8001/health
-sudo systemctl status orca-ingest-live.service orca-analytics-refresh.service orca-retention-rollup.service --no-pager
+sudo systemctl status orca-ingest-live.service orca-analytics-refresh.service orca-retention-rollup.service orca-ml-confidence-cycle.timer --no-pager
 ```
+
+## Continuous ML confidence cycle
+
+Manual run:
+
+```bash
+cd "$VM_REPO_DIR"
+source .venv/bin/activate
+.venv/bin/python data_platform/jobs/run_ml_prediction_confidence_cycle.py \
+  --promotion-mode gated \
+  --watch-precision-target 0.70 \
+  --strong-precision-target 0.80 \
+  --max-mae-regression-pts 0.5
+```
+
+What it does:
+
+1. validates matured 12h/24h ML prediction snapshots
+2. trains a candidate confidence artifact
+3. compares candidate versus active artifact on chronological holdout rows
+4. promotes only when guardrails pass
+5. writes fresh market-profile prediction snapshots
+
+Artifacts:
+
+- active model: `data_platform/runtime/ml/market_prediction_confidence_model.json`
+- candidates: `data_platform/runtime/ml/candidates/`
+- promotion log: `data_platform/runtime/ml/model_promotion_manifest.jsonl`
 
 ## Live scope prune
 
@@ -59,6 +90,7 @@ source .venv/bin/activate
   --focus-domain crypto \
   --focus-domain technology \
   --focus-domain video-games \
+  --focus-domain finance \
   --sample-size 8 \
   --apply \
   --preserve-current-events \
@@ -124,9 +156,11 @@ If you want a smaller cleanup run:
 ```bash
 sudo journalctl -u orca-ingest-live.service -f
 sudo journalctl -u orca-analytics-refresh.service -f
+sudo journalctl -u orca-ml-confidence-cycle.service -f
 sudo journalctl -u orca-retention-rollup.service -f
 tail -f "$VM_REPO_DIR/data_platform/runtime/ingest_live_runs.jsonl"
 tail -f "$VM_REPO_DIR/data_platform/runtime/maintenance_runs.jsonl"
+tail -f "$VM_REPO_DIR/data_platform/runtime/ml/model_promotion_manifest.jsonl"
 ```
 
 ## Notes
