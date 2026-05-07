@@ -23,6 +23,7 @@ from data_platform.ingest.polymarket import ingest_trades_record
 from data_platform.services.market_scope import add_focus_domain_argument, canonicalize_focus_domains
 
 POLYMARKET_TRADES_URL = "https://data-api.polymarket.com/trades"
+RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 
 
 def parse_args() -> argparse.Namespace:
@@ -74,6 +75,29 @@ def compute_retry_delay(attempt: int, args: argparse.Namespace) -> float:
     return min(args.backoff_cap_seconds, args.backoff_base_seconds * (2 ** attempt))
 
 
+def parse_retry_after(value: str | None) -> float | None:
+    """Return a Retry-After delay in seconds when the header is usable."""
+    if not value:
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    try:
+        return max(float(text), 0.0)
+    except ValueError:
+        return None
+
+
+def http_retry_delay(exc: Exception, attempt: int, args: argparse.Namespace) -> float:
+    """Return Retry-After when present, otherwise exponential backoff."""
+    delay = compute_retry_delay(attempt, args)
+    if isinstance(exc, httpx.HTTPStatusError) and exc.response is not None:
+        retry_after = parse_retry_after(exc.response.headers.get("Retry-After"))
+        if retry_after is not None:
+            delay = max(delay, min(retry_after, args.backoff_cap_seconds))
+    return delay
+
+
 def fetch_trades(client: httpx.Client, args: argparse.Namespace) -> list[dict[str, Any]]:
     """Fetch one trade batch with retry/backoff."""
     params: dict[str, Any] = {"limit": args.limit}
@@ -85,10 +109,13 @@ def fetch_trades(client: httpx.Client, args: argparse.Namespace) -> list[dict[st
             if not isinstance(payload, list):
                 raise ValueError("Unexpected Polymarket trades response shape; expected a list.")
             return [item for item in payload if isinstance(item, dict)]
-        except (httpx.RequestError, httpx.HTTPStatusError, ValueError):
+        except (httpx.RequestError, httpx.HTTPStatusError, ValueError) as exc:
+            if isinstance(exc, httpx.HTTPStatusError) and exc.response is not None:
+                if exc.response.status_code not in RETRYABLE_STATUS_CODES:
+                    raise
             if attempt >= args.max_retries:
                 raise
-            time.sleep(compute_retry_delay(attempt, args))
+            time.sleep(http_retry_delay(exc, attempt, args))
     raise RuntimeError("Unreachable retry loop state.")
 
 

@@ -120,6 +120,12 @@ def parse_args() -> argparse.Namespace:
         default=0,
         help="Maximum total public trade pages fetched per broad crawl cycle. 0 means unlimited.",
     )
+    parser.add_argument(
+        "--public-crawl-per-request-delay-seconds",
+        type=float,
+        default=0.5,
+        help="Delay between broad public-crawl trade page requests.",
+    )
     parser.add_argument("--polymarket-trades-limit", type=int, default=200, help="Trade row limit for the Polymarket trades step.")
     parser.add_argument("--orderbook-market-limit", type=int, default=10, help="Tracked Polymarket markets sampled in the order-book step.")
     parser.add_argument(
@@ -206,6 +212,8 @@ def parse_args() -> argparse.Namespace:
         parser.error("--public-crawl-max-pages-per-market must be >= 0.")
     if args.public_crawl_max_total_trade_pages < 0:
         parser.error("--public-crawl-max-total-trade-pages must be >= 0.")
+    if args.public_crawl_per_request_delay_seconds < 0:
+        parser.error("--public-crawl-per-request-delay-seconds must be >= 0.")
     if args.polymarket_trades_limit <= 0:
         parser.error("--polymarket-trades-limit must be > 0.")
     if args.orderbook_market_limit <= 0:
@@ -408,6 +416,8 @@ def pipeline_commands(args: argparse.Namespace) -> list[tuple[str, list[str]]]:
                     str(args.public_crawl_max_pages_per_market),
                     "--max-total-trade-pages",
                     str(args.public_crawl_max_total_trade_pages),
+                    "--per-request-delay-seconds",
+                    str(args.public_crawl_per_request_delay_seconds),
                     *focus_domain_flags,
                 ],
             )

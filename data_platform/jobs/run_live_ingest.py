@@ -2,9 +2,10 @@
 
 This wraps the existing ingestion pipeline with the fast-ingest cadence:
 - Polymarket discovery every 10 minutes
-- Polymarket public crawl, trades, and orderbooks every 2 minutes
+- Polymarket public crawl and trades every 2 minutes
+- Polymarket orderbooks on a slower configurable cadence
 - tracked positions every 10 minutes when wallets are configured
-- Kalshi trades and orderbooks every 2 minutes
+- Kalshi is disabled by default for Polymarket-only deployments
 - no whale/dashboard rebuilds in this loop
 """
 
@@ -43,7 +44,31 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--interval-seconds", type=float, default=120.0)
     parser.add_argument("--jitter-seconds", type=float, default=15.0)
     parser.add_argument("--discovery-every-cycles", type=int, default=5)
+    parser.add_argument(
+        "--orderbook-every-cycles",
+        type=int,
+        default=int(os.getenv("LIVE_ORDERBOOK_EVERY_CYCLES", "2")),
+        help="Run Polymarket order-book snapshots every N live cycles. Use 0 to disable.",
+    )
     parser.add_argument("--positions-every-cycles", type=int, default=5)
+    parser.add_argument(
+        "--enable-kalshi",
+        action="store_true",
+        default=os.getenv("LIVE_INGEST_ENABLE_KALSHI", "").lower() in {"1", "true", "yes"},
+        help="Enable Kalshi ingest steps. Off by default because the VM is Polymarket-only.",
+    )
+    parser.add_argument(
+        "--failure-cooldown-seconds",
+        type=float,
+        default=float(os.getenv("LIVE_INGEST_FAILURE_COOLDOWN_SECONDS", "300")),
+        help="Cooldown after a failed child ingest cycle, including exhausted rate-limit retries.",
+    )
+    parser.add_argument(
+        "--public-crawl-per-request-delay-seconds",
+        type=float,
+        default=float(os.getenv("LIVE_PUBLIC_CRAWL_DELAY_SECONDS", "1.0")),
+        help="Delay between Polymarket public-crawl trade page requests.",
+    )
     parser.add_argument("--polymarket-wallet", action="append", default=[])
     parser.add_argument("--summary-log-file", default=str(RUNTIME_DIR / "ingest_live_runs.jsonl"))
     parser.add_argument("--max-cycles", type=int, default=0)
@@ -52,6 +77,12 @@ def parse_args() -> argparse.Namespace:
         args.focus_domains = canonicalize_focus_domains(args.focus_domain) or list(DEFAULT_FOCUS_DOMAINS)
     except ValueError as exc:
         parser.error(str(exc))
+    if args.orderbook_every_cycles < 0:
+        parser.error("--orderbook-every-cycles must be >= 0.")
+    if args.failure_cooldown_seconds < 0:
+        parser.error("--failure-cooldown-seconds must be >= 0.")
+    if args.public_crawl_per_request_delay_seconds < 0:
+        parser.error("--public-crawl-per-request-delay-seconds must be >= 0.")
     return args
 
 
@@ -78,6 +109,9 @@ def main() -> int:
 
         cycle += 1
         enable_discovery = cycle == 1 or cycle % max(args.discovery_every_cycles, 1) == 0
+        enable_orderbook = args.orderbook_every_cycles > 0 and (
+            cycle == 1 or cycle % max(args.orderbook_every_cycles, 1) == 0
+        )
         enable_positions = bool(args.polymarket_wallet) and (cycle == 1 or cycle % max(args.positions_every_cycles, 1) == 0)
         started = time.monotonic()
         focus_domain_flags = sum((["--focus-domain", domain] for domain in args.focus_domains), [])
@@ -97,6 +131,8 @@ def main() -> int:
             "3",
             "--public-crawl-max-total-trade-pages",
             "20",
+            "--public-crawl-per-request-delay-seconds",
+            str(args.public_crawl_per_request_delay_seconds),
             "--polymarket-trades-limit",
             "200",
             "--orderbook-market-limit",
@@ -126,6 +162,10 @@ def main() -> int:
             cmd.extend(["--database-url", args.database_url])
         if not enable_discovery:
             cmd.append("--skip-discovery")
+        if not enable_orderbook:
+            cmd.append("--skip-orderbook")
+        if not args.enable_kalshi:
+            cmd.extend(["--skip-kalshi", "--skip-kalshi-orderbook"])
         if not enable_positions:
             cmd.append("--skip-positions")
         else:
@@ -133,7 +173,13 @@ def main() -> int:
                 cmd.extend(["--polymarket-wallet", wallet])
         result = subprocess.run(cmd, cwd=ROOT_DIR)
         if result.returncode != 0:
-            return result.returncode
+            if args.max_cycles > 0 and cycle >= args.max_cycles:
+                return result.returncode
+            cooldown = max(args.failure_cooldown_seconds, 0.0)
+            if cooldown > 0:
+                print(f"Child ingest cycle failed. Cooling down {cooldown:.0f}s before retrying.")
+                time.sleep(cooldown)
+            continue
         if args.max_cycles > 0 and cycle >= args.max_cycles:
             return 0
         target_cycle_seconds = max(args.interval_seconds, 0.0) + random.uniform(0.0, max(args.jitter_seconds, 0.0))
