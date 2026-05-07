@@ -75,6 +75,17 @@ Then rebuild derived outputs:
 
 ## Nightly maintenance
 
+Preview retention candidates without changing data:
+
+```bash
+cd "$VM_REPO_DIR"
+source .venv/bin/activate
+.venv/bin/python data_platform/jobs/run_retention_maintenance.py --dry-run --skip-snapshot
+```
+
+The dry-run report uses capped counts and query timeouts. If a table is very large, `candidate_rows_is_lower_bound` or `count_error` is expected and safer than blocking the database.
+By default, `auto` count mode uses fast planner estimates for high-volume raw/trade/whale tables and capped exact counts for smaller tables. Raw payload estimates are age-eligible estimates; the real GC still protects referenced payloads.
+
 Manual run:
 
 ```bash
@@ -91,6 +102,11 @@ What it does:
 4. deletes orphan `analytics.market_event` rows in batches
 5. garbage-collects unreferenced `raw.api_payload` rows in batches
 6. optionally writes a full snapshot backup artifact
+
+Retention policy and handoff guidance:
+
+- `data_platform/config/retention_policy.json`
+- `docs/DATA_RETENTION.md`
 
 If you want a smaller cleanup run:
 

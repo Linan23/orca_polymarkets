@@ -1,0 +1,43 @@
+{
+  "version": "retention_policy_v1",
+  "description": "Conservative storage lifecycle policy for the Polymarket-only Orca deployment.",
+  "defaults": {
+    "dry_run": true,
+    "archive_before_delete": true,
+    "batch_size": 1000
+  },
+  "windows": {
+    "full_trade_history_days": 180,
+    "client_validation_days": 180,
+    "raw_payload_active_days": 60,
+    "orderbook_detail_days": 30,
+    "dashboard_detail_days": 30,
+    "home_summary_detail_days": 30,
+    "research_summary_detail_days": 30,
+    "whale_score_detail_days": 60,
+    "ml_prediction_validated_days": 180
+  },
+  "protection": {
+    "protect_followed_users": true,
+    "protect_followed_markets": true,
+    "protect_active_trusted_whales": true,
+    "protect_unvalidated_ml_predictions": true,
+    "protect_referenced_raw_payloads": true
+  },
+  "rollups": {
+    "orderbook_hourly_days": 180,
+    "orderbook_daily_days": 365,
+    "position_daily_days": 180,
+    "dashboard_summary_days": 180,
+    "ml_validation_summary_days": 180
+  },
+  "scope": {
+    "platform": "polymarket",
+    "focus_domains": [
+      "politics",
+      "crypto",
+      "technology",
+      "video-games"
+    ]
+  }
+}

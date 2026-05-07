@@ -117,6 +117,18 @@ One-shot validation:
 
 ### Nightly maintenance
 
+Dry-run retention report:
+
+```bash
+.venv/bin/python data_platform/jobs/run_retention_maintenance.py --dry-run --skip-snapshot
+```
+
+The dry-run defaults to `--retention-report-count-mode auto`, which uses planner estimates for high-volume raw/trade/whale tables and capped exact counts elsewhere.
+
+Policy and handoff docs:
+- `data_platform/config/retention_policy.json`
+- `docs/DATA_RETENTION.md`
+
 ```bash
 .venv/bin/python data_platform/jobs/run_retention_maintenance.py --skip-snapshot
 ```
