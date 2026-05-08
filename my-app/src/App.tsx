@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import RequireAuth from "./auth/RequireAuth";
+import ScrollToTop from "./components/ScrollToTop";
 import { prefetchCommonRoutes, routeLoaders } from "./lib/routePrefetch";
 
 const HomePage = lazy(routeLoaders["/"]);
@@ -35,27 +36,30 @@ export default function App() {
   }, []);
 
   return (
-    <Suspense fallback={<RouteFallback />}>
-      <Routes>
-        <Route path="/" element={<HomePage />} />
-        <Route path="/analytics" element={<Navigate to="/" replace />} />
+    <>
+      <ScrollToTop />
+      <Suspense fallback={<RouteFallback />}>
+        <Routes>
+          <Route path="/" element={<HomePage />} />
+          <Route path="/analytics" element={<Navigate to="/" replace />} />
 
-        <Route
-          path="/following"
-          element={
-            <RequireAuth>
-              <FollowingPage />
-            </RequireAuth>
-          }
-        />
+          <Route
+            path="/following"
+            element={
+              <RequireAuth>
+                <FollowingPage />
+              </RequireAuth>
+            }
+          />
 
-        <Route path="/leaderboard" element={<LeaderboardPage />} />
-        <Route path="/definitions" element={<DefinitionsPage />} />
-        <Route path="/about" element={<AboutUsPage />} />
-        <Route path="/login" element={<LoginPage />} />
-        <Route path="/markets/:marketId" element={<MarketProfile />} />
-        <Route path="/users/:userId" element={<UserProfile />} />
-      </Routes>
-    </Suspense>
+          <Route path="/leaderboard" element={<LeaderboardPage />} />
+          <Route path="/definitions" element={<DefinitionsPage />} />
+          <Route path="/about" element={<AboutUsPage />} />
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/markets/:marketId" element={<MarketProfile />} />
+          <Route path="/users/:userId" element={<UserProfile />} />
+        </Routes>
+      </Suspense>
+    </>
   );
 }
