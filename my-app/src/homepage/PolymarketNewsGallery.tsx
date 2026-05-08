@@ -5,6 +5,7 @@ import { fetchPolymarketTweetFeed, type PolymarketTweet } from "../lib/api";
 const POLYMARKET_X_URL = "https://x.com/Polymarket";
 const TWEET_CARD_LIMIT = 6;
 const AUTO_ROTATE_MS = 9000;
+const FALLBACK_CARD_COUNT = 6;
 
 function formatTweetTime(value: string | null) {
   if (!value) return "Live";
@@ -52,7 +53,7 @@ function TweetCard({
       <p className="pm-news-text">{post.text}</p>
 
       <div className="pm-news-card-bottom">
-        <span className="pm-news-link">View post ↗</span>
+        <span className="pm-news-link">↗</span>
       </div>
     </a>
   );
@@ -62,21 +63,37 @@ function FeedStateCard({
   loading,
   error,
   reason,
+  index,
 }: {
   loading: boolean;
   error: string | null;
   reason?: string | null;
+  index: number;
 }) {
-  const message = loading
+  const baseMessage = loading
     ? "Loading latest Polymarket posts..."
     : error
       ? "Unable to load live posts right now."
       : reason === "missing_x_bearer_token"
-        ? "Live post cards need an X API token on the server."
+        ? "Live post cards are not connected yet."
         : "Live posts are unavailable right now.";
+  const messages = [
+    baseMessage,
+    "Open @Polymarket on X for the latest posts.",
+    "Live cards will appear here when the feed is connected.",
+    "Tap through to view Polymarket's current posts.",
+    "Latest X posts will rotate in this carousel.",
+    "Polymarket updates open in a new tab.",
+  ];
+  const message = messages[index % messages.length];
 
   return (
-    <a href={POLYMARKET_X_URL} target="_blank" rel="noreferrer" className="pm-news-card pm-news-state-card">
+    <a
+      href={POLYMARKET_X_URL}
+      target="_blank"
+      rel="noreferrer"
+      className="pm-news-card pm-news-state-card"
+    >
       <div className="pm-news-card-top">
         <div className="pm-news-account">
           <div className="pm-news-avatar">P</div>
@@ -89,7 +106,7 @@ function FeedStateCard({
       </div>
       <p className="pm-news-text">{message}</p>
       <div className="pm-news-card-bottom">
-        <span className="pm-news-link">Open on X ↗</span>
+        <span className="pm-news-link">↗</span>
       </div>
     </a>
   );
@@ -101,6 +118,7 @@ export default function PolymarketNewsGallery() {
   const loadTweetFeed = useCallback(() => fetchPolymarketTweetFeed(TWEET_CARD_LIMIT), []);
   const { data, loading, error } = useApiData(loadTweetFeed, { keepPreviousData: true });
   const posts = useMemo(() => data?.items ?? [], [data]);
+  const visibleCardCount = posts.length > 0 ? posts.length : FALLBACK_CARD_COUNT;
 
   const scroll = useCallback((direction: "left" | "right") => {
     const container = scrollRef.current;
@@ -119,10 +137,10 @@ export default function PolymarketNewsGallery() {
   }, []);
 
   useEffect(() => {
-    if (isPaused || posts.length <= 1) return undefined;
+    if (isPaused || visibleCardCount <= 1) return undefined;
     const interval = window.setInterval(() => scroll("right"), AUTO_ROTATE_MS);
     return () => window.clearInterval(interval);
-  }, [isPaused, posts.length, scroll]);
+  }, [isPaused, scroll, visibleCardCount]);
 
   return (
     <section className="pm-news-section">
@@ -156,7 +174,15 @@ export default function PolymarketNewsGallery() {
               />
             ))
           ) : (
-            <FeedStateCard loading={loading} error={error} reason={data?.reason} />
+            Array.from({ length: FALLBACK_CARD_COUNT }, (_, index) => (
+              <FeedStateCard
+                key={`tweet-state-${index}`}
+                loading={loading}
+                error={error}
+                reason={data?.reason}
+                index={index}
+              />
+            ))
           )}
         </div>
 
