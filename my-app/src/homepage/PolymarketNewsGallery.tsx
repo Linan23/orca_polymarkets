@@ -1,111 +1,127 @@
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
-const posts = [
-  {
-    id: 1,
-    text: 'JUST IN: Tesla, SpaceX & xAI unveil TERAFAB — a 1TW chip factory to power a "galactic civilization"',
-    time: "1h ago",
-    url: "https://x.com/Polymarket",
-  },
-  {
-    id: 2,
-    text: "19% chance the AI bubble bursts this year.",
-    time: "2h ago",
-    url: "https://x.com/Polymarket",
-  },
-  {
-    id: 3,
-    text: 'JUST IN: AI cow collar startup Halter raises at $2,000,000,000 valuation, uses proprietary “cowgorithm” to herd...',
-    time: "3h ago",
-    url: "https://x.com/Polymarket",
-  },
-  {
-    id: 4,
-    text: "BREAKING: Iranian man arrested attempting to break into UK nuclear base in Scotland.",
-    time: "3h ago",
-    url: "https://x.com/Polymarket",
-  },
-  {
-    id: 5,
-    text: "Fed speakers this week could reshape rate-cut odds across prediction markets.",
-    time: "4h ago",
-    url: "https://x.com/Polymarket",
-  },
-  {
-    id: 6,
-    text: "Election market volatility spikes after new polling and debate speculation.",
-    time: "5h ago",
-    url: "https://x.com/Polymarket",
-  },
-];
+const POLYMARKET_X_URL = "https://x.com/Polymarket";
+const TWITTER_WIDGET_SCRIPT_ID = "twitter-widgets-script";
+
+type TwitterWidgets = {
+  widgets?: {
+    load?: (element?: HTMLElement) => Promise<unknown> | void;
+  };
+};
+
+declare global {
+  interface Window {
+    twttr?: TwitterWidgets;
+  }
+}
+
+let twitterScriptPromise: Promise<void> | null = null;
+
+function loadTwitterWidgets() {
+  if (window.twttr?.widgets?.load) {
+    return Promise.resolve();
+  }
+
+  if (twitterScriptPromise) {
+    return twitterScriptPromise;
+  }
+
+  twitterScriptPromise = new Promise<void>((resolve, reject) => {
+    const existingScript = document.getElementById(TWITTER_WIDGET_SCRIPT_ID) as HTMLScriptElement | null;
+    if (existingScript) {
+      existingScript.addEventListener("load", () => resolve(), { once: true });
+      existingScript.addEventListener("error", () => reject(new Error("Unable to load X timeline.")), { once: true });
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.id = TWITTER_WIDGET_SCRIPT_ID;
+    script.src = "https://platform.twitter.com/widgets.js";
+    script.async = true;
+    script.onload = () => resolve();
+    script.onerror = () => {
+      twitterScriptPromise = null;
+      reject(new Error("Unable to load X timeline."));
+    };
+    document.body.appendChild(script);
+  });
+
+  return twitterScriptPromise;
+}
 
 export default function PolymarketNewsGallery() {
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const timelineRef = useRef<HTMLDivElement>(null);
+  const [loadState, setLoadState] = useState<"loading" | "ready" | "failed">("loading");
 
-  const scroll = (direction: "left" | "right") => {
-    if (!scrollRef.current) return;
+  useEffect(() => {
+    let cancelled = false;
+    let fallbackTimer: number | undefined;
 
-    const amount = 360;
-    scrollRef.current.scrollBy({
-      left: direction === "left" ? -amount : amount,
-      behavior: "smooth",
-    });
-  };
+    loadTwitterWidgets()
+      .then(() => {
+        if (cancelled) return;
+        return Promise.resolve(window.twttr?.widgets?.load?.(timelineRef.current ?? undefined));
+      })
+      .then(() => {
+        if (cancelled) return;
+        fallbackTimer = window.setTimeout(() => {
+          if (!cancelled && !timelineRef.current?.querySelector("iframe")) {
+            setLoadState("failed");
+          }
+        }, 8000);
+        setLoadState("ready");
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setLoadState("failed");
+        }
+      });
+
+    return () => {
+      cancelled = true;
+      if (fallbackTimer) window.clearTimeout(fallbackTimer);
+    };
+  }, []);
 
   return (
     <section className="pm-news-section">
       <div className="pm-news-header">
-        <h2>LIVE TWEET FEED</h2>
+        <div>
+          <p className="pm-news-kicker">LIVE TWEET FEED</p>
+          <h2>@Polymarket</h2>
+        </div>
+        <a className="pm-news-profile-link" href={POLYMARKET_X_URL} target="_blank" rel="noreferrer">
+          Open on X
+        </a>
       </div>
 
-      <div className="pm-news-carousel">
-        <button
-          className="pm-news-arrow left"
-          onClick={() => scroll("left")}
-          aria-label="Scroll left"
-          type="button"
+      <div className="pm-news-live-shell" ref={timelineRef}>
+        {loadState === "loading" && (
+          <div className="pm-news-loading">
+            <span>Loading live Polymarket posts...</span>
+          </div>
+        )}
+
+        <a
+          className="twitter-timeline"
+          data-theme="dark"
+          data-chrome="noheader nofooter noborders transparent"
+          data-height="420"
+          data-dnt="true"
+          href={POLYMARKET_X_URL}
         >
-          ‹
-        </button>
+          Tweets by Polymarket
+        </a>
 
-        <div className="pm-news-scroll" ref={scrollRef}>
-          {posts.map((post) => (
-            <a
-              key={post.id}
-              href={post.url}
-              target="_blank"
-              rel="noreferrer"
-              className="pm-news-card"
-            >
-              <div className="pm-news-card-top">
-                <div className="pm-news-account">
-                  <div className="pm-news-avatar">⌁</div>
-                  <div className="pm-news-meta">
-                    <span className="pm-news-name">Polymarket</span>
-                    <span className="pm-news-handle">@Polymarket</span>
-                  </div>
-                </div>
-
-                <span className="pm-news-time">{post.time}</span>
-              </div>
-
-              <p className="pm-news-text">{post.text}</p>
-
-              <div className="pm-news-card-bottom">
-                <span className="pm-news-link">↗</span>
-              </div>
+        {loadState === "failed" && (
+          <div className="pm-news-fallback">
+            <strong>Live feed is unavailable in this browser.</strong>
+            <span>Open the latest Polymarket posts directly on X.</span>
+            <a href={POLYMARKET_X_URL} target="_blank" rel="noreferrer">
+              View @Polymarket
             </a>
-          ))}
-        </div>
-
-        <button
-          className="pm-news-arrow right"
-          onClick={() => scroll("right")}
-          aria-label="Scroll right"
-          type="button"
-        >
-          ›
-        </button>
+          </div>
+        )}
       </div>
     </section>
   );
