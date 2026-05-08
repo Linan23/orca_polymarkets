@@ -712,6 +712,27 @@ export type UserProfileFullPayload = {
   insights: UserActivityInsights;
 };
 
+export type PolymarketTweet = {
+  id: string;
+  text: string;
+  created_at: string | null;
+  url: string;
+};
+
+export type PolymarketTweetFeed = {
+  available: boolean;
+  source: string;
+  reason?: string | null;
+  account: {
+    id?: string;
+    name: string;
+    username: string;
+    profile_image_url?: string | null;
+    profile_url: string;
+  };
+  items: PolymarketTweet[];
+};
+
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
 const HOME_SUMMARY_CLIENT_CACHE_MS = 60_000;
 const DASHBOARD_READ_CLIENT_CACHE_MS = 300_000;
@@ -968,6 +989,12 @@ export async function fetchDashboardHome(
   limit = 5,
 ): Promise<DashboardHomePayload> {
   return fetchCachedJson<DashboardHomePayload>(dashboardHomePath(timeframe, limit));
+}
+
+export async function fetchPolymarketTweetFeed(limit = 6): Promise<PolymarketTweetFeed> {
+  const params = new URLSearchParams();
+  params.set("limit", String(limit));
+  return fetchCachedJson<PolymarketTweetFeed>(`/api/social/polymarket-tweets?${params.toString()}`);
 }
 
 export async function fetchMarketProfileFull(marketSlug: string, topWhalesLimit = 5): Promise<MarketProfileFullPayload> {

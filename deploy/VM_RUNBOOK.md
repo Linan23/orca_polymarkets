@@ -52,6 +52,8 @@ sudo systemctl status orca-ingest-live.service orca-analytics-refresh.service or
 
 The VM frontend service runs `npm run build` and serves the built `dist/` bundle with Vite preview on the existing frontend port. The cache warmer fills homepage, research, leaderboard, whale, and hot market-profile reads so the first dashboard visit after restart is not a cold database path.
 
+Optional live tweet cards require `X_BEARER_TOKEN` in the VM environment. Without it, the homepage keeps the tweet-card layout and links users to `@Polymarket` on X instead of showing fake placeholder posts.
+
 ## Continuous ML confidence cycle
 
 Manual run:

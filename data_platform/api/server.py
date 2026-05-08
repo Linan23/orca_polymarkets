@@ -3,11 +3,17 @@
 from __future__ import annotations
 
 import copy
+import json
+import os
 from collections.abc import Callable
 from threading import Lock
 from time import monotonic
 from typing import Any
 from typing import Literal
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode
+from urllib.request import Request as UrlRequest
+from urllib.request import urlopen
 
 from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -93,6 +99,7 @@ MARKET_PROFILE_ML_TREND_CACHE_TTL_SECONDS = 120.0
 MARKET_PROFILE_TOP_WHALES_CACHE_TTL_SECONDS = 120.0
 USER_WHALE_PROFILE_CACHE_TTL_SECONDS = 60.0
 USER_ACTIVITY_INSIGHTS_CACHE_TTL_SECONDS = 60.0
+POLYMARKET_TWEETS_CACHE_TTL_SECONDS = 300.0
 _following_dashboard_cache: dict[tuple[tuple[int, ...], tuple[str, ...]], tuple[float, dict[str, object]]] = {}
 _following_dashboard_cache_lock = Lock()
 _latest_dashboard_cache: dict[str, tuple[float, dict[str, object]]] = {}
@@ -113,6 +120,8 @@ _recent_whale_entries_cache: dict[tuple[int, str], tuple[float, dict[str, object
 _recent_whale_entries_cache_lock = Lock()
 _dashboard_home_cache: dict[tuple[str, int], tuple[float, dict[str, object]]] = {}
 _dashboard_home_cache_lock = Lock()
+_polymarket_tweets_cache: dict[int, tuple[float, dict[str, object]]] = {}
+_polymarket_tweets_cache_lock = Lock()
 _latest_whales_cache: dict[tuple[int, bool, bool, str], tuple[float, dict[str, object]]] = {}
 _latest_whales_cache_lock = Lock()
 _market_profile_cache: dict[str, tuple[float, dict[str, object]]] = {}
@@ -343,6 +352,108 @@ def _set_cache_control_headers(
     response.headers["Cache-Control"] = (
         f"{scope}, max-age={int(max_age_seconds)}, stale-while-revalidate={stale}"
     )
+
+
+def _x_bearer_token() -> str:
+    """Return an optional X/Twitter bearer token for public tweet reads."""
+    return os.getenv("X_BEARER_TOKEN", "").strip() or os.getenv("TWITTER_BEARER_TOKEN", "").strip()
+
+
+def _x_api_json(url: str, bearer_token: str, *, timeout_seconds: float = 8.0) -> dict[str, Any]:
+    """Fetch one X API JSON payload with a bearer token."""
+    request = UrlRequest(
+        url,
+        headers={
+            "Accept": "application/json",
+            "Authorization": f"Bearer {bearer_token}",
+            "User-Agent": "orca-polymarket-dashboard/1.0",
+        },
+    )
+    with urlopen(request, timeout=timeout_seconds) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def _social_feed_unavailable(reason: str) -> dict[str, object]:
+    """Return a non-error payload when live X credentials or API access are unavailable."""
+    return {
+        "available": False,
+        "source": "x_api",
+        "account": {
+            "name": "Polymarket",
+            "username": "Polymarket",
+            "profile_url": "https://x.com/Polymarket",
+        },
+        "items": [],
+        "reason": reason,
+    }
+
+
+def _latest_polymarket_tweets(limit: int) -> dict[str, object]:
+    """Return latest @Polymarket tweets using the X API when credentials are configured."""
+    bearer_token = _x_bearer_token()
+    if not bearer_token:
+        return _social_feed_unavailable("missing_x_bearer_token")
+
+    try:
+        user_params = urlencode({"user.fields": "name,username,profile_image_url"})
+        user_payload = _x_api_json(
+            f"https://api.twitter.com/2/users/by/username/Polymarket?{user_params}",
+            bearer_token,
+        )
+        user = user_payload.get("data")
+        if not isinstance(user, dict) or not user.get("id"):
+            return _social_feed_unavailable("x_user_not_found")
+
+        tweet_params = urlencode(
+            {
+                "max_results": max(5, min(int(limit), 10)),
+                "tweet.fields": "created_at,entities",
+                "exclude": "retweets,replies",
+            }
+        )
+        tweet_payload = _x_api_json(
+            f"https://api.twitter.com/2/users/{user['id']}/tweets?{tweet_params}",
+            bearer_token,
+        )
+    except HTTPError as exc:
+        return _social_feed_unavailable(f"x_api_http_{exc.code}")
+    except (OSError, URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
+        return _social_feed_unavailable(f"x_api_unavailable:{type(exc).__name__}")
+
+    tweets = tweet_payload.get("data", [])
+    if not isinstance(tweets, list):
+        tweets = []
+    username = str(user.get("username") or "Polymarket")
+    items: list[dict[str, object]] = []
+    for tweet in tweets[:limit]:
+        if not isinstance(tweet, dict):
+            continue
+        tweet_id = str(tweet.get("id") or "").strip()
+        text = str(tweet.get("text") or "").strip()
+        if not tweet_id or not text:
+            continue
+        items.append(
+            {
+                "id": tweet_id,
+                "text": text,
+                "created_at": tweet.get("created_at"),
+                "url": f"https://x.com/{username}/status/{tweet_id}",
+            }
+        )
+
+    return {
+        "available": bool(items),
+        "source": "x_api",
+        "account": {
+            "id": str(user.get("id")),
+            "name": str(user.get("name") or "Polymarket"),
+            "username": username,
+            "profile_image_url": user.get("profile_image_url"),
+            "profile_url": f"https://x.com/{username}",
+        },
+        "items": items,
+        "reason": None if items else "x_api_returned_no_tweets",
+    }
 
 
 def _set_session_cookie(response: Response, token: str) -> None:
@@ -949,6 +1060,22 @@ def get_dashboard_home(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except (OSError, SQLAlchemyError) as exc:
         raise _service_error(exc) from exc
+
+
+@app.get("/api/social/polymarket-tweets")
+def get_polymarket_tweets(response: Response, limit: int = Query(6, ge=1, le=10)) -> dict[str, object]:
+    """Return latest @Polymarket tweets for the homepage carousel when X API credentials exist."""
+    normalized_limit = int(limit)
+
+    _set_cache_control_headers(response, max_age_seconds=POLYMARKET_TWEETS_CACHE_TTL_SECONDS)
+    return _cached_or_build(
+        namespace="polymarket_tweets",
+        cache=_polymarket_tweets_cache,
+        cache_key=normalized_limit,
+        ttl_seconds=POLYMARKET_TWEETS_CACHE_TTL_SECONDS,
+        lock=_polymarket_tweets_cache_lock,
+        builder=lambda: _latest_polymarket_tweets(normalized_limit),
+    )
 
 
 @app.get("/api/analytics/top-profitable-users")
