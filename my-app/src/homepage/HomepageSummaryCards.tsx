@@ -1,7 +1,7 @@
 import { PieChart } from "@mui/x-charts/PieChart";
 import { useCallback, useState } from "react";
 import { useApiData } from "../hooks/useApiData";
-import { fetchHomeSummary, type HomeSummary } from "../lib/api";
+import { fetchDashboardHome, type HomeSummary } from "../lib/api";
 import { formatCategoryLabel, getCategoryColor } from "../lib/categoryFormatting";
 
 type HomeSummaryWithFreshness = HomeSummary & {
@@ -168,9 +168,24 @@ function CoveragePieChart({
   );
 }
 
-export default function HomepageSummaryCards() {
-  const loadSummary = useCallback(() => fetchHomeSummary(), []);
-  const { data, loading, error } = useApiData(loadSummary);
+type HomepageSummaryCardsProps = {
+  summary?: HomeSummary | null;
+};
+
+export default function HomepageSummaryCards({ summary = null }: HomepageSummaryCardsProps) {
+  const loadSummary = useCallback(
+    async () => {
+      if (summary) return summary;
+      const dashboard = await fetchDashboardHome("all", 5);
+      return dashboard.summary;
+    },
+    [summary],
+  );
+  const { data, loading, error } = useApiData(loadSummary, {
+    keepPreviousData: true,
+    initialData: summary,
+    resetKey: summary?.last_successful_ingest_at ?? summary?.latest_ingestion?.finished_at ?? "summary",
+  });
 
   return (
     <section className="summary-section">

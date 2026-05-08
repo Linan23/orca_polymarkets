@@ -6,10 +6,9 @@ import { useApiData } from "../hooks/useApiData";
 import { useWatchlist } from "../hooks/useWatchlist";
 import {
   type AnalyticsTimeframe,
-  fetchMarketWhaleConcentration,
-  fetchRecentWhaleEntries,
-  fetchTopProfitableUsers,
-  fetchWhaleEntryBehavior,
+  type DashboardHomePayload,
+  fetchDashboardHome,
+  getCachedDashboardHome,
   type MarketConcentrationRow,
   type RecentWhaleEntryRow,
   type TopProfitableUserRow,
@@ -29,6 +28,23 @@ import {
 import { formatProfitabilityScorePercent, formatTrustScorePercent } from "../lib/scoreFormatting";
 
 const RESEARCH_CARD_LIMIT = 5;
+
+type ResearchAnalyticsPayload = {
+  topUsers: TopProfitableUserRow[];
+  recentEntries: RecentWhaleEntryRow[];
+  topMarkets: MarketConcentrationRow[];
+  entryBehavior: WhaleEntryBehaviorRow[];
+};
+
+function researchPayloadFromDashboard(payload: DashboardHomePayload | null): ResearchAnalyticsPayload | null {
+  if (!payload) return null;
+  return {
+    topUsers: payload.research.top_profitable_users?.items ?? [],
+    recentEntries: payload.research.recent_whale_entries?.items ?? [],
+    topMarkets: payload.research.market_whale_concentration?.items ?? [],
+    entryBehavior: payload.research.whale_entry_behavior?.items ?? [],
+  };
+}
 
 function formatCurrency(value: number) {
   return new Intl.NumberFormat("en-US", {
@@ -345,11 +361,13 @@ function ResearchEntryRows({
 type ResearchAnalyticsSectionProps = {
   showExportControls?: boolean;
   persistTimeframePreference?: boolean;
+  initialDashboardHome?: DashboardHomePayload | null;
 };
 
 export default function ResearchAnalyticsSection({
   showExportControls = false,
   persistTimeframePreference = false,
+  initialDashboardHome = null,
 }: ResearchAnalyticsSectionProps) {
   const { isAuthenticated, preferences, updatePreferences } = useAuth();
 const [publicTimeframe, setPublicTimeframe] = useState<AnalyticsTimeframe>("all");
@@ -383,17 +401,25 @@ const [activeResearchTab, setActiveResearchTab] = useState<
 
   const loadAnalytics = useCallback(
     async () => {
-      const [topUsers, recentEntries, topMarkets, entryBehavior] = await Promise.all([
-        fetchTopProfitableUsers(RESEARCH_CARD_LIMIT, timeframe),
-        fetchRecentWhaleEntries(RESEARCH_CARD_LIMIT, timeframe),
-        fetchMarketWhaleConcentration(RESEARCH_CARD_LIMIT, timeframe),
-        fetchWhaleEntryBehavior(RESEARCH_CARD_LIMIT, timeframe),
-      ]);
-      return { topUsers, recentEntries, topMarkets, entryBehavior };
+      const dashboard = await fetchDashboardHome(timeframe, RESEARCH_CARD_LIMIT);
+      return researchPayloadFromDashboard(dashboard) ?? {
+        topUsers: [],
+        recentEntries: [],
+        topMarkets: [],
+        entryBehavior: [],
+      };
     },
     [timeframe],
   );
-  const { data, loading, refreshing, error } = useApiData(loadAnalytics, { keepPreviousData: true });
+  const initialAnalytics = useMemo(() => {
+    const providedPayload = timeframe === "all" ? researchPayloadFromDashboard(initialDashboardHome) : null;
+    return providedPayload ?? researchPayloadFromDashboard(getCachedDashboardHome(timeframe, RESEARCH_CARD_LIMIT));
+  }, [initialDashboardHome, timeframe]);
+  const { data, loading, refreshing, error } = useApiData(loadAnalytics, {
+    keepPreviousData: true,
+    initialData: initialAnalytics,
+    resetKey: `research-${timeframe}`,
+  });
   const filteredTopUsers = useMemo(() => {
     if (!data) return [];
     return data.topUsers.filter((user) => matchesUserIdentityQuery(user, userSearch));

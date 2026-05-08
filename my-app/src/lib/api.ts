@@ -689,12 +689,36 @@ export type FollowingDashboard = {
   markets: FollowingMarketCard[];
 };
 
+export type DashboardHomePayload = {
+  summary: HomeSummary;
+  research: {
+    top_profitable_users: { items: TopProfitableUserRow[] } | null;
+    recent_whale_entries: { items: RecentWhaleEntryRow[] } | null;
+    market_whale_concentration: { items: MarketConcentrationRow[] } | null;
+    whale_entry_behavior: { items: WhaleEntryBehaviorRow[] } | null;
+  };
+  market_leaderboard: { items: DashboardMarketRow[] } | null;
+  whale_leaderboard: { items: WhaleScoreRow[] } | null;
+};
+
+export type MarketProfileFullPayload = {
+  profile: MarketProfile;
+  ml_prediction_trend: MarketProfileMlPredictionTrend;
+  top_whales: MarketProfileTopWhales;
+};
+
+export type UserProfileFullPayload = {
+  profile: WhaleProfile;
+  insights: UserActivityInsights;
+};
+
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
 const HOME_SUMMARY_CLIENT_CACHE_MS = 60_000;
-const DASHBOARD_READ_CLIENT_CACHE_MS = 60_000;
+const DASHBOARD_READ_CLIENT_CACHE_MS = 300_000;
+const SESSION_CACHE_PREFIX = "orca:dashboard-read:";
 
-let homeSummaryClientCache: { expiresAt: number; value: HomeSummary } | null = null;
 const clientReadCache = new Map<string, { expiresAt: number; value: unknown }>();
+const clientReadInflight = new Map<string, Promise<unknown>>();
 
 export class ApiError extends Error {
   status: number;
@@ -729,14 +753,77 @@ async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
+function sessionCacheKey(path: string) {
+  return `${SESSION_CACHE_PREFIX}${path}`;
+}
+
+function readStoredCacheEntry<T>(path: string): { expiresAt: number; value: T } | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.sessionStorage.getItem(sessionCacheKey(path));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { expiresAt?: unknown; value?: unknown };
+    if (typeof parsed.expiresAt !== "number" || !("value" in parsed)) {
+      window.sessionStorage.removeItem(sessionCacheKey(path));
+      return null;
+    }
+    return { expiresAt: parsed.expiresAt, value: parsed.value as T };
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredCacheEntry<T>(path: string, value: T, ttlMs: number) {
+  if (typeof window === "undefined") return;
+  const entry = { expiresAt: Date.now() + ttlMs, value };
+  try {
+    window.sessionStorage.setItem(sessionCacheKey(path), JSON.stringify(entry));
+  } catch {
+    // Session storage is an opportunistic speed path; failed writes should not block reads.
+  }
+}
+
+export function peekCachedApiResponse<T>(path: string, options?: { allowStale?: boolean }): T | null {
+  const now = Date.now();
+  const memoryEntry = clientReadCache.get(path);
+  if (memoryEntry && (options?.allowStale || memoryEntry.expiresAt > now)) {
+    return memoryEntry.value as T;
+  }
+
+  const storedEntry = readStoredCacheEntry<T>(path);
+  if (!storedEntry) return null;
+  if (!options?.allowStale && storedEntry.expiresAt <= now) return null;
+  clientReadCache.set(path, { expiresAt: storedEntry.expiresAt, value: storedEntry.value });
+  return storedEntry.value;
+}
+
 async function fetchCachedJson<T>(path: string, ttlMs = DASHBOARD_READ_CLIENT_CACHE_MS): Promise<T> {
   const now = Date.now();
   const cached = clientReadCache.get(path);
   if (cached && cached.expiresAt > now) {
     return cached.value as T;
   }
-  const value = await fetchJson<T>(path);
+  const stored = readStoredCacheEntry<T>(path);
+  if (stored && stored.expiresAt > now) {
+    clientReadCache.set(path, stored);
+    return stored.value;
+  }
+
+  const inflight = clientReadInflight.get(path);
+  if (inflight) {
+    return (await inflight) as T;
+  }
+
+  const promise = fetchJson<T>(path);
+  clientReadInflight.set(path, promise);
+  let value: T;
+  try {
+    value = await promise;
+  } finally {
+    clientReadInflight.delete(path);
+  }
   clientReadCache.set(path, { expiresAt: Date.now() + ttlMs, value });
+  writeStoredCacheEntry(path, value, ttlMs);
   return value;
 }
 
@@ -837,6 +924,66 @@ export async function importLocalWatchlist(payload: WatchlistState): Promise<{
   });
 }
 
+function dashboardHomePath(timeframe: AnalyticsTimeframe = "all", limit = 5) {
+  const params = new URLSearchParams();
+  params.set("timeframe", timeframe);
+  params.set("limit", String(limit));
+  return `/api/dashboard/home?${params.toString()}`;
+}
+
+function marketProfileFullPath(marketSlug: string, topWhalesLimit = 5) {
+  const params = new URLSearchParams();
+  params.set("top_whales_limit", String(topWhalesLimit));
+  return `/api/markets/${encodeURIComponent(marketSlug)}/profile/full?${params.toString()}`;
+}
+
+function userProfileFullPath(userId: number, timeframe: AnalyticsTimeframe = "30d") {
+  const params = new URLSearchParams();
+  params.set("timeframe", timeframe);
+  return `/api/users/${userId}/profile/full?${params.toString()}`;
+}
+
+export function getCachedDashboardHome(
+  timeframe: AnalyticsTimeframe = "all",
+  limit = 5,
+): DashboardHomePayload | null {
+  return peekCachedApiResponse<DashboardHomePayload>(dashboardHomePath(timeframe, limit), { allowStale: true });
+}
+
+export function getCachedMarketProfileFull(marketSlug: string, topWhalesLimit = 5): MarketProfileFullPayload | null {
+  return peekCachedApiResponse<MarketProfileFullPayload>(marketProfileFullPath(marketSlug, topWhalesLimit), {
+    allowStale: true,
+  });
+}
+
+export function getCachedUserProfileFull(
+  userId: number,
+  timeframe: AnalyticsTimeframe = "30d",
+): UserProfileFullPayload | null {
+  return peekCachedApiResponse<UserProfileFullPayload>(userProfileFullPath(userId, timeframe), { allowStale: true });
+}
+
+export async function fetchDashboardHome(
+  timeframe: AnalyticsTimeframe = "all",
+  limit = 5,
+): Promise<DashboardHomePayload> {
+  return fetchCachedJson<DashboardHomePayload>(dashboardHomePath(timeframe, limit));
+}
+
+export async function fetchMarketProfileFull(marketSlug: string, topWhalesLimit = 5): Promise<MarketProfileFullPayload> {
+  return fetchCachedJson<MarketProfileFullPayload>(
+    marketProfileFullPath(marketSlug, topWhalesLimit),
+    120_000,
+  );
+}
+
+export async function fetchUserProfileFull(
+  userId: number,
+  timeframe: AnalyticsTimeframe = "30d",
+): Promise<UserProfileFullPayload> {
+  return fetchCachedJson<UserProfileFullPayload>(userProfileFullPath(userId, timeframe), 60_000);
+}
+
 export async function fetchDashboardMarkets(limit = 10): Promise<DashboardMarketRow[]> {
   const payload = await fetchCachedJson<{ markets: { items: DashboardMarketRow[] } | null }>(
     `/api/dashboards/latest/markets?limit=${limit}`,
@@ -897,15 +1044,10 @@ export async function fetchMarketProfileTopWhales(marketSlug: string, limit = 5)
 }
 
 export async function fetchHomeSummary(): Promise<HomeSummary> {
-  const now = Date.now();
-  if (homeSummaryClientCache && homeSummaryClientCache.expiresAt > now) {
-    return homeSummaryClientCache.value;
-  }
-  const payload = await fetchJson<{ summary: HomeSummary }>("/api/home/summary");
-  homeSummaryClientCache = {
-    expiresAt: Date.now() + HOME_SUMMARY_CLIENT_CACHE_MS,
-    value: payload.summary,
-  };
+  const payload = await fetchCachedJson<{ summary: HomeSummary }>(
+    "/api/home/summary",
+    HOME_SUMMARY_CLIENT_CACHE_MS,
+  );
   return payload.summary;
 }
 

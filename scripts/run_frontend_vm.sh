@@ -11,4 +11,6 @@ if [[ ! -x node_modules/.bin/vite ]]; then
   npm install
 fi
 
-exec npm run dev -- --host 0.0.0.0 --port "${FRONTEND_PORT:-5173}" --strictPort
+npm run build
+
+exec npm run preview -- --host 0.0.0.0 --port "${FRONTEND_PORT:-5173}" --strictPort

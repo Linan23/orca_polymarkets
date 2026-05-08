@@ -1,11 +1,10 @@
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import FollowButton from "../components/FollowButton";
 import { useWatchlist } from "../hooks/useWatchlist";
 import {
-  fetchMarketProfile,
-  fetchMarketProfileMlTrend,
-  fetchMarketProfileTopWhales,
+  fetchMarketProfileFull,
+  getCachedMarketProfileFull,
   type MarketOutcomeProbability,
   type MarketProfileMlPredictionCase,
   type MarketProfileMlPredictionTrend,
@@ -547,17 +546,17 @@ function emptyMlTrend(marketSlug: string): MarketProfileMlPredictionTrend {
   };
 }
 
-function TopMarketWhalesPanel({ marketSlug }: { marketSlug: string }) {
-  const loadTopWhales = useCallback(
-    () => (marketSlug ? fetchMarketProfileTopWhales(marketSlug, 5) : Promise.resolve(emptyTopWhales(marketSlug))),
-    [marketSlug],
-  );
-  const { data: topWhales, loading, error } = useApiData(loadTopWhales);
+function TopMarketWhalesPanel({
+  marketSlug,
+  topWhales,
+  error,
+}: {
+  marketSlug: string;
+  topWhales?: MarketProfileTopWhales | null;
+  error?: string | null;
+}) {
+  const topWhalesPayload = topWhales ?? emptyTopWhales(marketSlug);
   const whales = topWhales?.items ?? [];
-
-  if (loading) {
-    return <div className="market-ml-empty">Loading top whales...</div>;
-  }
 
   if (error) {
     return <div className="market-ml-empty">Unable to load top whales: {error}</div>;
@@ -580,8 +579,8 @@ function TopMarketWhalesPanel({ marketSlug }: { marketSlug: string }) {
           <h3>Top 5 whales by trust score</h3>
         </div>
         <div className="market-ml-live-stats">
-          <span>{formatCompactNumber(topWhales?.count, 0)} ranked whales</span>
-          <span>Scores {formatDateTime(topWhales?.snapshot_time)}</span>
+          <span>{formatCompactNumber(topWhalesPayload.count, 0)} ranked whales</span>
+          <span>Scores {formatDateTime(topWhalesPayload.snapshot_time)}</span>
         </div>
       </div>
       <div className="market-ml-whale-list">
@@ -595,23 +594,26 @@ function TopMarketWhalesPanel({ marketSlug }: { marketSlug: string }) {
 
 function MarketMlPredictionTrendPanel({
   marketSlug,
+  trendPayload,
+  topWhales,
+  loading,
+  error,
   preferredSideLabel,
   outcomeProbabilities,
   price,
   odds,
 }: {
   marketSlug: string;
+  trendPayload?: MarketProfileMlPredictionTrend | null;
+  topWhales?: MarketProfileTopWhales | null;
+  loading?: boolean;
+  error?: string | null;
   preferredSideLabel?: string | null;
   outcomeProbabilities?: MarketOutcomeProbability[] | null;
   price: number | null;
   odds: number | null;
 }) {
-  const loadTrend = useCallback(
-    () => (marketSlug ? fetchMarketProfileMlTrend(marketSlug) : Promise.resolve(emptyMlTrend(marketSlug))),
-    [marketSlug],
-  );
-  const { data: trendPayload, loading: trendLoading, error: trendError } = useApiData(loadTrend);
-  const trend = trendPayload ?? undefined;
+  const trend = trendPayload ?? emptyMlTrend(marketSlug);
   const cases = profileTrendCases(trend);
   const primaryCases = primaryTrendCases(cases, trend?.primary_side_label ?? preferredSideLabel);
   const [activeTab, setActiveTab] = useState<"trend" | "whales">("trend");
@@ -660,11 +662,11 @@ function MarketMlPredictionTrendPanel({
       </div>
 
       {activeTab === "whales" ? (
-        <TopMarketWhalesPanel marketSlug={marketSlug} />
-      ) : trendLoading ? (
+        <TopMarketWhalesPanel marketSlug={marketSlug} topWhales={topWhales} error={error} />
+      ) : loading ? (
         <div className="market-ml-empty">Loading prediction trend...</div>
-      ) : trendError ? (
-        <div className="market-ml-empty">Unable to load prediction trend: {trendError}</div>
+      ) : error ? (
+        <div className="market-ml-empty">Unable to load prediction trend: {error}</div>
       ) : cases.length === 0 ? (
         <div className="market-ml-empty">
           <strong>No 12h/24h ML prediction snapshot for this market yet.</strong>
@@ -693,8 +695,24 @@ export default function MarketProfile() {
   const { marketId } = useParams();
   const marketSlug = marketId ?? "";
   const { isMarketFollowed, toggleMarket } = useWatchlist();
-  const loadMarket = useCallback(() => fetchMarketProfile(marketSlug), [marketSlug]);
-  const { data, loading, error } = useApiData(loadMarket);
+  const initialMarketFull = useMemo(
+    () => (marketSlug ? getCachedMarketProfileFull(marketSlug, 5) : null),
+    [marketSlug],
+  );
+  const loadMarket = useCallback(() => {
+    if (!marketSlug) {
+      throw new Error("Missing market slug");
+    }
+    return fetchMarketProfileFull(marketSlug, 5);
+  }, [marketSlug]);
+  const { data: fullProfile, loading, error } = useApiData(loadMarket, {
+    keepPreviousData: true,
+    initialData: initialMarketFull,
+    resetKey: `market-${marketSlug}`,
+  });
+  const data = fullProfile?.profile ?? null;
+  const mlTrend = fullProfile?.ml_prediction_trend ?? data?.ml_prediction_trend ?? null;
+  const topWhales = fullProfile?.top_whales ?? data?.top_whales ?? null;
   const externalMarketUrl = data ? polymarketMarketUrl(data.market_url, data.market_slug) : null;
 
   return (
@@ -774,6 +792,10 @@ export default function MarketProfile() {
 
           <MarketMlPredictionTrendPanel
             marketSlug={data.market_slug}
+            trendPayload={mlTrend}
+            topWhales={topWhales}
+            loading={loading}
+            error={error}
             preferredSideLabel={data.primary_side_label ?? data.selected_side_label}
             outcomeProbabilities={data.outcome_probabilities}
             price={data.price}

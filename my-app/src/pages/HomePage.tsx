@@ -1,10 +1,10 @@
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 import HomepageSummaryCards from "../homepage/HomepageSummaryCards";
 import PolymarketNewsGallery from "../homepage/PolymarketNewsGallery";
 import ResearchAnalyticsSection from "../homepage/ResearchAnalyticsSection";
 import TopNavbar from "../homepage/TopNavbar";
 import { useApiData } from "../hooks/useApiData";
-import { fetchHomeSummary } from "../lib/api";
+import { fetchDashboardHome, getCachedDashboardHome } from "../lib/api";
 
 function formatSignalValue(value: number | null) {
   if (value === null) return "--";
@@ -12,8 +12,14 @@ function formatSignalValue(value: number | null) {
 }
 
 export default function HomePage() {
-  const loadSummary = useCallback(() => fetchHomeSummary(), []);
-  const { data } = useApiData(loadSummary, { keepPreviousData: true });
+  const initialDashboardHome = useMemo(() => getCachedDashboardHome("all", 5), []);
+  const loadDashboardHome = useCallback(() => fetchDashboardHome("all", 5), []);
+  const { data: dashboardHome } = useApiData(loadDashboardHome, {
+    keepPreviousData: true,
+    initialData: initialDashboardHome,
+    resetKey: "home-all",
+  });
+  const data = dashboardHome?.summary ?? null;
   const totalTrackedTrades =
     data?.platform_coverage.reduce((sum, platform) => sum + platform.transaction_count, 0) ?? null;
 
@@ -62,10 +68,13 @@ export default function HomePage() {
       </section>
 
       <PolymarketNewsGallery />
-      <HomepageSummaryCards />
+      <HomepageSummaryCards summary={data} />
 
       <div id="research">
-        <ResearchAnalyticsSection persistTimeframePreference />
+        <ResearchAnalyticsSection
+          persistTimeframePreference
+          initialDashboardHome={dashboardHome}
+        />
       </div>
     </div>
   );

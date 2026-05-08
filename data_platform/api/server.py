@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+from collections.abc import Callable
 from threading import Lock
 from time import monotonic
 from typing import Any
@@ -81,17 +82,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-FOLLOWING_DASHBOARD_CACHE_TTL_SECONDS = 20.0
-SNAPSHOT_CACHE_TTL_SECONDS = 20.0
-LEADERBOARD_CACHE_TTL_SECONDS = 60.0
-HOME_SUMMARY_CACHE_TTL_SECONDS = 60.0
-ANALYTICS_CACHE_TTL_SECONDS = 60.0
-LATEST_WHALES_CACHE_TTL_SECONDS = 60.0
-MARKET_PROFILE_CACHE_TTL_SECONDS = 30.0
-MARKET_PROFILE_ML_TREND_CACHE_TTL_SECONDS = 30.0
-MARKET_PROFILE_TOP_WHALES_CACHE_TTL_SECONDS = 60.0
-USER_WHALE_PROFILE_CACHE_TTL_SECONDS = 30.0
-USER_ACTIVITY_INSIGHTS_CACHE_TTL_SECONDS = 20.0
+FOLLOWING_DASHBOARD_CACHE_TTL_SECONDS = 60.0
+SNAPSHOT_CACHE_TTL_SECONDS = 300.0
+LEADERBOARD_CACHE_TTL_SECONDS = 300.0
+HOME_SUMMARY_CACHE_TTL_SECONDS = 300.0
+ANALYTICS_CACHE_TTL_SECONDS = 300.0
+LATEST_WHALES_CACHE_TTL_SECONDS = 300.0
+MARKET_PROFILE_CACHE_TTL_SECONDS = 120.0
+MARKET_PROFILE_ML_TREND_CACHE_TTL_SECONDS = 120.0
+MARKET_PROFILE_TOP_WHALES_CACHE_TTL_SECONDS = 120.0
+USER_WHALE_PROFILE_CACHE_TTL_SECONDS = 60.0
+USER_ACTIVITY_INSIGHTS_CACHE_TTL_SECONDS = 60.0
 _following_dashboard_cache: dict[tuple[tuple[int, ...], tuple[str, ...]], tuple[float, dict[str, object]]] = {}
 _following_dashboard_cache_lock = Lock()
 _latest_dashboard_cache: dict[str, tuple[float, dict[str, object]]] = {}
@@ -110,6 +111,8 @@ _whale_entry_behavior_cache: dict[tuple[int, str], tuple[float, dict[str, object
 _whale_entry_behavior_cache_lock = Lock()
 _recent_whale_entries_cache: dict[tuple[int, str], tuple[float, dict[str, object]]] = {}
 _recent_whale_entries_cache_lock = Lock()
+_dashboard_home_cache: dict[tuple[str, int], tuple[float, dict[str, object]]] = {}
+_dashboard_home_cache_lock = Lock()
 _latest_whales_cache: dict[tuple[int, bool, bool, str], tuple[float, dict[str, object]]] = {}
 _latest_whales_cache_lock = Lock()
 _market_profile_cache: dict[str, tuple[float, dict[str, object]]] = {}
@@ -118,10 +121,16 @@ _market_profile_ml_trend_cache: dict[str, tuple[float, dict[str, object]]] = {}
 _market_profile_ml_trend_cache_lock = Lock()
 _market_profile_top_whales_cache: dict[tuple[str, int], tuple[float, dict[str, object]]] = {}
 _market_profile_top_whales_cache_lock = Lock()
+_market_profile_full_cache: dict[tuple[str, int], tuple[float, dict[str, object]]] = {}
+_market_profile_full_cache_lock = Lock()
 _user_whale_profile_cache: dict[int, tuple[float, dict[str, object]]] = {}
 _user_whale_profile_cache_lock = Lock()
 _user_activity_insights_cache: dict[tuple[int, str], tuple[float, dict[str, object]]] = {}
 _user_activity_insights_cache_lock = Lock()
+_user_profile_full_cache: dict[tuple[int, str], tuple[float, dict[str, object]]] = {}
+_user_profile_full_cache_lock = Lock()
+_cache_build_locks: dict[tuple[str, Any], Any] = {}
+_cache_build_locks_lock = Lock()
 
 
 def _service_error(exc: Exception) -> HTTPException:
@@ -283,6 +292,57 @@ def _cache_set(
     """Store a deep-copied API payload in the in-process TTL cache."""
     with lock:
         cache[cache_key] = (monotonic(), copy.deepcopy(payload))
+
+
+def _cache_build_lock(namespace: str, cache_key: Any) -> Any:
+    """Return a per-cache-key lock so cold requests share one DB build."""
+    build_key = (namespace, cache_key)
+    with _cache_build_locks_lock:
+        build_lock = _cache_build_locks.get(build_key)
+        if build_lock is None:
+            build_lock = Lock()
+            _cache_build_locks[build_key] = build_lock
+        return build_lock
+
+
+def _cached_or_build(
+    *,
+    namespace: str,
+    cache: dict[Any, tuple[float, dict[str, object]]],
+    cache_key: Any,
+    ttl_seconds: float,
+    lock: Lock,
+    builder: Callable[[], dict[str, object]],
+) -> dict[str, object]:
+    """Return cached read payloads and dedupe concurrent cold builds per key."""
+    cached_payload = _cache_get(cache, cache_key=cache_key, ttl_seconds=ttl_seconds, lock=lock)
+    if cached_payload is not None:
+        return cached_payload
+
+    build_lock = _cache_build_lock(namespace, cache_key)
+    with build_lock:
+        cached_payload = _cache_get(cache, cache_key=cache_key, ttl_seconds=ttl_seconds, lock=lock)
+        if cached_payload is not None:
+            return cached_payload
+
+        payload = builder()
+        _cache_set(cache, cache_key=cache_key, payload=payload, lock=lock)
+        return copy.deepcopy(payload)
+
+
+def _set_cache_control_headers(
+    response: Response,
+    *,
+    max_age_seconds: float,
+    stale_seconds: float | None = None,
+    private: bool = False,
+) -> None:
+    """Advertise safe browser/proxy caching for read-only dashboard payloads."""
+    scope = "private" if private else "public"
+    stale = int(stale_seconds if stale_seconds is not None else max_age_seconds)
+    response.headers["Cache-Control"] = (
+        f"{scope}, max-age={int(max_age_seconds)}, stale-while-revalidate={stale}"
+    )
 
 
 def _set_session_cookie(response: Response, token: str) -> None:
@@ -834,6 +894,63 @@ def get_home_summary() -> dict[str, object]:
         raise _service_error(exc) from exc
 
 
+@app.get("/api/dashboard/home")
+def get_dashboard_home(
+    response: Response,
+    timeframe: str = Query("all"),
+    limit: int = Query(5, ge=1, le=25),
+) -> dict[str, object]:
+    """Return the homepage's public summary and research previews in one fast read."""
+    normalized_timeframe = _normalize_timeframe(timeframe)
+    normalized_limit = int(limit)
+    cache_key = (normalized_timeframe, normalized_limit)
+
+    def build_payload() -> dict[str, object]:
+        with session_scope() as session:
+            return {
+                "summary": home_summary(session),
+                "research": {
+                    "top_profitable_users": top_profitable_resolved_users(
+                        session,
+                        limit=normalized_limit,
+                        timeframe=normalized_timeframe,
+                    ),
+                    "recent_whale_entries": recent_whale_entries(
+                        session,
+                        limit=normalized_limit,
+                        timeframe=normalized_timeframe,
+                    ),
+                    "market_whale_concentration": market_whale_concentration(
+                        session,
+                        limit=normalized_limit,
+                        timeframe=normalized_timeframe,
+                    ),
+                    "whale_entry_behavior": whale_entry_behavior(
+                        session,
+                        limit=normalized_limit,
+                        timeframe=normalized_timeframe,
+                    ),
+                },
+                "market_leaderboard": latest_dashboard_markets(session, limit=normalized_limit),
+                "whale_leaderboard": latest_whale_scores(session, limit=normalized_limit, tier="all"),
+            }
+
+    _set_cache_control_headers(response, max_age_seconds=HOME_SUMMARY_CACHE_TTL_SECONDS)
+    try:
+        return _cached_or_build(
+            namespace="dashboard_home",
+            cache=_dashboard_home_cache,
+            cache_key=cache_key,
+            ttl_seconds=HOME_SUMMARY_CACHE_TTL_SECONDS,
+            lock=_dashboard_home_cache_lock,
+            builder=build_payload,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except (OSError, SQLAlchemyError) as exc:
+        raise _service_error(exc) from exc
+
+
 @app.get("/api/analytics/top-profitable-users")
 def get_top_profitable_users(
     limit: int = Query(10, ge=1, le=100),
@@ -1139,6 +1256,93 @@ def get_user_activity_insights(
             return {"insights": insights}
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except (OSError, SQLAlchemyError) as exc:
+        raise _service_error(exc) from exc
+
+
+@app.get("/api/users/{user_id}/profile/full")
+def get_user_profile_full(
+    response: Response,
+    user_id: int,
+    timeframe: str = Query("30d"),
+) -> dict[str, object]:
+    """Return trader profile and activity insights in one cache-backed payload."""
+    normalized_timeframe = _normalize_timeframe(timeframe)
+    cache_key = (int(user_id), normalized_timeframe)
+
+    def build_payload() -> dict[str, object]:
+        with session_scope() as session:
+            profile = latest_user_whale_profile(session, user_id=user_id)
+            if profile is None:
+                raise HTTPException(status_code=404, detail=f"User {user_id} not found")
+            insights = user_activity_insights(session, user_id=user_id, timeframe=normalized_timeframe)
+            if insights is None:
+                raise HTTPException(status_code=404, detail=f"User {user_id} not found")
+            return {"profile": profile, "insights": insights}
+
+    _set_cache_control_headers(response, max_age_seconds=USER_ACTIVITY_INSIGHTS_CACHE_TTL_SECONDS, private=True)
+    try:
+        return _cached_or_build(
+            namespace="user_profile_full",
+            cache=_user_profile_full_cache,
+            cache_key=cache_key,
+            ttl_seconds=USER_ACTIVITY_INSIGHTS_CACHE_TTL_SECONDS,
+            lock=_user_profile_full_cache_lock,
+            builder=build_payload,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except (OSError, SQLAlchemyError) as exc:
+        raise _service_error(exc) from exc
+
+
+@app.get("/api/markets/{market_slug}/profile/full")
+def get_market_profile_full(
+    response: Response,
+    market_slug: str,
+    top_whales_limit: int = Query(5, ge=1, le=25),
+) -> dict[str, object]:
+    """Return market profile, ML trend, and top whales in one cache-backed payload."""
+    normalized_market_slug = market_slug.strip().lower()
+    cache_key = (normalized_market_slug, int(top_whales_limit))
+
+    def build_payload() -> dict[str, object]:
+        with session_scope() as session:
+            profile = latest_market_profile(session, market_slug=normalized_market_slug)
+            if profile is None:
+                raise HTTPException(status_code=404, detail=f"Market {market_slug} not found")
+            ml_prediction_trend = market_profile_ml_trend_payload(
+                session,
+                market_slug=normalized_market_slug,
+            )
+            top_whales = market_profile_top_whales(
+                session,
+                market_slug=normalized_market_slug,
+                limit=top_whales_limit,
+            )
+            profile_payload = dict(profile)
+            profile_payload["ml_prediction_trend"] = ml_prediction_trend
+            profile_payload["top_whales"] = top_whales
+            return {
+                "profile": profile_payload,
+                "ml_prediction_trend": ml_prediction_trend,
+                "top_whales": top_whales,
+            }
+
+    _set_cache_control_headers(response, max_age_seconds=MARKET_PROFILE_CACHE_TTL_SECONDS)
+    try:
+        return _cached_or_build(
+            namespace="market_profile_full",
+            cache=_market_profile_full_cache,
+            cache_key=cache_key,
+            ttl_seconds=MARKET_PROFILE_CACHE_TTL_SECONDS,
+            lock=_market_profile_full_cache_lock,
+            builder=build_payload,
+        )
     except HTTPException:
         raise
     except (OSError, SQLAlchemyError) as exc:

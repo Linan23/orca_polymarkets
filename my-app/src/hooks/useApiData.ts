@@ -1,25 +1,44 @@
 import { useEffect, useRef, useState } from "react";
 
-type UseApiDataOptions = {
+type UseApiDataOptions<T> = {
   keepPreviousData?: boolean;
+  initialData?: T | null;
+  resetKey?: string | number | boolean | null;
 };
 
-export function useApiData<T>(loader: () => Promise<T>, options?: UseApiDataOptions) {
-  const [data, setData] = useState<T | null>(null);
-  const [loading, setLoading] = useState(true);
+export function useApiData<T>(loader: () => Promise<T>, options?: UseApiDataOptions<T>) {
+  const keepPreviousData = Boolean(options?.keepPreviousData);
+  const initialData = options?.initialData ?? null;
+  const resetKey = options?.resetKey ?? null;
+  const [data, setData] = useState<T | null>(initialData);
+  const [loading, setLoading] = useState(initialData ? false : true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const hasDataRef = useRef(false);
+  const hasDataRef = useRef(initialData !== null);
+  const latestInitialDataRef = useRef<T | null>(initialData);
 
   useEffect(() => {
     hasDataRef.current = data !== null;
   }, [data]);
 
   useEffect(() => {
+    latestInitialDataRef.current = initialData;
+  }, [initialData]);
+
+  useEffect(() => {
+    const nextInitialData = latestInitialDataRef.current;
+    setData(nextInitialData);
+    setLoading(nextInitialData === null);
+    setRefreshing(false);
+    setError(null);
+    hasDataRef.current = nextInitialData !== null;
+  }, [resetKey]);
+
+  useEffect(() => {
     let cancelled = false;
 
     async function run() {
-      const shouldKeepPreviousData = Boolean(options?.keepPreviousData && hasDataRef.current);
+      const shouldKeepPreviousData = Boolean(keepPreviousData && hasDataRef.current);
       if (shouldKeepPreviousData) {
         setRefreshing(true);
       } else {
@@ -33,7 +52,7 @@ export function useApiData<T>(loader: () => Promise<T>, options?: UseApiDataOpti
         }
       } catch (err) {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : "Unknown API error");
+          setError(hasDataRef.current ? null : err instanceof Error ? err.message : "Unknown API error");
         }
       } finally {
         if (!cancelled) {
@@ -48,7 +67,7 @@ export function useApiData<T>(loader: () => Promise<T>, options?: UseApiDataOpti
     return () => {
       cancelled = true;
     };
-  }, [loader, options?.keepPreviousData]);
+  }, [loader, keepPreviousData]);
 
   return { data, loading, refreshing, error };
 }

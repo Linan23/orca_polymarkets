@@ -38,6 +38,7 @@ git pull origin main
 source .venv/bin/activate
 python -m alembic -c alembic.ini upgrade head
 sudo systemctl restart orca-api.service orca-frontend.service orca-ingest-live.service orca-analytics-refresh.service
+./scripts/warm_dashboard_caches_vm.sh
 sudo systemctl enable --now orca-ml-confidence-cycle.timer
 ```
 
@@ -45,8 +46,11 @@ Verify:
 
 ```bash
 curl -s http://127.0.0.1:8001/health
+curl -s "http://127.0.0.1:8001/api/dashboard/home?timeframe=all&limit=5" >/dev/null
 sudo systemctl status orca-ingest-live.service orca-analytics-refresh.service orca-retention-rollup.service orca-ml-confidence-cycle.timer --no-pager
 ```
+
+The VM frontend service runs `npm run build` and serves the built `dist/` bundle with Vite preview on the existing frontend port. The cache warmer fills homepage, research, leaderboard, whale, and hot market-profile reads so the first dashboard visit after restart is not a cold database path.
 
 ## Continuous ML confidence cycle
 

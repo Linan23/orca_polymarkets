@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import FollowButton from "../components/FollowButton";
@@ -10,8 +10,8 @@ import {
   type RecentTradeRow,
   type UserActivityInsights,
   type WhaleProfile,
-  fetchUserActivityInsights,
-  fetchUserWhaleProfile,
+  fetchUserProfileFull,
+  getCachedUserProfileFull,
 } from "../lib/api";
 import { deriveUserIdentity, deriveWhaleTierLabel } from "../lib/userIdentity";
 import {
@@ -332,26 +332,29 @@ export default function UserProfile() {
     [isAuthenticated, preferences.user_profile.analytics_timeframe, updatePreferences],
   );
 
-  const loadProfile = useCallback(async () => {
+  const initialProfileFull = useMemo(
+    () => (!invalidUser ? getCachedUserProfileFull(parsedUserId, timeframe) : null),
+    [invalidUser, parsedUserId, timeframe],
+  );
+  const loadProfileFull = useCallback(async () => {
     if (invalidUser) {
       throw new Error("Invalid user id");
     }
-    return fetchUserWhaleProfile(parsedUserId);
-  }, [invalidUser, parsedUserId]);
-  const loadInsights = useCallback(async () => {
-    if (invalidUser) {
-      throw new Error("Invalid user id");
-    }
-    return fetchUserActivityInsights(parsedUserId, timeframe);
+    return fetchUserProfileFull(parsedUserId, timeframe);
   }, [invalidUser, parsedUserId, timeframe]);
 
-  const { data, loading, error } = useApiData(loadProfile);
   const {
-    data: insights,
-    loading: insightsLoading,
-    refreshing: insightsRefreshing,
-    error: insightsError,
-  } = useApiData(loadInsights, { keepPreviousData: true });
+    data: fullProfile,
+    loading,
+    refreshing,
+    error,
+  } = useApiData(loadProfileFull, {
+    keepPreviousData: true,
+    initialData: initialProfileFull,
+    resetKey: `user-${parsedUserId}`,
+  });
+  const data = fullProfile?.profile ?? null;
+  const insights = fullProfile?.insights ?? null;
 
   if (invalidUser) {
     return (
@@ -477,10 +480,10 @@ export default function UserProfile() {
             {activeTab === "analytics" && (
               <div className="tab-panel">
                 <TimeframeField timeframe={timeframe} onChange={handleTimeframeChange} />
-                {insightsRefreshing && <p className="tab-copy">Updating trader analytics...</p>}
-                {insightsLoading && <div className="status-panel">Loading trader analytics...</div>}
-                {insightsError && <div className="status-panel error-panel">{insightsError}</div>}
-                {!insightsLoading && !insightsError && insights && (
+                {refreshing && <p className="tab-copy">Updating trader analytics...</p>}
+                {loading && <div className="status-panel">Loading trader analytics...</div>}
+                {error && <div className="status-panel error-panel">{error}</div>}
+                {!loading && !error && insights && (
                   <>
                     <ActivitySummaryStrip summary={insights.summary} />
                     <div className="tab-grid two-col">
@@ -510,10 +513,10 @@ export default function UserProfile() {
             {activeTab === "activity" && (
               <div className="tab-panel">
                 <TimeframeField timeframe={timeframe} onChange={handleTimeframeChange} />
-                {insightsRefreshing && <p className="tab-copy">Updating past activity...</p>}
-                {insightsLoading && <div className="status-panel">Loading past activity...</div>}
-                {insightsError && <div className="status-panel error-panel">{insightsError}</div>}
-                {!insightsLoading && !insightsError && insights && (
+                {refreshing && <p className="tab-copy">Updating past activity...</p>}
+                {loading && <div className="status-panel">Loading past activity...</div>}
+                {error && <div className="status-panel error-panel">{error}</div>}
+                {!loading && !error && insights && (
                   <>
                     <ActivitySummaryStrip summary={insights.summary} />
                     <div className="tab-grid">
