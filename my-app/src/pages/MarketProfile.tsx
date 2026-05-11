@@ -28,12 +28,6 @@ function formatOddsPercent(value: number | null | undefined, digits = 1) {
   return `${value.toFixed(digits)}%`;
 }
 
-function formatSignedPercentagePoints(value: number | null | undefined, digits = 1) {
-  if (typeof value !== "number" || !Number.isFinite(value)) return "--";
-  const sign = value > 0 ? "+" : "";
-  return `${sign}${value.toFixed(digits)} percentage points`;
-}
-
 function formatPercentagePointMagnitude(value: number | null | undefined, digits = 1) {
   if (typeof value !== "number" || !Number.isFinite(value)) return "--";
   return `${Math.abs(value).toFixed(digits)} percentage points`;
@@ -142,23 +136,22 @@ function primaryTrendCases(cases: MarketProfileMlPredictionCase[], preferredSide
     .sort((left, right) => windowHours(left.window) - windowHours(right.window));
 }
 
-function forecastDirectionTag(item: MarketProfileMlPredictionCase) {
+function forecastMarketSummary(item: MarketProfileMlPredictionCase) {
   const sideLabel = formatLabel(item.side_label);
-  if (item.predicted_direction === "up") return `Whale forecast expects ${sideLabel} probability to rise`;
-  if (item.predicted_direction === "down") return `Whale forecast expects ${sideLabel} probability to fall`;
-  return `Whale forecast expects ${sideLabel} probability to stay near the current level`;
-}
-
-function forecastPlainLanguageDescription(item: MarketProfileMlPredictionCase) {
-  const sideLabel = formatLabel(item.side_label);
+  const futureValue = modelFutureOdds(item);
+  const oppositeValue = complementProbability(futureValue);
+  const oppositeLabel = oppositeSideLabel(item.side_label);
   const hours = windowHours(item.window);
-  if (item.predicted_direction === "up") {
-    return `Whale activity points to ${sideLabel} becoming more likely over the next ${hours} hours.`;
+  if (typeof futureValue !== "number" || typeof oppositeValue !== "number") {
+    return `Whale activity forecast is still being prepared for the next ${hours} hours.`;
   }
-  if (item.predicted_direction === "down") {
-    return `Whale activity points to ${sideLabel} becoming less likely over the next ${hours} hours.`;
+  if (futureValue > 52) {
+    return `Whale activity suggests the market is leaning ${sideLabel} over the next ${hours} hours.`;
   }
-  return `Whale activity points to ${sideLabel} probability staying close to the current level over the next ${hours} hours.`;
+  if (oppositeValue > 52) {
+    return `Whale activity suggests the market is leaning ${oppositeLabel} over the next ${hours} hours.`;
+  }
+  return `Whale activity suggests the market is close to balanced over the next ${hours} hours.`;
 }
 
 function historicalValidationDescription(item: MarketProfileMlPredictionCase) {
@@ -851,11 +844,10 @@ function MarketPredictionOutcomeSummary({ cases }: { cases: MarketProfileMlPredi
         const comparison = completedValidation(item);
         const predictedValue = comparison?.model_predicted_future_odds_pct ?? modelFutureOdds(item);
         const predictedRows = binaryProbabilityRows(item, predictedValue);
-        const hasValidation = comparison !== null;
         return (
           <article className="market-ml-outcome-card" key={`outcome-${item.window}-${item.side_label}`}>
             <div className="market-ml-outcome-card-header">
-              <span>{formatLabel(item.side_label)} probability</span>
+              <span>Market probability</span>
               <strong>{item.window} forecast</strong>
             </div>
             <div className="market-ml-model-probability-grid">
@@ -866,17 +858,8 @@ function MarketPredictionOutcomeSummary({ cases }: { cases: MarketProfileMlPredi
               ))}
             </div>
             <div className="market-ml-outcome-footer">
-              <span>{forecastPlainLanguageDescription(item)}</span>
-            </div>
-            <div className="market-ml-outcome-footer">
-              <span>{forecastDirectionTag(item)}</span>
+              <span>{forecastMarketSummary(item)}</span>
               <span>Accuracy: {historicalValidationDescription(item)}</span>
-              <span>Expected change: {formatSignedPercentagePoints(comparison?.model_predicted_delta_pts ?? modelDelta(item))}</span>
-              {hasValidation && (
-                <span>
-                  Past error: {formatPercentagePointMagnitude(comparison?.prediction_absolute_error_pts ?? item.prediction_absolute_error_pts)}
-                </span>
-              )}
             </div>
           </article>
         );
