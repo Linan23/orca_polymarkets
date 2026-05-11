@@ -84,13 +84,6 @@ function coerceFiniteNumber(value: number | string | null | undefined) {
   return Number.isFinite(numeric) ? numeric : null;
 }
 
-function formatWeightedPressure(value: number | null | undefined) {
-  if (typeof value !== "number" || !Number.isFinite(value)) return "--";
-  return value.toLocaleString(undefined, {
-    maximumFractionDigits: Math.abs(value) >= 100 ? 0 : 1,
-  });
-}
-
 function polymarketMarketUrl(marketUrl: string | null | undefined, marketSlug: string | null | undefined) {
   if (marketUrl) {
     try {
@@ -268,6 +261,14 @@ function whaleLeanSummary(cases: MarketProfileMlPredictionCase[]) {
   };
 }
 
+function whaleSupportLabel(score: number, maxScore: number) {
+  if (maxScore <= 0 || score <= 0) return "No clear support";
+  const ratio = score / maxScore;
+  if (ratio >= 0.95) return "Most support";
+  if (ratio >= 0.5) return "Some support";
+  return "Light support";
+}
+
 function oppositeSideLabel(value: string | null | undefined) {
   const normalized = normalizeSideLabel(value);
   if (normalized === "yes") return "No";
@@ -429,13 +430,13 @@ function MarketPredictionTrendChart({ cases }: { cases: MarketProfileMlPredictio
   const minOdds = paddedMax - paddedMin < minRange ? Math.max(0, Math.floor(midpoint - minRange / 2)) : paddedMin;
   const maxOdds = paddedMax - paddedMin < minRange ? Math.min(100, Math.ceil(midpoint + minRange / 2)) : paddedMax;
   const width = 520;
-  const height = 320;
+  const height = 292;
   const left = 58;
   const right = 44;
-  const top = 24;
-  const axisLabelY = height - 10;
-  const axisY = axisLabelY - 18;
-  const plotBottom = axisY - 26;
+  const top = 18;
+  const axisLabelY = height - 6;
+  const axisY = axisLabelY - 14;
+  const plotBottom = axisY - 16;
   const plotWidth = width - left - right;
   const plotHeight = plotBottom - top;
   const yFor = (odds: number) => top + ((maxOdds - odds) / Math.max(maxOdds - minOdds, 1)) * plotHeight;
@@ -546,7 +547,7 @@ function WhaleLeanPanel({ cases }: { cases: MarketProfileMlPredictionCase[] }) {
         <div>
           <p className="market-ml-side-label">Whale Lean</p>
           <h4>Whale lean is mixed</h4>
-          <span>No clear side has stronger trusted whale pressure yet.</span>
+          <span>No clear side has stronger trusted whale support yet.</span>
         </div>
       </div>
     );
@@ -560,11 +561,11 @@ function WhaleLeanPanel({ cases }: { cases: MarketProfileMlPredictionCase[] }) {
           <h4>{summary.leader ? `Whales leaning ${summary.leader.label}` : "Whale lean is mixed"}</h4>
           <span>
             {summary.leader
-              ? `Trust-weighted whale pressure is stronger on ${summary.leader.label}.`
-              : "No clear side has stronger trusted whale pressure yet."}
+              ? `Trusted whales are showing more support for ${summary.leader.label}.`
+              : "No clear side has stronger trusted whale support yet."}
           </span>
         </div>
-        <span className="market-ml-whale-lean-pill">Weighted pressure</span>
+        <span className="market-ml-whale-lean-pill">Whale support</span>
       </div>
       <div className="market-ml-whale-lean-bars">
         {summary.sides.map((side) => {
@@ -575,7 +576,7 @@ function WhaleLeanPanel({ cases }: { cases: MarketProfileMlPredictionCase[] }) {
               <div className="market-ml-whale-lean-track" aria-hidden="true">
                 <i style={{ width: `${width}%` }} />
               </div>
-              <strong>{formatWeightedPressure(side.score)}</strong>
+              <strong>{whaleSupportLabel(side.score, summary.maxScore)}</strong>
             </div>
           );
         })}
