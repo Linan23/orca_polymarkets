@@ -3106,9 +3106,8 @@ a {
 .page-definitions .definitions-list {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 9px;
-  max-width: 860px;
-  margin: 0 auto;
+  gap: 12px;
+  width: 100%;
 }
 
 .page-definitions .definitions-list.definitions-list-ml {
@@ -3123,8 +3122,8 @@ a {
   gap: 6px;
   align-content: start;
   min-width: 0;
-  padding: 13px 15px;
-  border-radius: 14px;
+  padding: 16px 18px;
+  border-radius: 16px;
   background: rgba(255, 255, 255, 0.055);
   border: 1px solid rgba(255, 255, 255, 0.08);
 }
