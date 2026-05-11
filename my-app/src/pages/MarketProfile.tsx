@@ -150,21 +150,21 @@ function primaryTrendCases(cases: MarketProfileMlPredictionCase[], preferredSide
 
 function forecastDirectionTag(item: MarketProfileMlPredictionCase) {
   const sideLabel = formatLabel(item.side_label);
-  if (item.predicted_direction === "up") return `Model expects ${sideLabel} odds to rise`;
-  if (item.predicted_direction === "down") return `Model expects ${sideLabel} odds to fall`;
-  return `Model expects ${sideLabel} odds to stay near the current level`;
+  if (item.predicted_direction === "up") return `Whale forecast expects ${sideLabel} probability to rise`;
+  if (item.predicted_direction === "down") return `Whale forecast expects ${sideLabel} probability to fall`;
+  return `Whale forecast expects ${sideLabel} probability to stay near the current level`;
 }
 
 function forecastPlainLanguageDescription(item: MarketProfileMlPredictionCase) {
   const sideLabel = formatLabel(item.side_label);
   const hours = windowHours(item.window);
   if (item.predicted_direction === "up") {
-    return `The model expects ${sideLabel} to become more likely over the next ${hours} hours.`;
+    return `Whale activity points to ${sideLabel} becoming more likely over the next ${hours} hours.`;
   }
   if (item.predicted_direction === "down") {
-    return `The model expects ${sideLabel} to become less likely over the next ${hours} hours.`;
+    return `Whale activity points to ${sideLabel} becoming less likely over the next ${hours} hours.`;
   }
-  return `The model expects ${sideLabel} odds to stay close to the current level over the next ${hours} hours.`;
+  return `Whale activity points to ${sideLabel} probability staying close to the current level over the next ${hours} hours.`;
 }
 
 function historicalValidationDescription(item: MarketProfileMlPredictionCase) {
@@ -233,9 +233,9 @@ function forecastMoveDetail(item: MarketProfileMlPredictionCase) {
   const futureOdds = formatOddsPercent(modelFutureOdds(item));
   const delta = modelDelta(item);
   if (typeof delta !== "number" || !Number.isFinite(delta) || Math.abs(delta) < 0.05) {
-    return `${sideLabel} stays near ${futureOdds}`;
+    return `${sideLabel} probability stays near ${futureOdds}`;
   }
-  return `${sideLabel} ${delta > 0 ? "moves up" : "moves down"} ${formatPercentagePointMagnitude(delta)} to ${futureOdds}`;
+  return `${sideLabel} probability ${delta > 0 ? "moves up" : "moves down"} ${formatPercentagePointMagnitude(delta)} to ${futureOdds}`;
 }
 
 function firstFiniteNumber(values: Array<number | string | null | undefined>) {
@@ -669,18 +669,18 @@ function MarketPredictionTrendChart({
     <div className="market-ml-chart-shell">
       <div className="market-ml-chart-summary">
         <span>Whale entered {formatDateTime(entryTime)}</span>
-        <span>Starting {formatLabel(base.side_label)} odds {formatOddsPercent(entryOdds)}</span>
+        <span>Starting {formatLabel(base.side_label)} probability {formatOddsPercent(entryOdds)}</span>
         {forecastSummaries.map((summary) => (
           <span key={summary}>{summary}</span>
         ))}
       </div>
       {actualPoints.length > 0 && (
         <div className="market-ml-chart-legend">
-          <span><i className="market-ml-legend-predicted" /> Model forecast</span>
-          <span><i className="market-ml-legend-actual" /> Actual odds</span>
+          <span><i className="market-ml-legend-predicted" /> Whale forecast</span>
+          <span><i className="market-ml-legend-actual" /> Actual probability</span>
         </div>
       )}
-      <svg className="market-ml-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="ML prediction trend">
+      <svg className="market-ml-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Whale-driven probability forecast">
         {[minOdds, Math.round((minOdds + maxOdds) / 2), maxOdds].map((odds) => (
           <g key={`grid-${odds}`}>
             <line x1={left} x2={width - right} y1={yFor(odds)} y2={yFor(odds)} />
@@ -784,7 +784,7 @@ function MarketPredictionOutcomeSummary({ cases }: { cases: MarketProfileMlPredi
         return (
           <article className="market-ml-outcome-card" key={`outcome-${item.window}-${item.side_label}`}>
             <div className="market-ml-outcome-card-header">
-              <span>{formatLabel(item.side_label)} odds</span>
+              <span>{formatLabel(item.side_label)} probability</span>
               <strong>{item.window} forecast</strong>
             </div>
             <div className="market-ml-model-probability-grid">
@@ -822,7 +822,7 @@ function MarketPredictionValidationSummary({ summary }: { summary?: MarketProfil
         <p className="market-ml-section-label">12h accuracy check</p>
         <h3>{summary.direction_match_rate_pct.toFixed(1)}% matched actual direction</h3>
         <span>
-          {summary.summary_label ?? `Last ${summary.sample_size} completed 12h forecasts`} checked against actual Polymarket odds.
+          {summary.summary_label ?? `Last ${summary.sample_size} completed 12h forecasts`} checked against actual Polymarket probability.
         </span>
       </div>
       <div className="market-ml-validation-stats">
@@ -968,7 +968,7 @@ function MarketMlPredictionTrendPanel({
           <p className="card-subtext">
             {activeTab === "whales"
               ? "Top 5 whales active in this market, ranked by latest trust score."
-              : "Shows when whales entered, current odds, and where the model expects odds to move in 12 and 24 hours."}
+              : "Shows how whale activity may move market probability over the next 12 and 24 hours."}
           </p>
         </div>
         <div className="market-ml-actions">
@@ -1013,7 +1013,7 @@ function MarketMlPredictionTrendPanel({
         <>
           <div className="market-ml-chart-layout">
             <div>
-              <h3>{formatLabel(primaryCases[0]?.side_label)} probability trend</h3>
+              <h3>Whale-driven probability trend</h3>
               <CurrentMarketProbabilityPanel outcomes={outcomeProbabilities} price={price} odds={odds} />
               <WhaleLeanPanel cases={cases} />
               <MarketPredictionOutcomeSummary cases={primaryCases} />
