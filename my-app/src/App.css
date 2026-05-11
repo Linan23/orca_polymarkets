@@ -3104,9 +3104,8 @@ a {
 }
 
 .page-definitions .definitions-list {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
+  columns: 2 360px;
+  column-gap: 14px;
 }
 
 .page-definitions .definition-row {
@@ -3114,7 +3113,8 @@ a {
   grid-template-columns: 1fr;
   gap: 8px;
   align-content: start;
-  min-height: 118px;
+  break-inside: avoid;
+  margin: 0 0 14px;
   padding: 18px 20px;
   border-radius: 18px;
   background: rgba(255, 255, 255, 0.055);
@@ -3142,11 +3142,7 @@ a {
   }
 
   .page-definitions .definitions-list {
-    grid-template-columns: 1fr;
-  }
-
-  .page-definitions .definition-row {
-    min-height: auto;
+    columns: 1;
   }
 }
 
