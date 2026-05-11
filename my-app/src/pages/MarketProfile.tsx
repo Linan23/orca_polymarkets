@@ -34,9 +34,15 @@ function formatSignedPoints(value: number | null | undefined, digits = 1) {
   return `${sign}${value.toFixed(digits)} points`;
 }
 
-function formatPointMagnitude(value: number | null | undefined, digits = 1) {
+function formatSignedPercentagePoints(value: number | null | undefined, digits = 1) {
   if (typeof value !== "number" || !Number.isFinite(value)) return "--";
-  return `${Math.abs(value).toFixed(digits)} points`;
+  const sign = value > 0 ? "+" : "";
+  return `${sign}${value.toFixed(digits)} percentage points`;
+}
+
+function formatPercentagePointMagnitude(value: number | null | undefined, digits = 1) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "--";
+  return `${Math.abs(value).toFixed(digits)} percentage points`;
 }
 
 function formatCompactNumber(value: number | string | null | undefined, digits = 1) {
@@ -131,32 +137,60 @@ function primaryTrendCases(cases: MarketProfileMlPredictionCase[], preferredSide
 }
 
 function forecastDirectionTag(item: MarketProfileMlPredictionCase) {
-  if (item.predicted_direction === "up") return "Expected to rise";
-  if (item.predicted_direction === "down") return "Expected to fall";
-  return "Expected to stay near current odds";
+  const sideLabel = formatLabel(item.side_label);
+  if (item.predicted_direction === "up") return `Model expects ${sideLabel} odds to rise`;
+  if (item.predicted_direction === "down") return `Model expects ${sideLabel} odds to fall`;
+  return `Model expects ${sideLabel} odds to stay near the current level`;
 }
 
-function historicalValidationTag(item: MarketProfileMlPredictionCase) {
+function forecastPlainLanguageDescription(item: MarketProfileMlPredictionCase) {
+  const sideLabel = formatLabel(item.side_label);
+  const hours = windowHours(item.window);
+  if (item.predicted_direction === "up") {
+    return `The model expects ${sideLabel} to become more likely over the next ${hours} hours.`;
+  }
+  if (item.predicted_direction === "down") {
+    return `The model expects ${sideLabel} to become less likely over the next ${hours} hours.`;
+  }
+  return `The model expects ${sideLabel} odds to stay close to the current level over the next ${hours} hours.`;
+}
+
+function historicalValidationDescription(item: MarketProfileMlPredictionCase) {
   const trainedAccuracyPct = item.validation_accuracy_pct ?? item.direction_signal_accuracy_pct;
+  if (item.historical_validation_tier === "market_closed") {
+    return "Market is closed, so this forecast is shown for validation only.";
+  }
+  if (item.historical_validation_tier === "trained_low_confidence") {
+    return "Low confidence: similar past forecasts have not been reliable enough yet.";
+  }
   if (
     item.historical_validation_tier === "trained_strong_confidence" ||
     item.historical_validation_tier === "trained_watch_confidence"
   ) {
-    return typeof trainedAccuracyPct === "number" ? `${trainedAccuracyPct.toFixed(1)}%` : "Pending";
-  }
-  if (item.historical_validation_tier === "trained_low_confidence") {
-    return typeof trainedAccuracyPct === "number" ? `Low ${trainedAccuracyPct.toFixed(1)}%` : "Low validation";
+    return typeof trainedAccuracyPct === "number"
+      ? `About ${trainedAccuracyPct.toFixed(1)}% of similar past forecasts matched the actual direction.`
+      : "Accuracy is still being validated for this forecast type.";
   }
   if (item.historical_validation_tier === "high_confidence_historical_slice") {
     const pct = item.historical_validation_direction_match_pct;
-    return typeof pct === "number" ? `${pct.toFixed(1)}%` : "Past match available";
+    return typeof pct === "number"
+      ? `About ${pct.toFixed(1)}% of similar past forecasts matched the actual direction.`
+      : "Similar past forecasts have shown useful direction matches.";
   }
-  if (item.historical_validation_tier === "strong_model_signal") return "High confidence";
-  if (item.historical_validation_tier === "review_only") return "Needs review";
-  if (item.historical_validation_tier === "insufficient_validated_accuracy") return "Limited past proof";
-  if (item.direction_signal_tier === "watch") return "Watch closely";
-  if (item.direction_signal_tier === "abstain") return "Needs review";
-  return formatLabel(item.direction_signal_tier);
+  if (item.historical_validation_tier === "strong_model_signal") {
+    return "High confidence signal; exact historical accuracy is still being validated.";
+  }
+  if (
+    item.historical_validation_tier === "review_only" ||
+    item.historical_validation_tier === "insufficient_validated_accuracy" ||
+    item.direction_signal_tier === "abstain"
+  ) {
+    return "Not enough validated history yet, so treat this as review-only.";
+  }
+  if (item.direction_signal_tier === "watch") {
+    return "Watch signal: useful direction clue, but not enough validated history yet.";
+  }
+  return "Accuracy is still being validated for this forecast type.";
 }
 
 function modelFutureOdds(item: MarketProfileMlPredictionCase) {
@@ -454,8 +488,8 @@ function MarketPredictionOutcomeSummary({ cases }: { cases: MarketProfileMlPredi
         return (
           <article className="market-ml-outcome-card" key={`outcome-${item.window}-${item.side_label}`}>
             <div className="market-ml-outcome-card-header">
-              <span>{item.window}</span>
-              <strong>Expected odds</strong>
+              <span>{formatLabel(item.side_label)} odds</span>
+              <strong>{item.window} forecast</strong>
             </div>
             <div className="market-ml-model-probability-grid">
               {predictedRows.map((row) => (
@@ -465,10 +499,17 @@ function MarketPredictionOutcomeSummary({ cases }: { cases: MarketProfileMlPredi
               ))}
             </div>
             <div className="market-ml-outcome-footer">
-              <span>Direction: {forecastDirectionTag(item)}</span>
-              <span>Historical Accuracy: {historicalValidationTag(item)}</span>
-              <span>Odds change: {formatSignedPoints(comparison?.model_predicted_delta_pts ?? modelDelta(item))}</span>
-              {hasValidation && <span>Past error: {formatPointMagnitude(comparison?.prediction_absolute_error_pts ?? item.prediction_absolute_error_pts)}</span>}
+              <span>{forecastPlainLanguageDescription(item)}</span>
+            </div>
+            <div className="market-ml-outcome-footer">
+              <span>{forecastDirectionTag(item)}</span>
+              <span>Accuracy: {historicalValidationDescription(item)}</span>
+              <span>Expected change: {formatSignedPercentagePoints(comparison?.model_predicted_delta_pts ?? modelDelta(item))}</span>
+              {hasValidation && (
+                <span>
+                  Past error: {formatPercentagePointMagnitude(comparison?.prediction_absolute_error_pts ?? item.prediction_absolute_error_pts)}
+                </span>
+              )}
             </div>
           </article>
         );
@@ -482,15 +523,15 @@ function MarketPredictionValidationSummary({ summary }: { summary?: MarketProfil
   return (
     <div className="market-ml-validation-summary">
       <div>
-        <p className="market-ml-section-label">12h validation</p>
-        <h3>{summary.direction_match_rate_pct.toFixed(1)}% trend match</h3>
+        <p className="market-ml-section-label">12h accuracy check</p>
+        <h3>{summary.direction_match_rate_pct.toFixed(1)}% matched actual direction</h3>
         <span>
-          {summary.summary_label ?? `Last ${summary.sample_size} completed 12h checks`} against actual Polymarket odds.
+          {summary.summary_label ?? `Last ${summary.sample_size} completed 12h forecasts`} checked against actual Polymarket odds.
         </span>
       </div>
       <div className="market-ml-validation-stats">
         <span>{summary.direction_match_count}/{summary.sample_size} matched</span>
-        <span>Avg error {formatPointMagnitude(summary.avg_absolute_error_pts)}</span>
+        <span>Avg error {formatPercentagePointMagnitude(summary.avg_absolute_error_pts)}</span>
       </div>
     </div>
   );
