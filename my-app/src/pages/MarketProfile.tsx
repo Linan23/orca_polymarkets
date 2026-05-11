@@ -430,13 +430,13 @@ function MarketPredictionTrendChart({ cases }: { cases: MarketProfileMlPredictio
   const minOdds = paddedMax - paddedMin < minRange ? Math.max(0, Math.floor(midpoint - minRange / 2)) : paddedMin;
   const maxOdds = paddedMax - paddedMin < minRange ? Math.min(100, Math.ceil(midpoint + minRange / 2)) : paddedMax;
   const width = 520;
-  const height = 292;
+  const height = 268;
   const left = 58;
   const right = 44;
-  const top = 18;
-  const axisLabelY = height - 6;
-  const axisY = axisLabelY - 14;
-  const plotBottom = axisY - 16;
+  const top = 16;
+  const axisLabelY = height - 3;
+  const axisY = axisLabelY - 10;
+  const plotBottom = axisY - 10;
   const plotWidth = width - left - right;
   const plotHeight = plotBottom - top;
   const yFor = (odds: number) => top + ((maxOdds - odds) / Math.max(maxOdds - minOdds, 1)) * plotHeight;
