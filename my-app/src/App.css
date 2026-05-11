@@ -4987,7 +4987,7 @@ font-weight:700;
   display: grid;
   grid-template-columns: minmax(220px, 0.8fr) minmax(0, 1.4fr);
   gap: 18px;
-  align-items: stretch;
+  align-items: start;
 }
 
 .market-ml-side-label,
@@ -5070,6 +5070,7 @@ font-weight:700;
 }
 
 .market-ml-chart-shell {
+  align-self: start;
   border: 1px solid rgba(148, 163, 184, 0.14);
   background: rgba(2, 6, 23, 0.34);
   border-radius: 18px;
@@ -5080,6 +5081,8 @@ font-weight:700;
 
 .market-ml-chart-panel {
   display: grid;
+  align-content: start;
+  align-items: start;
   gap: 12px;
   min-width: 0;
 }
@@ -5138,8 +5141,26 @@ font-weight:700;
 
 .market-ml-chart {
   width: 100%;
-  min-height: 252px;
+  min-height: 0;
   display: block;
+}
+
+.market-ml-chart-context {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  padding: 8px 4px 2px;
+}
+
+.market-ml-chart-context span {
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  background: rgba(15, 23, 42, 0.62);
+  color: #cbd5e1;
+  padding: 8px 10px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1.35;
 }
 
 .market-ml-chart line {
@@ -5511,6 +5532,10 @@ font-weight:700;
 
   .market-ml-whale-lean-header {
     flex-direction: column;
+  }
+
+  .market-ml-chart-context {
+    grid-template-columns: 1fr;
   }
 
   .market-ml-whale-meta {

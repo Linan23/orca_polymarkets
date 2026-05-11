@@ -488,6 +488,14 @@ function MarketPredictionTrendChart({ cases }: { cases: MarketProfileMlPredictio
   };
   const predictedLinePoints = predictedPoints.map((point) => `${xFor(point.hour)},${yFor(point.odds)}`).join(" ");
   const actualLinePoints = actualPoints.map((point) => `${xFor(point.hour)},${yFor(point.odds)}`).join(" ");
+  const finalForecastPoint = [...predictedPoints].sort((leftPoint, rightPoint) => leftPoint.hour - rightPoint.hour).at(-1);
+  const forecastDelta = finalForecastPoint ? finalForecastPoint.odds - entryOdds : null;
+  const forecastDirection =
+    forecastDelta === null || Math.abs(forecastDelta) < 0.05
+      ? "stay close to the entry odds"
+      : forecastDelta > 0
+        ? `rise by ${formatPercentagePointMagnitude(forecastDelta)}`
+        : `fall by ${formatPercentagePointMagnitude(forecastDelta)}`;
   return (
     <div className="market-ml-chart-shell">
       <div className="market-ml-chart-summary">
@@ -535,6 +543,13 @@ function MarketPredictionTrendChart({ cases }: { cases: MarketProfileMlPredictio
           </g>
         ))}
       </svg>
+      <div className="market-ml-chart-context">
+        <span>The line starts when whale activity was detected.</span>
+        <span>
+          Model expects {formatLabel(base.side_label)} odds to {forecastDirection} by{" "}
+          {finalForecastPoint?.hour ? `${finalForecastPoint.hour}h later` : "the forecast target"}.
+        </span>
+      </div>
     </div>
   );
 }
