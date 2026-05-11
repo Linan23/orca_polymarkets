@@ -143,15 +143,15 @@ function forecastMarketSummary(item: MarketProfileMlPredictionCase) {
   const oppositeLabel = oppositeSideLabel(item.side_label);
   const hours = windowHours(item.window);
   if (typeof futureValue !== "number" || typeof oppositeValue !== "number") {
-    return `Whale activity forecast is still being prepared for the next ${hours} hours.`;
+    return `The forecast is still being prepared for the next ${hours} hours.`;
   }
   if (futureValue > 52) {
-    return `Whale activity suggests the market is leaning ${sideLabel} over the next ${hours} hours.`;
+    return `Whale activity indicates the market may move toward ${sideLabel} in the next ${hours} hours.`;
   }
   if (oppositeValue > 52) {
-    return `Whale activity suggests the market is leaning ${oppositeLabel} over the next ${hours} hours.`;
+    return `Whale activity indicates the market may move toward ${oppositeLabel} in the next ${hours} hours.`;
   }
-  return `Whale activity suggests the market is close to balanced over the next ${hours} hours.`;
+  return `Whale activity does not show a clear market direction for the next ${hours} hours.`;
 }
 
 function historicalValidationDescription(item: MarketProfileMlPredictionCase) {
