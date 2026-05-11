@@ -5147,7 +5147,7 @@ font-weight:700;
 
 .market-ml-chart-insights {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
   padding: 8px 4px 2px;
 }
@@ -5155,11 +5155,13 @@ font-weight:700;
 .market-ml-chart-insight {
   display: grid;
   gap: 4px;
+  align-content: start;
   border-radius: 12px;
   border: 1px solid rgba(148, 163, 184, 0.14);
   background: rgba(15, 23, 42, 0.62);
   padding: 9px 10px;
   min-width: 0;
+  min-height: 94px;
 }
 
 .market-ml-chart-insight span {

@@ -78,6 +78,12 @@ function formatCurrency(value: number | null) {
   return `$${value.toLocaleString()}`;
 }
 
+function formatCount(value: number | string | null | undefined) {
+  const numeric = coerceFiniteNumber(value);
+  if (numeric === null) return "--";
+  return Math.round(numeric).toLocaleString();
+}
+
 function coerceFiniteNumber(value: number | string | null | undefined) {
   if (value === null || typeof value === "undefined" || value === "") return null;
   const numeric = typeof value === "number" ? value : Number(value);
@@ -232,44 +238,129 @@ function forecastMoveDetail(item: MarketProfileMlPredictionCase) {
   return `${sideLabel} ${delta > 0 ? "moves up" : "moves down"} ${formatPercentagePointMagnitude(delta)} to ${futureOdds}`;
 }
 
-function simpleSignalQuality(item: MarketProfileMlPredictionCase | undefined) {
-  if (!item) {
+function firstFiniteNumber(values: Array<number | string | null | undefined>) {
+  return values.map(coerceFiniteNumber).find((value): value is number => value !== null) ?? null;
+}
+
+function whalePressureInsight(item: MarketProfileMlPredictionCase, allCases: MarketProfileMlPredictionCase[]) {
+  const sideLabel = formatLabel(item.side_label);
+  const liveFeatures = item.live_window_features ?? {};
+  const whaleAnchor = item.whale_anchor ?? {};
+  const pressure = firstFiniteNumber([
+    liveFeatures["24h"]?.weighted_net_pressure,
+    liveFeatures["12h"]?.weighted_net_pressure,
+    whaleAnchor.side_net_pressure,
+  ]);
+  const pressureRatio = firstFiniteNumber([whaleAnchor.pressure_ratio]);
+  const lean = whaleLeanSummary(allCases);
+
+  if (pressure === null && !lean.leader) {
     return {
-      value: "Review",
-      detail: "Not enough forecast history yet.",
+      label: "Whale Pressure",
+      value: "Not enough data",
+      detail: "Not enough whale pressure data yet.",
     };
   }
-  if (
-    item.direction_signal_tier === "strong" ||
-    item.historical_validation_tier === "trained_strong_confidence" ||
-    item.historical_validation_tier === "high_confidence_historical_slice"
-  ) {
+
+  if (pressure !== null && Math.abs(pressure) < 0.01) {
     return {
-      value: "High confidence",
-      detail:
-        typeof (item.validation_accuracy_pct ?? item.direction_signal_accuracy_pct) === "number"
-          ? `Similar forecasts matched ${((item.validation_accuracy_pct ?? item.direction_signal_accuracy_pct) as number).toFixed(1)}% of the time.`
-          : "Similar forecasts have been the most reliable.",
+      label: "Whale Pressure",
+      value: "Mixed pressure",
+      detail: "Whale buying and selling are close to balanced.",
     };
   }
-  if (item.direction_signal_tier === "watch" || item.historical_validation_tier === "trained_watch_confidence") {
+
+  const supportsSide = pressure === null ? lean.leader?.key === normalizeSideLabel(item.side_label) : pressure > 0;
+  const strength = Math.abs(pressureRatio ?? 0);
+  const strengthLabel = strength >= 0.35 ? "Strong whale support" : strength >= 0.1 ? "Light whale support" : "Whale support";
+  return {
+    label: "Whale Pressure",
+    value: supportsSide ? strengthLabel : "Pressure against side",
+    detail: supportsSide
+      ? `Trusted whale activity is pushing toward ${sideLabel}.`
+      : `Trusted whale activity is not clearly supporting ${sideLabel}.`,
+  };
+}
+
+function netSupportInsight(item: MarketProfileMlPredictionCase) {
+  const whaleAnchor = item.whale_anchor ?? {};
+  const entryPressure = firstFiniteNumber([whaleAnchor.side_entry_pressure, whaleAnchor.recent_weighted_entry_12h]);
+  const exitPressure = firstFiniteNumber([whaleAnchor.side_exit_pressure, whaleAnchor.recent_weighted_exit_12h]);
+  const netPressure = firstFiniteNumber([whaleAnchor.side_net_pressure, whaleAnchor.recent_weighted_net_pressure_12h]);
+  const resolvedNet =
+    netPressure ?? (entryPressure !== null && exitPressure !== null ? entryPressure - exitPressure : null);
+
+  if (resolvedNet === null) {
     return {
-      value: "Watch closely",
-      detail:
-        typeof (item.validation_accuracy_pct ?? item.direction_signal_accuracy_pct) === "number"
-          ? `Similar forecasts matched ${((item.validation_accuracy_pct ?? item.direction_signal_accuracy_pct) as number).toFixed(1)}% of the time.`
-          : "Useful signal, but still needs caution.",
+      label: "Net Support",
+      value: "Not enough data",
+      detail: "Not enough whale pressure data yet.",
     };
   }
-  if (item.historical_validation_tier === "market_closed") {
+  if (Math.abs(resolvedNet) < 0.01) {
     return {
-      value: "Validation only",
-      detail: "This closed market is used to compare forecast vs actual movement.",
+      label: "Net Support",
+      value: "Balanced pressure",
+      detail: "Whale buying and selling are nearly even.",
     };
   }
   return {
-    value: "Review",
-    detail: "Limited validation history, so treat this as a weak signal.",
+    label: "Net Support",
+    value: resolvedNet > 0 ? "More whale buying" : "More whale selling",
+    detail:
+      resolvedNet > 0
+        ? "Whale entries outweigh exits on this side."
+        : "Whale exits outweigh entries on this side.",
+  };
+}
+
+function trustedActivityInsight(item: MarketProfileMlPredictionCase) {
+  const whaleAnchor = item.whale_anchor ?? {};
+  const trustedEvents = firstFiniteNumber([whaleAnchor.trusted_event_count]);
+  const totalEvents = firstFiniteNumber([whaleAnchor.event_count]);
+
+  if (trustedEvents === null && totalEvents === null) {
+    return {
+      label: "Trusted Activity",
+      value: "Not enough data",
+      detail: "Not enough whale pressure data yet.",
+    };
+  }
+  return {
+    label: "Trusted Activity",
+    value: `${formatCount(trustedEvents ?? 0)} trusted`,
+    detail: `${formatCount(totalEvents ?? trustedEvents ?? 0)} total whale signal${
+      Math.round(totalEvents ?? trustedEvents ?? 0) === 1 ? "" : "s"
+    } found for this side.`,
+  };
+}
+
+function entryStrengthInsight(item: MarketProfileMlPredictionCase) {
+  const sideLabel = formatLabel(item.side_label);
+  const entryNotional = coerceFiniteNumber(item.whale_entry_notional);
+  const weightedNotional = coerceFiniteNumber(item.whale_entry_weighted_notional);
+  const trustScore = coerceFiniteNumber(item.whale_entry_trust_score);
+  const hasTrustedEntry = item.whale_entry_is_trusted === true || (trustScore !== null && trustScore >= 1);
+
+  if (entryNotional === null && weightedNotional === null && trustScore === null) {
+    return {
+      label: "Entry Strength",
+      value: "Not enough data",
+      detail: "Not enough whale pressure data yet.",
+    };
+  }
+
+  const weightedLift =
+    entryNotional !== null && weightedNotional !== null && entryNotional > 0 ? weightedNotional / entryNotional : null;
+  const value = hasTrustedEntry ? "Trusted entry" : weightedLift !== null && weightedLift >= 1.1 ? "Weighted entry" : "Review entry";
+  const sizeText = formatCurrency(Math.round(weightedNotional ?? entryNotional ?? 0));
+  return {
+    label: "Entry Strength",
+    value,
+    detail:
+      sizeText === "$0"
+        ? `${sideLabel} entry is included in the forecast weighting.`
+        : `${sideLabel} entry carries about ${sizeText} of weighted pressure.`,
   };
 }
 
@@ -433,7 +524,6 @@ function MarketPredictionTrendChart({
   if (cases.length === 0) return null;
 
   const base = cases[0];
-  const whaleLean = whaleLeanSummary(allCases);
   const validationComparisons = cases
     .map((item) => ({ item, comparison: completedValidation(item) }))
     .filter(
@@ -559,33 +649,20 @@ function MarketPredictionTrendChart({
   const actualLinePoints = actualPoints.map((point) => `${xFor(point.hour)},${yFor(point.odds)}`).join(" ");
   const shortWindowCase = cases.find((item) => item.window === "12h") ?? cases[0];
   const longWindowCase = cases.find((item) => item.window === "24h") ?? cases.at(-1) ?? cases[0];
-  const qualityCase =
-    cases.find((item) => item.direction_signal_tier === "strong") ??
-    cases.find((item) => item.direction_signal_tier === "watch") ??
-    shortWindowCase;
-  const signalQuality = simpleSignalQuality(qualityCase);
   const forecastInsightRows = [
+    whalePressureInsight(base, allCases),
+    netSupportInsight(base),
+    trustedActivityInsight(base),
+    entryStrengthInsight(base),
     {
-      label: "Whale-driven side",
-      value: whaleLean.leader ? `Leaning ${whaleLean.leader.label}` : "Mixed lean",
-      detail: whaleLean.leader
-        ? `Trusted whale support is strongest on ${whaleLean.leader.label}.`
-        : "Whale activity is not clearly favoring one side yet.",
-    },
-    {
-      label: "12h whale forecast",
+      label: "12h Forecast",
       value: simpleForecastDirection(shortWindowCase),
       detail: forecastMoveDetail(shortWindowCase),
     },
     {
-      label: "24h whale forecast",
+      label: "24h Forecast",
       value: simpleForecastDirection(longWindowCase),
       detail: forecastMoveDetail(longWindowCase),
-    },
-    {
-      label: "Signal quality",
-      value: signalQuality.value,
-      detail: signalQuality.detail,
     },
   ];
   return (
