@@ -28,12 +28,6 @@ function formatOddsPercent(value: number | null | undefined, digits = 1) {
   return `${value.toFixed(digits)}%`;
 }
 
-function formatSignedPoints(value: number | null | undefined, digits = 1) {
-  if (typeof value !== "number" || !Number.isFinite(value)) return "--";
-  const sign = value > 0 ? "+" : "";
-  return `${sign}${value.toFixed(digits)} points`;
-}
-
 function formatSignedPercentagePoints(value: number | null | undefined, digits = 1) {
   if (typeof value !== "number" || !Number.isFinite(value)) return "--";
   const sign = value > 0 ? "+" : "";
@@ -214,7 +208,10 @@ function modelDelta(item: MarketProfileMlPredictionCase) {
 }
 
 function predictionForecastSummary(item: MarketProfileMlPredictionCase) {
-  return `${item.window} forecast ${formatOddsPercent(modelFutureOdds(item))} (${formatSignedPoints(modelDelta(item))})`;
+  const sideLabel = formatLabel(item.side_label);
+  const futureOdds = modelFutureOdds(item);
+  const oppositeOdds = complementProbability(futureOdds);
+  return `${item.window} market forecast ${sideLabel} ${formatOddsPercent(futureOdds)} / ${oppositeSideLabel(item.side_label)} ${formatOddsPercent(oppositeOdds)}`;
 }
 
 function simpleForecastDirection(item: MarketProfileMlPredictionCase) {
@@ -230,12 +227,14 @@ function simpleForecastDirection(item: MarketProfileMlPredictionCase) {
 
 function forecastMoveDetail(item: MarketProfileMlPredictionCase) {
   const sideLabel = formatLabel(item.side_label);
-  const futureOdds = formatOddsPercent(modelFutureOdds(item));
+  const futureValue = modelFutureOdds(item);
+  const futureOdds = formatOddsPercent(futureValue);
+  const oppositeOdds = formatOddsPercent(complementProbability(futureValue));
   const delta = modelDelta(item);
   if (typeof delta !== "number" || !Number.isFinite(delta) || Math.abs(delta) < 0.05) {
-    return `${sideLabel} probability stays near ${futureOdds}`;
+    return `${sideLabel} ${futureOdds} / ${oppositeSideLabel(item.side_label)} ${oppositeOdds}; market stays near current levels.`;
   }
-  return `${sideLabel} probability ${delta > 0 ? "moves up" : "moves down"} ${formatPercentagePointMagnitude(delta)} to ${futureOdds}`;
+  return `${sideLabel} ${futureOdds} / ${oppositeSideLabel(item.side_label)} ${oppositeOdds}; ${sideLabel} ${delta > 0 ? "rises" : "falls"} ${formatPercentagePointMagnitude(delta)}.`;
 }
 
 function firstFiniteNumber(values: Array<number | string | null | undefined>) {
@@ -431,6 +430,18 @@ function oppositeSideLabel(value: string | null | undefined) {
   return "Other";
 }
 
+function sideChartClass(value: string | null | undefined) {
+  const normalized = normalizeSideLabel(value);
+  if (normalized === "yes" || normalized === "up") return "is-yes";
+  if (normalized === "no" || normalized === "down") return "is-no";
+  return "is-other";
+}
+
+function complementProbability(value: number | null | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  return Math.min(Math.max(100 - value, 0), 100);
+}
+
 function binaryProbabilityRows(item: MarketProfileMlPredictionCase, value: number | null | undefined) {
   if (typeof value !== "number" || !Number.isFinite(value)) {
     return [
@@ -441,7 +452,7 @@ function binaryProbabilityRows(item: MarketProfileMlPredictionCase, value: numbe
   const sideLabel = formatLabel(item.side_label);
   return [
     { label: sideLabel, value },
-    { label: oppositeSideLabel(item.side_label), value: Math.min(Math.max(100 - value, 0), 100) },
+    { label: oppositeSideLabel(item.side_label), value: complementProbability(value) },
   ];
 }
 
@@ -538,6 +549,8 @@ function MarketPredictionTrendChart({
     ? baseComparison?.current_odds_pct ?? base.whale_entry_odds_pct ?? base.current_odds_pct ?? 50
     : base.whale_entry_odds_pct ?? base.current_odds_pct ?? 50;
   const entryTime = base.whale_entry_time ?? base.prediction_start_time ?? base.observation_time;
+  const primarySideLabel = formatLabel(base.side_label);
+  const oppositeLabel = oppositeSideLabel(base.side_label);
   const forecastSummaries = cases
     .filter((item) => typeof modelFutureOdds(item) === "number")
     .map(predictionForecastSummary);
@@ -573,13 +586,49 @@ function MarketPredictionTrendChart({
           odds: item.actual_future_odds_pct ?? entryOdds,
           label: item.window,
         }));
+  const oppositePredictedPoints = predictedPoints.map((point) => ({
+    ...point,
+    odds: complementProbability(point.odds) ?? 0,
+  }));
+  const oppositeActualPoints = actualPoints.map((point) => ({
+    ...point,
+    odds: complementProbability(point.odds) ?? 0,
+  }));
+  const predictedSeries = [
+    {
+      label: primarySideLabel,
+      points: predictedPoints,
+      className: sideChartClass(base.side_label),
+      preferredSide: "above" as const,
+    },
+    {
+      label: oppositeLabel,
+      points: oppositePredictedPoints,
+      className: sideChartClass(oppositeLabel),
+      preferredSide: "below" as const,
+    },
+  ];
+  const actualSeries = [
+    {
+      label: primarySideLabel,
+      points: actualPoints,
+      className: sideChartClass(base.side_label),
+    },
+    {
+      label: oppositeLabel,
+      points: oppositeActualPoints,
+      className: sideChartClass(oppositeLabel),
+    },
+  ].filter((series) => series.points.length > 0);
   const intervalValues = cases.flatMap((item) => [
     item.interval_low_future_odds_pct,
     item.interval_high_future_odds_pct,
   ]);
-  const values = [...predictedPoints.map((point) => point.odds), ...actualPoints.map((point) => point.odds), ...intervalValues].filter(
-    (value): value is number => typeof value === "number" && Number.isFinite(value),
-  );
+  const values = [
+    ...predictedSeries.flatMap((series) => series.points.map((point) => point.odds)),
+    ...actualSeries.flatMap((series) => series.points.map((point) => point.odds)),
+    ...intervalValues,
+  ].filter((value): value is number => typeof value === "number" && Number.isFinite(value));
   const rawMin = Math.min(...values);
   const rawMax = Math.max(...values);
   const paddedMin = Math.max(0, Math.floor(rawMin - 6));
@@ -601,8 +650,8 @@ function MarketPredictionTrendChart({
   const yFor = (odds: number) => top + ((maxOdds - odds) / Math.max(maxOdds - minOdds, 1)) * plotHeight;
   const xFor = (hour: number) => left + (Math.min(Math.max(hour, 0), 24) / 24) * plotWidth;
   const lineOddsAtHour = (hour: number) => [
-    ...predictedPoints.filter((point) => point.hour === hour).map((point) => point.odds),
-    ...actualPoints.filter((point) => point.hour === hour).map((point) => point.odds),
+    ...predictedSeries.flatMap((series) => series.points.filter((point) => point.hour === hour).map((point) => point.odds)),
+    ...actualSeries.flatMap((series) => series.points.filter((point) => point.hour === hour).map((point) => point.odds)),
   ];
   const pointTextProps = (hour: number, odds: number, preferredSide: "above" | "below") => {
     const x = xFor(hour);
@@ -645,8 +694,8 @@ function MarketPredictionTrendChart({
     if (hour === 24) return { x: x - 4, textAnchor: "end" } as const;
     return { x, textAnchor: "middle" } as const;
   };
-  const predictedLinePoints = predictedPoints.map((point) => `${xFor(point.hour)},${yFor(point.odds)}`).join(" ");
-  const actualLinePoints = actualPoints.map((point) => `${xFor(point.hour)},${yFor(point.odds)}`).join(" ");
+  const linePoints = (points: Array<{ hour: number; odds: number }>) =>
+    points.map((point) => `${xFor(point.hour)},${yFor(point.odds)}`).join(" ");
   const shortWindowCase = cases.find((item) => item.window === "12h") ?? cases[0];
   const longWindowCase = cases.find((item) => item.window === "24h") ?? cases.at(-1) ?? cases[0];
   const forecastInsightRows = [
@@ -669,17 +718,22 @@ function MarketPredictionTrendChart({
     <div className="market-ml-chart-shell">
       <div className="market-ml-chart-summary">
         <span>Whale entered {formatDateTime(entryTime)}</span>
-        <span>Starting {formatLabel(base.side_label)} probability {formatOddsPercent(entryOdds)}</span>
+        <span>
+          Starting market probability {primarySideLabel} {formatOddsPercent(entryOdds)} / {oppositeLabel}{" "}
+          {formatOddsPercent(complementProbability(entryOdds))}
+        </span>
         {forecastSummaries.map((summary) => (
           <span key={summary}>{summary}</span>
         ))}
       </div>
-      {actualPoints.length > 0 && (
-        <div className="market-ml-chart-legend">
-          <span><i className="market-ml-legend-predicted" /> Whale forecast</span>
-          <span><i className="market-ml-legend-actual" /> Actual probability</span>
-        </div>
-      )}
+      <div className="market-ml-chart-legend">
+        {predictedSeries.map((series) => (
+          <span key={`legend-${series.label}`}>
+            <i className={`market-ml-legend-predicted ${series.className}`} /> {series.label} whale forecast
+          </span>
+        ))}
+        {actualPoints.length > 0 && <span><i className="market-ml-legend-actual" /> Actual probability</span>}
+      </div>
       <svg className="market-ml-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Whale-driven probability forecast">
         {[minOdds, Math.round((minOdds + maxOdds) / 2), maxOdds].map((odds) => (
           <g key={`grid-${odds}`}>
@@ -693,24 +747,37 @@ function MarketPredictionTrendChart({
             {hour === 0 ? "Start" : `${hour}h later`}
           </text>
         ))}
-        <polyline className="market-ml-chart-line" points={predictedLinePoints} />
-        {actualLinePoints && <polyline className="market-ml-chart-line market-ml-chart-actual-line" points={actualLinePoints} />}
-        {predictedPoints.map((point) => (
-          <g key={`${point.label}-${point.hour}`}>
-            <circle cx={xFor(point.hour)} cy={yFor(point.odds)} r={point.hour === 0 ? 4 : 6} />
-            <text className="market-ml-point-label" {...pointTextProps(point.hour, point.odds, "above")}>
-              {formatOddsPercent(point.odds)}
-            </text>
-          </g>
+        {predictedSeries.map((series) => (
+          <polyline
+            className={`market-ml-chart-line ${series.className}`}
+            key={`forecast-line-${series.label}`}
+            points={linePoints(series.points)}
+          />
         ))}
-        {actualPoints.map((point) => (
-          <g key={`actual-${point.label}-${point.hour}`}>
-            <circle className="market-ml-chart-actual-dot" cx={xFor(point.hour)} cy={yFor(point.odds)} r={5} />
-            <text className="market-ml-point-label" {...pointTextProps(point.hour, point.odds, "below")}>
-              {formatOddsPercent(point.odds)}
-            </text>
-          </g>
+        {actualSeries.map((series) => (
+          <polyline
+            className={`market-ml-chart-line market-ml-chart-actual-line ${series.className}`}
+            key={`actual-line-${series.label}`}
+            points={linePoints(series.points)}
+          />
         ))}
+        {predictedSeries.flatMap((series) =>
+          series.points.map((point) => (
+            <g key={`${series.label}-${point.label}-${point.hour}`}>
+              <circle className={series.className} cx={xFor(point.hour)} cy={yFor(point.odds)} r={point.hour === 0 ? 4 : 6} />
+              <text className="market-ml-point-label" {...pointTextProps(point.hour, point.odds, series.preferredSide)}>
+                {series.label} {formatOddsPercent(point.odds)}
+              </text>
+            </g>
+          )),
+        )}
+        {actualSeries.flatMap((series) =>
+          series.points.map((point) => (
+            <g key={`actual-${series.label}-${point.label}-${point.hour}`}>
+              <circle className={`market-ml-chart-actual-dot ${series.className}`} cx={xFor(point.hour)} cy={yFor(point.odds)} r={4} />
+            </g>
+          )),
+        )}
       </svg>
       <div className="market-ml-chart-insights" aria-label="Whale trend forecast summary">
         {forecastInsightRows.map((row) => (
@@ -1013,7 +1080,7 @@ function MarketMlPredictionTrendPanel({
         <>
           <div className="market-ml-chart-layout">
             <div>
-              <h3>Whale-driven probability trend</h3>
+              <h3>Whale-driven market forecast</h3>
               <CurrentMarketProbabilityPanel outcomes={outcomeProbabilities} price={price} odds={odds} />
               <WhaleLeanPanel cases={cases} />
               <MarketPredictionOutcomeSummary cases={primaryCases} />

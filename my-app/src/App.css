@@ -5139,6 +5139,18 @@ font-weight:700;
   background: #2dd4bf;
 }
 
+.market-ml-legend-predicted.is-yes {
+  background: #34d399;
+}
+
+.market-ml-legend-predicted.is-no {
+  background: #fb7185;
+}
+
+.market-ml-legend-predicted.is-other {
+  background: #38bdf8;
+}
+
 .market-ml-legend-actual {
   background: #f59e0b;
 }
@@ -5227,6 +5239,18 @@ font-weight:700;
   stroke-width: 2;
 }
 
+.market-ml-chart circle.is-yes {
+  fill: #34d399;
+}
+
+.market-ml-chart circle.is-no {
+  fill: #fb7185;
+}
+
+.market-ml-chart circle.is-other {
+  fill: #38bdf8;
+}
+
 .market-ml-chart-line {
   fill: none;
   stroke: #2dd4bf;
@@ -5235,13 +5259,39 @@ font-weight:700;
   stroke-linejoin: round;
 }
 
+.market-ml-chart-line.is-yes {
+  stroke: #34d399;
+}
+
+.market-ml-chart-line.is-no {
+  stroke: #fb7185;
+}
+
+.market-ml-chart-line.is-other {
+  stroke: #38bdf8;
+}
+
 .market-ml-chart-actual-line {
   stroke: #f59e0b;
   stroke-dasharray: 7 5;
+  opacity: 0.72;
 }
 
 .market-ml-chart-actual-dot {
-  fill: #f59e0b !important;
+  fill: #f59e0b;
+  opacity: 0.82;
+}
+
+.market-ml-chart-actual-dot.is-yes {
+  fill: #34d399;
+}
+
+.market-ml-chart-actual-dot.is-no {
+  fill: #fb7185;
+}
+
+.market-ml-chart-actual-dot.is-other {
+  fill: #38bdf8;
 }
 
 .market-ml-axis-label {
