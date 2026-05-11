@@ -279,7 +279,7 @@ useEffect(() => {
   <h2>How the ML Works</h2>
 </div>
 
-          <div className="definitions-list">
+          <div className="definitions-list definitions-list-ml">
   {slides[1].definitions?.map((item) => (
     <div className="definition-row" key={item.term}>
       <h3>{item.term}</h3>

@@ -3105,7 +3105,15 @@ a {
 
 .page-definitions .definitions-list {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  grid-template-columns: 1fr;
+  gap: 9px;
+  max-width: 860px;
+  margin: 0 auto;
+}
+
+.page-definitions .definitions-list.definitions-list-ml {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  max-width: none;
   gap: 10px;
 }
 
@@ -3143,6 +3151,10 @@ a {
   }
 
   .page-definitions .definitions-list {
+    grid-template-columns: 1fr;
+  }
+
+  .page-definitions .definitions-list.definitions-list-ml {
     grid-template-columns: 1fr;
   }
 }
