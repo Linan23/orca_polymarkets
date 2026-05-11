@@ -365,12 +365,12 @@ function trustedActivityInsight(base: MarketProfileMlPredictionCase, allCases: M
     };
   }
 
-  const trustedText = sides.map((side) => `${side.label} ${formatCount(side.trusted)}`).join(" / ");
-  const totalText = sides.map((side) => `${side.label} ${formatCount(side.total)}`).join(" / ");
+  const trustedText = sides.map((side) => `${side.label} ${formatCount(side.trusted)}`).join(", ");
+  const totalText = sides.map((side) => `${side.label} ${formatCount(side.total)}`).join(", ");
   return {
     label: "Trusted Activity",
-    value: `${trustedText} trusted`,
-    detail: `Total whale signals: ${totalText}.`,
+    value: `Trusted whales: ${trustedText}`,
+    detail: `All whale signals: ${totalText}`,
   };
 }
 
