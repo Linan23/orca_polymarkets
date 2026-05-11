@@ -416,6 +416,41 @@ def _live_market_payload(live_market: LivePolymarketMarket) -> dict[str, Any]:
     }
 
 
+def _live_market_result_label(live_market: LivePolymarketMarket) -> str:
+    """Return a compact resolved-result label from a closed live Gamma market."""
+    if not live_market.closed:
+        return "Closed"
+    return live_market.primary_side_label() or "Closed"
+
+
+def _apply_live_polymarket_following_card_overlay(card: dict[str, Any]) -> dict[str, Any]:
+    """Mark a followed-market card closed when live Gamma has newer status than the DB."""
+    if card.get("market_status_label") == "Closed":
+        return card
+
+    live_market = fetch_live_polymarket_market_by_slug(str(card.get("market_slug") or ""))
+    if live_market is None or not live_market.closed:
+        return card
+
+    if live_market.question:
+        card["question"] = live_market.question
+    if live_market.last_trade_price is not None:
+        card["price"] = live_market.last_trade_price
+    card["market_url"] = live_market.market_url
+    card["market_status_label"] = "Closed"
+    card["database_is_closed"] = False
+    card["closed_status_source"] = "polymarket_gamma_live"
+    card["closed_time"] = (
+        live_market.closed_time.isoformat()
+        if live_market.closed_time
+        else live_market.observed_at.isoformat()
+        if live_market.observed_at
+        else None
+    )
+    card["result_label"] = _live_market_result_label(live_market)
+    return card
+
+
 def _apply_live_polymarket_profile_overlay(
     payload: dict[str, Any],
     *,
@@ -3586,13 +3621,16 @@ def following_market_cards(
 
     for row in latest_dashboard_rows:
         normalized_slug = row["normalized_slug"]
+        database_is_closed = bool(row["is_closed"])
         cards_by_slug[normalized_slug] = {
             "market_slug": row["market_slug"] or normalized_slug,
             "question": row["question"] or row["market_slug"] or normalized_slug,
             "price": float(row["price"]) if row["price"] is not None else None,
             "whale_count": int(row["whale_count"] or 0),
             "trusted_whale_count": int(row["trusted_whale_count"] or 0),
-            "market_status_label": _market_status_label(row["is_closed"]),
+            "market_status_label": _market_status_label(database_is_closed),
+            "database_is_closed": database_is_closed,
+            "closed_status_source": "database" if database_is_closed else None,
         }
 
     remaining_market_slugs = [slug for slug in normalized_market_slugs if slug not in cards_by_slug]
@@ -3645,13 +3683,16 @@ def following_market_cards(
 
         for row in historical_rows:
             normalized_slug = row["normalized_slug"]
+            database_is_closed = bool(row["is_closed"])
             cards_by_slug[normalized_slug] = {
                 "market_slug": row["market_slug"] or normalized_slug,
                 "question": row["question"] or row["market_slug"] or normalized_slug,
                 "price": float(row["price"]) if row["price"] is not None else None,
                 "whale_count": int(row["whale_count"] or 0),
                 "trusted_whale_count": int(row["trusted_whale_count"] or 0),
-                "market_status_label": _market_status_label(row["is_closed"]),
+                "market_status_label": _market_status_label(database_is_closed),
+                "database_is_closed": database_is_closed,
+                "closed_status_source": "database" if database_is_closed else None,
             }
 
     remaining_market_slugs = [slug for slug in normalized_market_slugs if slug not in cards_by_slug]
@@ -3694,17 +3735,20 @@ def following_market_cards(
 
         for row in contract_rows:
             normalized_slug = row["normalized_slug"]
+            database_is_closed = bool(row["is_closed"])
             cards_by_slug[normalized_slug] = {
                 "market_slug": row["market_slug"] or normalized_slug,
                 "question": row["question"] or row["market_slug"] or normalized_slug,
                 "price": float(row["price"]) if row["price"] is not None else None,
                 "whale_count": 0,
                 "trusted_whale_count": 0,
-                "market_status_label": _market_status_label(row["is_closed"]),
+                "market_status_label": _market_status_label(database_is_closed),
+                "database_is_closed": database_is_closed,
+                "closed_status_source": "database" if database_is_closed else None,
             }
 
     return [
-        cards_by_slug[market_slug]
+        _apply_live_polymarket_following_card_overlay(cards_by_slug[market_slug])
         for market_slug in normalized_market_slugs
         if market_slug in cards_by_slug
     ]
@@ -3730,9 +3774,47 @@ def following_dashboard(
         for item in overview.get("recent_closed_markets", [])
         if isinstance(item, dict)
     }
+    recent_closed_markets = [
+        item for item in overview.get("recent_closed_markets", []) if isinstance(item, dict)
+    ]
+    additional_live_closed_count = 0
     for market in markets:
-        if str(market.get("market_slug") or "").strip().casefold() in closed_market_slugs:
+        normalized_market_slug = str(market.get("market_slug") or "").strip().casefold()
+        if normalized_market_slug in closed_market_slugs:
             market["market_status_label"] = "Closed"
+            continue
+        if market.get("market_status_label") != "Closed":
+            continue
+
+        closed_market_slugs.add(normalized_market_slug)
+        if market.get("closed_status_source") == "polymarket_gamma_live" and not market.get("database_is_closed"):
+            additional_live_closed_count += 1
+        recent_closed_markets.append(
+            {
+                "market_slug": market.get("market_slug"),
+                "question": market.get("question"),
+                "closed_time": market.get("closed_time"),
+                "result_label": market.get("result_label") or "Closed",
+                "market_status_label": "Closed",
+            }
+        )
+
+    if additional_live_closed_count:
+        overview_summary = overview.get("summary")
+        if isinstance(overview_summary, dict):
+            overview_summary["recent_closed_followed_market_count"] = int(
+                overview_summary.get("recent_closed_followed_market_count") or 0
+            ) + additional_live_closed_count
+
+    if recent_closed_markets:
+        overview["recent_closed_markets"] = sorted(
+            recent_closed_markets,
+            key=lambda item: str(item.get("closed_time") or ""),
+            reverse=True,
+        )[:5]
+        for market in markets:
+            if str(market.get("market_slug") or "").strip().casefold() in closed_market_slugs:
+                market["market_status_label"] = "Closed"
     return {
         "overview": overview,
         "users": following_user_cards(session, user_ids=normalized_user_ids),

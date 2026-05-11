@@ -225,9 +225,9 @@ function buildRecentMarketFocusRows(items: FollowedTraderFocusRow[]): FollowingM
       total_focus_value: current.total_focus_value + item.focus_value,
       latest_activity_time: nextLatestTime,
       market_status_label:
-        current.market_status_label === "Open" || item.market_status_label === "Open"
-          ? "Open"
-          : "Closed",
+        current.market_status_label === "Closed" || item.market_status_label === "Closed"
+          ? "Closed"
+          : "Open",
     });
   });
 
