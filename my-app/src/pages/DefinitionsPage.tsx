@@ -1,6 +1,6 @@
 
 import TopNavbar from "../homepage/TopNavbar";
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 
 
@@ -181,6 +181,7 @@ export default function DefinitionsPage() {
 
 const [activeSlide, setActiveSlide] = useState(0);
 const [activeSlideHeight, setActiveSlideHeight] = useState<number | null>(null);
+const carouselTopRef = useRef<HTMLDivElement | null>(null);
 const slideRefs = useRef<Array<HTMLDivElement | null>>([]);
 
 useLayoutEffect(() => {
@@ -200,6 +201,10 @@ useLayoutEffect(() => {
     window.removeEventListener("resize", updateHeight);
     observer?.disconnect();
   };
+}, [activeSlide]);
+
+useEffect(() => {
+  carouselTopRef.current?.scrollIntoView({ block: "start", behavior: "auto" });
 }, [activeSlide]);
 
   return (
@@ -229,7 +234,7 @@ useLayoutEffect(() => {
       </section>
 
 <section className="definitions-section">
-  <div className="carousel-container">
+  <div className="carousel-container" ref={carouselTopRef}>
     <button
       className="carousel-btn left"
       onClick={() => setActiveSlide((prev) => Math.max(prev - 1, 0))}
