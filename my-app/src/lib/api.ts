@@ -481,6 +481,9 @@ export type MarketConcentrationRow = {
   read_time: string | null;
   last_entry_time: string | null;
   market_status_label: "Open" | "Closed";
+  database_is_closed?: boolean;
+  closed_status_source?: "database" | "polymarket_gamma_live" | null;
+  closed_time?: string | null;
   whale_bias_label: string;
 };
 

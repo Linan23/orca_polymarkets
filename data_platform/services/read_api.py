@@ -451,6 +451,59 @@ def _apply_live_polymarket_following_card_overlay(card: dict[str, Any]) -> dict[
     return card
 
 
+def _closed_time_from_live_market(live_market: LivePolymarketMarket) -> str | None:
+    """Return the best serialized close timestamp from a live Gamma market."""
+    if live_market.closed_time:
+        return live_market.closed_time.isoformat()
+    if live_market.observed_at:
+        return live_market.observed_at.isoformat()
+    return None
+
+
+def _apply_live_polymarket_market_status_overlay(row: dict[str, Any]) -> dict[str, Any]:
+    """Correct an open market row when live Gamma says the market is closed."""
+    if row.get("market_status_label") == "Closed":
+        return row
+
+    live_market = fetch_live_polymarket_market_by_slug(str(row.get("market_slug") or ""))
+    if live_market is None or live_market.closed is not True:
+        return row
+
+    updated = dict(row)
+    if live_market.question:
+        updated["question"] = live_market.question
+    if live_market.last_trade_price is not None:
+        updated["price"] = live_market.last_trade_price
+    if live_market.volume is not None:
+        updated["volume"] = live_market.volume
+    updated["market_url"] = live_market.market_url
+    updated["market_status_label"] = "Closed"
+    updated["database_is_closed"] = False
+    updated["closed_status_source"] = "polymarket_gamma_live"
+    updated["closed_time"] = _closed_time_from_live_market(live_market)
+    return updated
+
+
+def _apply_live_polymarket_market_concentration_overlay(payload: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Apply live closed-status corrections to market concentration payload rows."""
+    if payload is None:
+        return None
+    items = payload.get("items")
+    if not isinstance(items, list):
+        return payload
+
+    updated_payload = dict(payload)
+    updated_items: list[Any] = []
+    for item in items:
+        if isinstance(item, dict):
+            updated_items.append(_apply_live_polymarket_market_status_overlay(item))
+        else:
+            updated_items.append(item)
+    updated_payload["items"] = updated_items
+    updated_payload["count"] = len(updated_items)
+    return updated_payload
+
+
 def _apply_live_polymarket_profile_overlay(
     payload: dict[str, Any],
     *,
@@ -2284,8 +2337,10 @@ def market_whale_concentration(
         limit=limit,
     )
     if cached_payload is not None:
-        return _with_current_whale_status(cached_payload)
-    return _live_market_whale_concentration(session, limit=limit, timeframe=timeframe)
+        return _apply_live_polymarket_market_concentration_overlay(_with_current_whale_status(cached_payload))
+    return _apply_live_polymarket_market_concentration_overlay(
+        _live_market_whale_concentration(session, limit=limit, timeframe=timeframe)
+    )
 
 
 def _live_market_whale_concentration(
