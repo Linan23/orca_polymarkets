@@ -488,14 +488,32 @@ function MarketPredictionTrendChart({ cases }: { cases: MarketProfileMlPredictio
   };
   const predictedLinePoints = predictedPoints.map((point) => `${xFor(point.hour)},${yFor(point.odds)}`).join(" ");
   const actualLinePoints = actualPoints.map((point) => `${xFor(point.hour)},${yFor(point.odds)}`).join(" ");
-  const finalForecastPoint = [...predictedPoints].sort((leftPoint, rightPoint) => leftPoint.hour - rightPoint.hour).at(-1);
-  const forecastDelta = finalForecastPoint ? finalForecastPoint.odds - entryOdds : null;
-  const forecastDirection =
-    forecastDelta === null || Math.abs(forecastDelta) < 0.05
-      ? "stay close to the entry odds"
-      : forecastDelta > 0
-        ? `rise by ${formatPercentagePointMagnitude(forecastDelta)}`
-        : `fall by ${formatPercentagePointMagnitude(forecastDelta)}`;
+  const forecastInsightRows = [
+    {
+      label: "Whale entry",
+      value: formatDateTime(entryTime),
+      detail: `${formatLabel(base.side_label)} started at ${formatOddsPercent(entryOdds)}`,
+    },
+    ...cases
+      .filter((item) => typeof modelFutureOdds(item) === "number")
+      .sort((leftCase, rightCase) => windowHours(leftCase.window) - windowHours(rightCase.window))
+      .slice(0, 2)
+      .map((item) => {
+        const futureOdds = modelFutureOdds(item);
+        const delta = modelDelta(item);
+        const direction =
+          delta === null || typeof delta === "undefined" || Math.abs(delta) < 0.05
+            ? "stays near current odds"
+            : delta > 0
+              ? `moves up ${formatPercentagePointMagnitude(delta)}`
+              : `moves down ${formatPercentagePointMagnitude(delta)}`;
+        return {
+          label: `${item.window} outlook`,
+          value: formatOddsPercent(futureOdds),
+          detail: `${formatLabel(item.side_label)} ${direction}`,
+        };
+      }),
+  ];
   return (
     <div className="market-ml-chart-shell">
       <div className="market-ml-chart-summary">
@@ -543,12 +561,14 @@ function MarketPredictionTrendChart({ cases }: { cases: MarketProfileMlPredictio
           </g>
         ))}
       </svg>
-      <div className="market-ml-chart-context">
-        <span>The line starts when whale activity was detected.</span>
-        <span>
-          Model expects {formatLabel(base.side_label)} odds to {forecastDirection} by{" "}
-          {finalForecastPoint?.hour ? `${finalForecastPoint.hour}h later` : "the forecast target"}.
-        </span>
+      <div className="market-ml-chart-insights" aria-label="Whale trend forecast summary">
+        {forecastInsightRows.map((row) => (
+          <div className="market-ml-chart-insight" key={`${row.label}-${row.value}`}>
+            <span>{row.label}</span>
+            <strong>{row.value}</strong>
+            <p>{row.detail}</p>
+          </div>
+        ))}
       </div>
     </div>
   );

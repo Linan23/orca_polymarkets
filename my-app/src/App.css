@@ -5145,22 +5145,43 @@ font-weight:700;
   display: block;
 }
 
-.market-ml-chart-context {
+.market-ml-chart-insights {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
   padding: 8px 4px 2px;
 }
 
-.market-ml-chart-context span {
+.market-ml-chart-insight {
+  display: grid;
+  gap: 4px;
   border-radius: 12px;
   border: 1px solid rgba(148, 163, 184, 0.14);
   background: rgba(15, 23, 42, 0.62);
+  padding: 9px 10px;
+  min-width: 0;
+}
+
+.market-ml-chart-insight span {
   color: #cbd5e1;
-  padding: 8px 10px;
-  font-size: 0.78rem;
+  font-size: 0.72rem;
+  font-weight: 800;
+  line-height: 1.2;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.market-ml-chart-insight strong {
+  color: #f8fafc;
+  font-size: 0.94rem;
   font-weight: 700;
-  line-height: 1.35;
+}
+
+.market-ml-chart-insight p {
+  margin: 0;
+  color: #94a3b8;
+  font-size: 0.76rem;
+  line-height: 1.3;
 }
 
 .market-ml-chart line {
@@ -5534,7 +5555,7 @@ font-weight:700;
     flex-direction: column;
   }
 
-  .market-ml-chart-context {
+  .market-ml-chart-insights {
     grid-template-columns: 1fr;
   }
 
