@@ -78,6 +78,19 @@ function formatCurrency(value: number | null) {
   return `$${value.toLocaleString()}`;
 }
 
+function coerceFiniteNumber(value: number | string | null | undefined) {
+  if (value === null || typeof value === "undefined" || value === "") return null;
+  const numeric = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function formatWeightedPressure(value: number | null | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "--";
+  return value.toLocaleString(undefined, {
+    maximumFractionDigits: Math.abs(value) >= 100 ? 0 : 1,
+  });
+}
+
 function polymarketMarketUrl(marketUrl: string | null | undefined, marketSlug: string | null | undefined) {
   if (marketUrl) {
     try {
@@ -203,6 +216,56 @@ function modelDelta(item: MarketProfileMlPredictionCase) {
 
 function predictionForecastSummary(item: MarketProfileMlPredictionCase) {
   return `${item.window} forecast ${formatOddsPercent(modelFutureOdds(item))} (${formatSignedPoints(modelDelta(item))})`;
+}
+
+type WhaleLeanSide = {
+  key: string;
+  label: string;
+  score: number;
+};
+
+function whaleLeanScore(item: MarketProfileMlPredictionCase) {
+  const liveFeatures = item.live_window_features ?? {};
+  const whaleAnchor = item.whale_anchor ?? {};
+  const candidates = [
+    coerceFiniteNumber(liveFeatures["24h"]?.weighted_net_pressure),
+    coerceFiniteNumber(liveFeatures["12h"]?.weighted_net_pressure),
+    coerceFiniteNumber(whaleAnchor.side_total_pressure),
+    coerceFiniteNumber(item.whale_entry_weighted_notional),
+  ];
+  return candidates.find((value): value is number => typeof value === "number") ?? null;
+}
+
+function whaleLeanSides(cases: MarketProfileMlPredictionCase[]) {
+  const bySide = new Map<string, WhaleLeanSide>();
+  cases.forEach((item) => {
+    const key = normalizeSideLabel(item.side_label);
+    if (!key) return;
+    const rawScore = whaleLeanScore(item);
+    if (rawScore === null) return;
+    const score = Math.max(rawScore, 0);
+    const current = bySide.get(key);
+    if (!current || score > current.score) {
+      bySide.set(key, {
+        key,
+        label: formatLabel(item.side_label),
+        score,
+      });
+    }
+  });
+  return [...bySide.values()].sort((left, right) => right.score - left.score);
+}
+
+function whaleLeanSummary(cases: MarketProfileMlPredictionCase[]) {
+  const sides = whaleLeanSides(cases);
+  const leader = sides[0];
+  const runnerUp = sides[1];
+  const hasClearLean = Boolean(leader && leader.score > 0 && (!runnerUp || leader.score > runnerUp.score));
+  return {
+    sides,
+    leader: hasClearLean ? leader : null,
+    maxScore: Math.max(...sides.map((side) => side.score), 0),
+  };
 }
 
 function oppositeSideLabel(value: string | null | undefined) {
@@ -475,6 +538,52 @@ function MarketPredictionTrendChart({ cases }: { cases: MarketProfileMlPredictio
   );
 }
 
+function WhaleLeanPanel({ cases }: { cases: MarketProfileMlPredictionCase[] }) {
+  const summary = whaleLeanSummary(cases);
+  if (summary.sides.length === 0) {
+    return (
+      <div className="market-ml-whale-lean-panel">
+        <div>
+          <p className="market-ml-side-label">Whale Lean</p>
+          <h4>Whale lean is mixed</h4>
+          <span>No clear side has stronger trusted whale pressure yet.</span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="market-ml-whale-lean-panel">
+      <div className="market-ml-whale-lean-header">
+        <div>
+          <p className="market-ml-side-label">Whale Lean</p>
+          <h4>{summary.leader ? `Whales leaning ${summary.leader.label}` : "Whale lean is mixed"}</h4>
+          <span>
+            {summary.leader
+              ? `Trust-weighted whale pressure is stronger on ${summary.leader.label}.`
+              : "No clear side has stronger trusted whale pressure yet."}
+          </span>
+        </div>
+        <span className="market-ml-whale-lean-pill">Weighted pressure</span>
+      </div>
+      <div className="market-ml-whale-lean-bars">
+        {summary.sides.map((side) => {
+          const width = summary.maxScore > 0 ? Math.max(6, Math.round((side.score / summary.maxScore) * 100)) : 0;
+          return (
+            <div className="market-ml-whale-lean-row" key={side.key}>
+              <span>{side.label}</span>
+              <div className="market-ml-whale-lean-track" aria-hidden="true">
+                <i style={{ width: `${width}%` }} />
+              </div>
+              <strong>{formatWeightedPressure(side.score)}</strong>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function MarketPredictionOutcomeSummary({ cases }: { cases: MarketProfileMlPredictionCase[] }) {
   if (cases.length === 0) return null;
 
@@ -719,6 +828,7 @@ function MarketMlPredictionTrendPanel({
             <div>
               <h3>{formatLabel(primaryCases[0]?.side_label)} probability trend</h3>
               <CurrentMarketProbabilityPanel outcomes={outcomeProbabilities} price={price} odds={odds} />
+              <WhaleLeanPanel cases={cases} />
               <MarketPredictionOutcomeSummary cases={primaryCases} />
             </div>
             <div className="market-ml-chart-panel">
