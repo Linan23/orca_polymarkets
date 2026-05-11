@@ -3079,14 +3079,14 @@ a {
 }
 
 .definitions-section {
-  padding: 110px 24px;
+  padding: 90px 24px 120px;
   display: flex;
   justify-content: center;
 }
 
 .definitions-panel {
-  width: min(980px, 100%);
-  padding: 44px;
+  width: min(1120px, 100%);
+  padding: clamp(26px, 3vw, 38px);
   border-radius: 32px;
   background: rgba(255, 255, 255, 0.045);
   border: 1px solid rgba(255, 255, 255, 0.1);
@@ -3094,7 +3094,7 @@ a {
 
 .definitions-panel-header {
   text-align: center;
-  margin-bottom: 34px;
+  margin-bottom: 28px;
 }
 
 .definitions-panel-header h2 {
@@ -3103,29 +3103,32 @@ a {
   letter-spacing: -0.04em;
 }
 
-.definitions-list {
+.page-definitions .definitions-list {
   display: grid;
-  gap: 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
 }
 
-.definition-row {
+.page-definitions .definition-row {
   display: grid;
-  grid-template-columns: 180px 1fr;
-  gap: 28px;
-  padding: 24px 28px;
-  border-radius: 22px;
+  grid-template-columns: 1fr;
+  gap: 8px;
+  align-content: start;
+  min-height: 118px;
+  padding: 18px 20px;
+  border-radius: 18px;
   background: rgba(255, 255, 255, 0.055);
   border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-.definition-row h3 {
+.page-definitions .definition-row h3 {
   margin: 0;
-  font-size: 1.1rem;
+  font-size: 1rem;
 }
 
-.definition-row p {
+.page-definitions .definition-row p {
   margin: 0;
-  line-height: 1.7;
+  line-height: 1.55;
   color: rgba(255, 255, 255, 0.74);
 }
 
@@ -3138,9 +3141,12 @@ a {
     padding: 24px;
   }
 
-  .definition-row {
+  .page-definitions .definitions-list {
     grid-template-columns: 1fr;
-    gap: 8px;
+  }
+
+  .page-definitions .definition-row {
+    min-height: auto;
   }
 }
 
@@ -5438,7 +5444,8 @@ font-weight:700;
 .carousel-container {
   position: relative;
   overflow: hidden;
-  max-width: 1100px;
+  width: min(1240px, 100%);
+  max-width: 1240px;
   margin: 0 auto;
 }
 
@@ -5451,13 +5458,13 @@ font-weight:700;
   min-width: 100%;
   display: flex;
   justify-content: center; /* centers card */
-  padding: 50px 0;
+  padding: 36px 72px 58px;
 }
 
 /* 🔥 main card */
 .carousel-card {
-  width: 70%;        
-  max-width: 1000px;     
+  width: 100%;
+  max-width: 1120px;
   padding: 28px;
 
   border-radius: 22px;
@@ -5503,7 +5510,7 @@ font-weight:700;
 }
 
 .carousel-btn.left {
-  left: 4px;   /* was 10px */
+  left: 4px;
 }
 
 .carousel-btn.right {
@@ -5528,6 +5535,18 @@ font-weight:700;
 
 .dot.active {
   background: white;
+}
+
+@media (max-width: 700px) {
+  .carousel-slide {
+    padding: 24px 12px 54px;
+  }
+
+  .carousel-btn {
+    width: 44px;
+    height: 44px;
+    font-size: 22px;
+  }
 }
 
 .info-slide {
