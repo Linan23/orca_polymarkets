@@ -318,7 +318,21 @@ type WhaleActivitySide = {
   hasData: boolean;
 };
 
-function trustedActivityInsight(base: MarketProfileMlPredictionCase, allCases: MarketProfileMlPredictionCase[]) {
+function trustedActivityInsight(
+  base: MarketProfileMlPredictionCase,
+  allCases: MarketProfileMlPredictionCase[],
+  marketWhales?: { whaleCount?: number | null; trustedWhaleCount?: number | null },
+) {
+  const marketWhaleCount = coerceFiniteNumber(marketWhales?.whaleCount);
+  const marketTrustedWhaleCount = coerceFiniteNumber(marketWhales?.trustedWhaleCount);
+  if (marketWhaleCount !== null || marketTrustedWhaleCount !== null) {
+    return {
+      label: "Trusted Activity",
+      value: `Trusted whales: ${formatCount(marketTrustedWhaleCount ?? 0)}`,
+      detail: `Whale traders: ${formatCount(marketWhaleCount ?? 0)} total`,
+    };
+  }
+
   const sideOrder = [formatLabel(base.side_label), oppositeSideLabel(base.side_label)];
   const bySide = new Map<string, WhaleActivitySide>();
   sideOrder.forEach((label) => {
@@ -369,8 +383,8 @@ function trustedActivityInsight(base: MarketProfileMlPredictionCase, allCases: M
   const totalText = sides.map((side) => `${side.label} ${formatCount(side.total)}`).join(", ");
   return {
     label: "Trusted Activity",
-    value: `Trusted whales: ${trustedText}`,
-    detail: `All whale signals: ${totalText}`,
+    value: `Recent trusted signals: ${trustedText}`,
+    detail: `Recent whale signals: ${totalText}`,
   };
 }
 
@@ -568,9 +582,13 @@ function CurrentMarketProbabilityPanel({
 function MarketPredictionTrendChart({
   cases,
   allCases = cases,
+  marketWhaleCount,
+  marketTrustedWhaleCount,
 }: {
   cases: MarketProfileMlPredictionCase[];
   allCases?: MarketProfileMlPredictionCase[];
+  marketWhaleCount?: number | null;
+  marketTrustedWhaleCount?: number | null;
 }) {
   if (cases.length === 0) return null;
 
@@ -741,7 +759,7 @@ function MarketPredictionTrendChart({
   const forecastInsightRows = [
     whalePressureInsight(base, allCases),
     netSupportInsight(base),
-    trustedActivityInsight(base, allCases),
+    trustedActivityInsight(base, allCases, { whaleCount: marketWhaleCount, trustedWhaleCount: marketTrustedWhaleCount }),
     entryStrengthInsight(base),
     {
       label: "12h Forecast",
@@ -1034,6 +1052,8 @@ function MarketMlPredictionTrendPanel({
   error,
   preferredSideLabel,
   outcomeProbabilities,
+  marketWhaleCount,
+  marketTrustedWhaleCount,
   price,
   odds,
 }: {
@@ -1044,6 +1064,8 @@ function MarketMlPredictionTrendPanel({
   error?: string | null;
   preferredSideLabel?: string | null;
   outcomeProbabilities?: MarketOutcomeProbability[] | null;
+  marketWhaleCount?: number | null;
+  marketTrustedWhaleCount?: number | null;
   price: number | null;
   odds: number | null;
 }) {
@@ -1116,7 +1138,12 @@ function MarketMlPredictionTrendPanel({
               <MarketPredictionOutcomeSummary cases={primaryCases} />
             </div>
             <div className="market-ml-chart-panel">
-              <MarketPredictionTrendChart cases={primaryCases} allCases={cases} />
+              <MarketPredictionTrendChart
+                cases={primaryCases}
+                allCases={cases}
+                marketWhaleCount={marketWhaleCount}
+                marketTrustedWhaleCount={marketTrustedWhaleCount}
+              />
               <MarketPredictionValidationSummary summary={trend?.recent_12h_validation} />
             </div>
           </div>
@@ -1233,6 +1260,8 @@ export default function MarketProfile() {
             error={error}
             preferredSideLabel={data.primary_side_label ?? data.selected_side_label}
             outcomeProbabilities={data.outcome_probabilities}
+            marketWhaleCount={data.whale_count}
+            marketTrustedWhaleCount={data.trusted_whale_count}
             price={data.price}
             odds={data.odds}
           />
