@@ -1,6 +1,6 @@
 
 import TopNavbar from "../homepage/TopNavbar";
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 
 
 
@@ -180,6 +180,27 @@ const slides = [
 export default function DefinitionsPage() {
 
 const [activeSlide, setActiveSlide] = useState(0);
+const [activeSlideHeight, setActiveSlideHeight] = useState<number | null>(null);
+const slideRefs = useRef<Array<HTMLDivElement | null>>([]);
+
+useLayoutEffect(() => {
+  const activeNode = slideRefs.current[activeSlide];
+  if (!activeNode) return;
+
+  const updateHeight = () => {
+    setActiveSlideHeight(activeNode.scrollHeight);
+  };
+
+  updateHeight();
+  window.addEventListener("resize", updateHeight);
+  const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(updateHeight) : null;
+  observer?.observe(activeNode);
+
+  return () => {
+    window.removeEventListener("resize", updateHeight);
+    observer?.disconnect();
+  };
+}, [activeSlide]);
 
   return (
     <div className="page page-definitions">
@@ -218,10 +239,13 @@ const [activeSlide, setActiveSlide] = useState(0);
 
     <div
       className="carousel-track"
-      style={{ transform: `translateX(-${activeSlide * 100}%)` }}
+      style={{
+        transform: `translateX(-${activeSlide * 100}%)`,
+        height: activeSlideHeight ? `${activeSlideHeight}px` : undefined,
+      }}
     >
       {/* SLIDE 1: DEFINITIONS */}
-      <div className="carousel-slide">
+      <div className="carousel-slide" ref={(node) => { slideRefs.current[0] = node; }}>
         <div className="carousel-card definitions-panel">
           <div className="definitions-panel-header">
             <p className="eyebrow">Glossary</p>
@@ -240,7 +264,7 @@ const [activeSlide, setActiveSlide] = useState(0);
       </div>
 
       {/* SLIDE 2: ML */}
-      <div className="carousel-slide">
+      <div className="carousel-slide" ref={(node) => { slideRefs.current[1] = node; }}>
         <div className=" carousel-card definitions-panel">
         <div className="definitions-panel-header">
   <p className="eyebrow">Machine Learning</p>
@@ -261,7 +285,7 @@ const [activeSlide, setActiveSlide] = useState(0);
       </div>
 
       {/* SLIDE 3: TRUST */}
-      <div className="carousel-slide">
+      <div className="carousel-slide" ref={(node) => { slideRefs.current[2] = node; }}>
         <div className="carousel-card definitions-panel">
      <div className="definitions-panel-header">
   <p className="eyebrow">Trust Score</p>

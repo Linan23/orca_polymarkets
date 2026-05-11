@@ -5447,7 +5447,8 @@ font-weight:700;
 
 .carousel-track {
   display: flex;
-  transition: transform 0.45s ease;
+  align-items: flex-start;
+  transition: transform 0.45s ease, height 0.25s ease;
 }
 
 .carousel-slide {
