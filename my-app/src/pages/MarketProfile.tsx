@@ -214,15 +214,14 @@ function predictionForecastSummary(item: MarketProfileMlPredictionCase) {
   return `${item.window} market forecast ${sideLabel} ${formatOddsPercent(futureOdds)} / ${oppositeSideLabel(item.side_label)} ${formatOddsPercent(oppositeOdds)}`;
 }
 
-function simpleForecastDirection(item: MarketProfileMlPredictionCase) {
-  const delta = modelDelta(item);
-  if (typeof delta === "number" && Number.isFinite(delta)) {
-    if (delta > 0.05) return "Up";
-    if (delta < -0.05) return "Down";
-  }
-  if (item.predicted_direction === "up") return "Up";
-  if (item.predicted_direction === "down") return "Down";
-  return "Mostly flat";
+function marketLeanLabel(item: MarketProfileMlPredictionCase) {
+  const sideLabel = formatLabel(item.side_label);
+  const futureValue = modelFutureOdds(item);
+  const oppositeValue = complementProbability(futureValue);
+  if (typeof futureValue !== "number" || typeof oppositeValue !== "number") return "Market trend pending";
+  if (futureValue > 52) return `Market leaning ${sideLabel}`;
+  if (oppositeValue > 52) return `Market leaning ${oppositeSideLabel(item.side_label)}`;
+  return "Market mostly balanced";
 }
 
 function forecastMoveDetail(item: MarketProfileMlPredictionCase) {
@@ -230,11 +229,16 @@ function forecastMoveDetail(item: MarketProfileMlPredictionCase) {
   const futureValue = modelFutureOdds(item);
   const futureOdds = formatOddsPercent(futureValue);
   const oppositeOdds = formatOddsPercent(complementProbability(futureValue));
-  const delta = modelDelta(item);
-  if (typeof delta !== "number" || !Number.isFinite(delta) || Math.abs(delta) < 0.05) {
-    return `${sideLabel} ${futureOdds} / ${oppositeSideLabel(item.side_label)} ${oppositeOdds}; market stays near current levels.`;
+  const oppositeLabel = oppositeSideLabel(item.side_label);
+  const futureNumeric = modelFutureOdds(item);
+  const oppositeNumeric = complementProbability(futureNumeric);
+  if (typeof futureNumeric === "number" && futureNumeric > 52) {
+    return `${sideLabel} ${futureOdds} / ${oppositeLabel} ${oppositeOdds}; market leans toward ${sideLabel}.`;
   }
-  return `${sideLabel} ${futureOdds} / ${oppositeSideLabel(item.side_label)} ${oppositeOdds}; ${sideLabel} ${delta > 0 ? "rises" : "falls"} ${formatPercentagePointMagnitude(delta)}.`;
+  if (typeof oppositeNumeric === "number" && oppositeNumeric > 52) {
+    return `${sideLabel} ${futureOdds} / ${oppositeLabel} ${oppositeOdds}; market leans toward ${oppositeLabel}.`;
+  }
+  return `${sideLabel} ${futureOdds} / ${oppositeLabel} ${oppositeOdds}; market is close to balanced.`;
 }
 
 function firstFiniteNumber(values: Array<number | string | null | undefined>) {
@@ -705,12 +709,12 @@ function MarketPredictionTrendChart({
     entryStrengthInsight(base),
     {
       label: "12h Forecast",
-      value: simpleForecastDirection(shortWindowCase),
+      value: marketLeanLabel(shortWindowCase),
       detail: forecastMoveDetail(shortWindowCase),
     },
     {
       label: "24h Forecast",
-      value: simpleForecastDirection(longWindowCase),
+      value: marketLeanLabel(longWindowCase),
       detail: forecastMoveDetail(longWindowCase),
     },
   ];
@@ -729,7 +733,7 @@ function MarketPredictionTrendChart({
       <div className="market-ml-chart-legend">
         {predictedSeries.map((series) => (
           <span key={`legend-${series.label}`}>
-            <i className={`market-ml-legend-predicted ${series.className}`} /> {series.label} whale forecast
+            <i className={`market-ml-legend-predicted ${series.className}`} /> {series.label}
           </span>
         ))}
         {actualPoints.length > 0 && <span><i className="market-ml-legend-actual" /> Actual probability</span>}
