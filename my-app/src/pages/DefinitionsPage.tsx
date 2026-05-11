@@ -237,6 +237,9 @@ useEffect(() => {
   <div className="carousel-container" ref={carouselTopRef}>
     <button
       className="carousel-btn left"
+      type="button"
+      aria-label="Previous glossary card"
+      disabled={activeSlide === 0}
       onClick={() => setActiveSlide((prev) => Math.max(prev - 1, 0))}
     >
       ‹
@@ -312,6 +315,9 @@ useEffect(() => {
 
     <button
       className="carousel-btn right"
+      type="button"
+      aria-label="Next glossary card"
+      disabled={activeSlide === slides.length - 1}
       onClick={() =>
         setActiveSlide((prev) => Math.min(prev + 1, slides.length - 1))
       }

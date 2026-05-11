@@ -3079,14 +3079,14 @@ a {
 }
 
 .definitions-section {
-  padding: 90px 24px 120px;
+  padding: 70px 24px 100px;
   display: flex;
   justify-content: center;
 }
 
 .definitions-panel {
-  width: min(1120px, 100%);
-  padding: clamp(26px, 3vw, 38px);
+  width: min(1160px, 100%);
+  padding: clamp(22px, 2.4vw, 32px);
   border-radius: 32px;
   background: rgba(255, 255, 255, 0.045);
   border: 1px solid rgba(255, 255, 255, 0.1);
@@ -3094,41 +3094,42 @@ a {
 
 .definitions-panel-header {
   text-align: center;
-  margin-bottom: 28px;
+  margin-bottom: 18px;
 }
 
 .definitions-panel-header h2 {
   margin: 8px 0 0;
-  font-size: clamp(2rem, 4vw, 3.5rem);
+  font-size: clamp(1.85rem, 3.2vw, 3rem);
   letter-spacing: -0.04em;
 }
 
 .page-definitions .definitions-list {
-  columns: 2 360px;
-  column-gap: 14px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 10px;
 }
 
 .page-definitions .definition-row {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 8px;
+  gap: 6px;
   align-content: start;
-  break-inside: avoid;
-  margin: 0 0 14px;
-  padding: 18px 20px;
-  border-radius: 18px;
+  min-width: 0;
+  padding: 13px 15px;
+  border-radius: 14px;
   background: rgba(255, 255, 255, 0.055);
   border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .page-definitions .definition-row h3 {
   margin: 0;
-  font-size: 1rem;
+  font-size: 0.95rem;
 }
 
 .page-definitions .definition-row p {
   margin: 0;
-  line-height: 1.55;
+  line-height: 1.38;
+  font-size: 0.88rem;
   color: rgba(255, 255, 255, 0.74);
 }
 
@@ -3142,7 +3143,7 @@ a {
   }
 
   .page-definitions .definitions-list {
-    columns: 1;
+    grid-template-columns: 1fr;
   }
 }
 
@@ -5646,14 +5647,14 @@ font-weight:700;
   min-width: 100%;
   display: flex;
   justify-content: center; /* centers card */
-  padding: 36px 72px 58px;
+  padding: 28px 74px 50px;
 }
 
 /* 🔥 main card */
 .carousel-card {
   width: 100%;
-  max-width: 1120px;
-  padding: 28px;
+  max-width: 1160px;
+  padding: 24px;
 
   border-radius: 22px;
   background: linear-gradient(
@@ -5669,11 +5670,10 @@ font-weight:700;
 
 .carousel-btn {
   position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
+  top: 112px;
 
-  width: 64px;          /* 🔥 bigger */
-  height: 64px;
+  width: 56px;
+  height: 56px;
   border-radius: 999px;
 
   display: grid;
@@ -5682,7 +5682,7 @@ font-weight:700;
   background: rgba(255,255,255,0.12);
   backdrop-filter: blur(6px);
 
-  font-size: 28px;      /* 🔥 bigger arrow */
+  font-size: 26px;
   color: white;
 
   border: 1px solid rgba(255,255,255,0.18);
@@ -5694,15 +5694,25 @@ font-weight:700;
 
 .carousel-btn:hover {
   background: rgba(255,255,255,0.2);
-  transform: translateY(-50%) scale(1.05);
+  transform: scale(1.05);
+}
+
+.carousel-btn:disabled {
+  cursor: default;
+  opacity: 0.38;
+}
+
+.carousel-btn:disabled:hover {
+  background: rgba(255,255,255,0.12);
+  transform: none;
 }
 
 .carousel-btn.left {
-  left: 4px;
+  left: 10px;
 }
 
 .carousel-btn.right {
-  right: 4px;
+  right: 10px;
 }
 
 /* dots */
@@ -5734,6 +5744,7 @@ font-weight:700;
     width: 44px;
     height: 44px;
     font-size: 22px;
+    top: 78px;
   }
 }
 
