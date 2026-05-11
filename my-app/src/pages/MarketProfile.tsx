@@ -211,6 +211,68 @@ function predictionForecastSummary(item: MarketProfileMlPredictionCase) {
   return `${item.window} forecast ${formatOddsPercent(modelFutureOdds(item))} (${formatSignedPoints(modelDelta(item))})`;
 }
 
+function simpleForecastDirection(item: MarketProfileMlPredictionCase) {
+  const delta = modelDelta(item);
+  if (typeof delta === "number" && Number.isFinite(delta)) {
+    if (delta > 0.05) return "Up";
+    if (delta < -0.05) return "Down";
+  }
+  if (item.predicted_direction === "up") return "Up";
+  if (item.predicted_direction === "down") return "Down";
+  return "Mostly flat";
+}
+
+function forecastMoveDetail(item: MarketProfileMlPredictionCase) {
+  const sideLabel = formatLabel(item.side_label);
+  const futureOdds = formatOddsPercent(modelFutureOdds(item));
+  const delta = modelDelta(item);
+  if (typeof delta !== "number" || !Number.isFinite(delta) || Math.abs(delta) < 0.05) {
+    return `${sideLabel} stays near ${futureOdds}`;
+  }
+  return `${sideLabel} ${delta > 0 ? "moves up" : "moves down"} ${formatPercentagePointMagnitude(delta)} to ${futureOdds}`;
+}
+
+function simpleSignalQuality(item: MarketProfileMlPredictionCase | undefined) {
+  if (!item) {
+    return {
+      value: "Review",
+      detail: "Not enough forecast history yet.",
+    };
+  }
+  if (
+    item.direction_signal_tier === "strong" ||
+    item.historical_validation_tier === "trained_strong_confidence" ||
+    item.historical_validation_tier === "high_confidence_historical_slice"
+  ) {
+    return {
+      value: "High confidence",
+      detail:
+        typeof (item.validation_accuracy_pct ?? item.direction_signal_accuracy_pct) === "number"
+          ? `Similar forecasts matched ${((item.validation_accuracy_pct ?? item.direction_signal_accuracy_pct) as number).toFixed(1)}% of the time.`
+          : "Similar forecasts have been the most reliable.",
+    };
+  }
+  if (item.direction_signal_tier === "watch" || item.historical_validation_tier === "trained_watch_confidence") {
+    return {
+      value: "Watch closely",
+      detail:
+        typeof (item.validation_accuracy_pct ?? item.direction_signal_accuracy_pct) === "number"
+          ? `Similar forecasts matched ${((item.validation_accuracy_pct ?? item.direction_signal_accuracy_pct) as number).toFixed(1)}% of the time.`
+          : "Useful signal, but still needs caution.",
+    };
+  }
+  if (item.historical_validation_tier === "market_closed") {
+    return {
+      value: "Validation only",
+      detail: "This closed market is used to compare forecast vs actual movement.",
+    };
+  }
+  return {
+    value: "Review",
+    detail: "Limited validation history, so treat this as a weak signal.",
+  };
+}
+
 type WhaleLeanSide = {
   key: string;
   label: string;
@@ -361,10 +423,17 @@ function CurrentMarketProbabilityPanel({
   );
 }
 
-function MarketPredictionTrendChart({ cases }: { cases: MarketProfileMlPredictionCase[] }) {
+function MarketPredictionTrendChart({
+  cases,
+  allCases = cases,
+}: {
+  cases: MarketProfileMlPredictionCase[];
+  allCases?: MarketProfileMlPredictionCase[];
+}) {
   if (cases.length === 0) return null;
 
   const base = cases[0];
+  const whaleLean = whaleLeanSummary(allCases);
   const validationComparisons = cases
     .map((item) => ({ item, comparison: completedValidation(item) }))
     .filter(
@@ -488,31 +557,36 @@ function MarketPredictionTrendChart({ cases }: { cases: MarketProfileMlPredictio
   };
   const predictedLinePoints = predictedPoints.map((point) => `${xFor(point.hour)},${yFor(point.odds)}`).join(" ");
   const actualLinePoints = actualPoints.map((point) => `${xFor(point.hour)},${yFor(point.odds)}`).join(" ");
+  const shortWindowCase = cases.find((item) => item.window === "12h") ?? cases[0];
+  const longWindowCase = cases.find((item) => item.window === "24h") ?? cases.at(-1) ?? cases[0];
+  const qualityCase =
+    cases.find((item) => item.direction_signal_tier === "strong") ??
+    cases.find((item) => item.direction_signal_tier === "watch") ??
+    shortWindowCase;
+  const signalQuality = simpleSignalQuality(qualityCase);
   const forecastInsightRows = [
     {
-      label: "Whale entry",
-      value: formatDateTime(entryTime),
-      detail: `${formatLabel(base.side_label)} started at ${formatOddsPercent(entryOdds)}`,
+      label: "Whale-driven side",
+      value: whaleLean.leader ? `Leaning ${whaleLean.leader.label}` : "Mixed lean",
+      detail: whaleLean.leader
+        ? `Trusted whale support is strongest on ${whaleLean.leader.label}.`
+        : "Whale activity is not clearly favoring one side yet.",
     },
-    ...cases
-      .filter((item) => typeof modelFutureOdds(item) === "number")
-      .sort((leftCase, rightCase) => windowHours(leftCase.window) - windowHours(rightCase.window))
-      .slice(0, 2)
-      .map((item) => {
-        const futureOdds = modelFutureOdds(item);
-        const delta = modelDelta(item);
-        const direction =
-          delta === null || typeof delta === "undefined" || Math.abs(delta) < 0.05
-            ? "stays near current odds"
-            : delta > 0
-              ? `moves up ${formatPercentagePointMagnitude(delta)}`
-              : `moves down ${formatPercentagePointMagnitude(delta)}`;
-        return {
-          label: `${item.window} outlook`,
-          value: formatOddsPercent(futureOdds),
-          detail: `${formatLabel(item.side_label)} ${direction}`,
-        };
-      }),
+    {
+      label: "12h whale forecast",
+      value: simpleForecastDirection(shortWindowCase),
+      detail: forecastMoveDetail(shortWindowCase),
+    },
+    {
+      label: "24h whale forecast",
+      value: simpleForecastDirection(longWindowCase),
+      detail: forecastMoveDetail(longWindowCase),
+    },
+    {
+      label: "Signal quality",
+      value: signalQuality.value,
+      detail: signalQuality.detail,
+    },
   ];
   return (
     <div className="market-ml-chart-shell">
@@ -868,7 +942,7 @@ function MarketMlPredictionTrendPanel({
               <MarketPredictionOutcomeSummary cases={primaryCases} />
             </div>
             <div className="market-ml-chart-panel">
-              <MarketPredictionTrendChart cases={primaryCases} />
+              <MarketPredictionTrendChart cases={primaryCases} allCases={cases} />
               <MarketPredictionValidationSummary summary={trend?.recent_12h_validation} />
             </div>
           </div>
