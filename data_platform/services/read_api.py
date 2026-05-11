@@ -484,8 +484,8 @@ def _apply_live_polymarket_market_status_overlay(row: dict[str, Any]) -> dict[st
     return updated
 
 
-def _apply_live_polymarket_market_concentration_overlay(payload: dict[str, Any] | None) -> dict[str, Any] | None:
-    """Apply live closed-status corrections to market concentration payload rows."""
+def _apply_live_polymarket_market_rows_overlay(payload: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Apply live closed-status corrections to payloads containing market rows."""
     if payload is None:
         return None
     items = payload.get("items")
@@ -2337,8 +2337,8 @@ def market_whale_concentration(
         limit=limit,
     )
     if cached_payload is not None:
-        return _apply_live_polymarket_market_concentration_overlay(_with_current_whale_status(cached_payload))
-    return _apply_live_polymarket_market_concentration_overlay(
+        return _apply_live_polymarket_market_rows_overlay(_with_current_whale_status(cached_payload))
+    return _apply_live_polymarket_market_rows_overlay(
         _live_market_whale_concentration(session, limit=limit, timeframe=timeframe)
     )
 
@@ -2472,8 +2472,10 @@ def recent_whale_entries(
         limit=limit,
     )
     if cached_payload is not None:
-        return cached_payload
-    return _live_recent_whale_entries(session, limit=limit, timeframe=timeframe)
+        return _apply_live_polymarket_market_rows_overlay(cached_payload)
+    return _apply_live_polymarket_market_rows_overlay(
+        _live_recent_whale_entries(session, limit=limit, timeframe=timeframe)
+    )
 
 
 def _live_recent_whale_entries(

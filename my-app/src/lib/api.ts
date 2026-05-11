@@ -502,6 +502,9 @@ export type RecentWhaleEntryRow = {
   total_entry_notional: number;
   latest_entry_time: string | null;
   market_status_label: "Open" | "Closed";
+  database_is_closed?: boolean;
+  closed_status_source?: "database" | "polymarket_gamma_live" | null;
+  closed_time?: string | null;
   whale_bias_label: string;
 };
 
@@ -739,7 +742,7 @@ export type PolymarketTweetFeed = {
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
 const HOME_SUMMARY_CLIENT_CACHE_MS = 60_000;
 const DASHBOARD_READ_CLIENT_CACHE_MS = 300_000;
-const SESSION_CACHE_PREFIX = "orca:dashboard-read:";
+const SESSION_CACHE_PREFIX = "orca:dashboard-read:v2:";
 
 const clientReadCache = new Map<string, { expiresAt: number; value: unknown }>();
 const clientReadInflight = new Map<string, Promise<unknown>>();
