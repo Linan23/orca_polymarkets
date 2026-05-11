@@ -90,6 +90,36 @@ const slides = [
           "The model labels predictions by reliability. Strong is higher confidence, Watch is useful but less certain, and Review Only means the signal needs more proof.",
       },
       {
+        term: "Strong Signal",
+        description:
+          "A forecast with stronger model confidence and better past validation. It is still a prediction, but it is the model’s most reliable signal type.",
+      },
+      {
+        term: "Watch Signal",
+        description:
+          "A useful forecast that may be worth watching, but it has less proof than a Strong signal. Users should treat it as a clue, not a confirmed call.",
+      },
+      {
+        term: "Review Only",
+        description:
+          "A forecast shown for transparency because the model does not have enough validated proof yet. It should not be treated as a reliable signal.",
+      },
+      {
+        term: "Low Confidence",
+        description:
+          "The model sees a possible direction, but similar past forecasts have not been accurate enough. This means the prediction needs more data or validation.",
+      },
+      {
+        term: "Validated Slice",
+        description:
+          "A group of similar past predictions that has been checked against actual market movement. The model uses this to explain how reliable a signal has been.",
+      },
+      {
+        term: "Accuracy",
+        description:
+          "How often similar completed forecasts matched the actual market direction. For example, 80% means 8 out of 10 similar forecasts moved the right way.",
+      },
+      {
         term: "Validate Against Reality",
         description:
           "Older predictions are compared against what actually happened later. This helps show whether the model is matching real market movement.",
