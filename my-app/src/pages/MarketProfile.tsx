@@ -310,24 +310,67 @@ function netSupportInsight(item: MarketProfileMlPredictionCase) {
   };
 }
 
-function trustedActivityInsight(item: MarketProfileMlPredictionCase) {
-  const whaleAnchor = item.whale_anchor ?? {};
-  const trustedEvents = firstFiniteNumber([whaleAnchor.trusted_event_count]);
-  const totalEvents = firstFiniteNumber([whaleAnchor.event_count]);
+type WhaleActivitySide = {
+  key: string;
+  label: string;
+  trusted: number;
+  total: number;
+  hasData: boolean;
+};
 
-  if (trustedEvents === null && totalEvents === null) {
+function trustedActivityInsight(base: MarketProfileMlPredictionCase, allCases: MarketProfileMlPredictionCase[]) {
+  const sideOrder = [formatLabel(base.side_label), oppositeSideLabel(base.side_label)];
+  const bySide = new Map<string, WhaleActivitySide>();
+  sideOrder.forEach((label) => {
+    bySide.set(normalizeSideLabel(label), {
+      key: normalizeSideLabel(label),
+      label,
+      trusted: 0,
+      total: 0,
+      hasData: false,
+    });
+  });
+
+  allCases.forEach((item) => {
+    const label = formatLabel(item.side_label);
+    const key = normalizeSideLabel(label);
+    if (!key) return;
+    const whaleAnchor = item.whale_anchor ?? {};
+    const trustedEvents = firstFiniteNumber([whaleAnchor.trusted_event_count]);
+    const totalEvents = firstFiniteNumber([whaleAnchor.event_count]);
+    const current = bySide.get(key) ?? {
+      key,
+      label,
+      trusted: 0,
+      total: 0,
+      hasData: false,
+    };
+    bySide.set(key, {
+      ...current,
+      trusted: Math.max(current.trusted, trustedEvents ?? 0),
+      total: Math.max(current.total, totalEvents ?? trustedEvents ?? 0),
+      hasData: current.hasData || trustedEvents !== null || totalEvents !== null,
+    });
+  });
+
+  const sides = sideOrder
+    .map((label) => bySide.get(normalizeSideLabel(label)))
+    .filter((side): side is WhaleActivitySide => Boolean(side));
+
+  if (sides.length === 0 || sides.every((side) => !side.hasData)) {
     return {
       label: "Trusted Activity",
       value: "Not enough data",
       detail: "Not enough whale pressure data yet.",
     };
   }
+
+  const trustedText = sides.map((side) => `${side.label} ${formatCount(side.trusted)}`).join(" / ");
+  const totalText = sides.map((side) => `${side.label} ${formatCount(side.total)}`).join(" / ");
   return {
     label: "Trusted Activity",
-    value: `${formatCount(trustedEvents ?? 0)} trusted`,
-    detail: `${formatCount(totalEvents ?? trustedEvents ?? 0)} total whale signal${
-      Math.round(totalEvents ?? trustedEvents ?? 0) === 1 ? "" : "s"
-    } found for this side.`,
+    value: `${trustedText} trusted`,
+    detail: `Total whale signals: ${totalText}.`,
   };
 }
 
@@ -698,7 +741,7 @@ function MarketPredictionTrendChart({
   const forecastInsightRows = [
     whalePressureInsight(base, allCases),
     netSupportInsight(base),
-    trustedActivityInsight(base),
+    trustedActivityInsight(base, allCases),
     entryStrengthInsight(base),
     {
       label: "12h Forecast",
