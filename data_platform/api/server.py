@@ -952,7 +952,6 @@ async def get_auth_me(request: Request) -> dict[str, object]:
     """Return the signed-in account payload for frontend bootstrap."""
     try:
         with session_scope() as session:
-            _require_csrf(session, request)
             account = _require_account(session, request)
             return {"session": serialize_account_session(session, account)}
     except HTTPException:
