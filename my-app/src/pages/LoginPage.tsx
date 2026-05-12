@@ -30,7 +30,7 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [resetToken, setResetToken] = useState(searchParams.get("reset") ?? "");
+  const [resetToken] = useState(searchParams.get("reset") ?? "");
   const [mfaToken, setMfaToken] = useState<string | null>(null);
   const [mfaCode, setMfaCode] = useState("");
   const [mfaSetupSecret, setMfaSetupSecret] = useState<string | null>(null);
@@ -296,23 +296,14 @@ export default function LoginPage() {
                   />
                 )}
                 {mode === "reset" && resetToken && (
-                  <>
-                    <input
-                      value={resetToken}
-                      onChange={(event) => setResetToken(event.target.value)}
-                      type="text"
-                      placeholder="Reset token"
-                      required
-                    />
-                    <input
-                      value={confirmPassword}
-                      onChange={(event) => setConfirmPassword(event.target.value)}
-                      type="password"
-                      placeholder="Confirm new password"
-                      autoComplete="new-password"
-                      required
-                    />
-                  </>
+                  <input
+                    value={confirmPassword}
+                    onChange={(event) => setConfirmPassword(event.target.value)}
+                    type="password"
+                    placeholder="Confirm new password"
+                    autoComplete="new-password"
+                    required
+                  />
                 )}
                 {mode === "signup" && (
                   <>
