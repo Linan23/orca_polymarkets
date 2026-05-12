@@ -766,7 +766,15 @@ export type PolymarketTweetFeed = {
   items: PolymarketTweet[];
 };
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
+function resolveApiBaseUrl() {
+  const configured = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
+  if (configured === "__CURRENT_HOST__" && typeof window !== "undefined") {
+    return `${window.location.protocol}//${window.location.hostname}:8001`;
+  }
+  return configured;
+}
+
+const API_BASE_URL = resolveApiBaseUrl();
 const HOME_SUMMARY_CLIENT_CACHE_MS = 60_000;
 const DASHBOARD_READ_CLIENT_CACHE_MS = 300_000;
 const SESSION_CACHE_PREFIX = "orca:dashboard-read:v2:";

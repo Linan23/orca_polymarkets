@@ -40,6 +40,7 @@ class Settings:
     app_env: str
     database_url: str
     frontend_origin: str
+    frontend_additional_origins: tuple[str, ...]
     session_cookie_secure: bool
     session_cookie_samesite: str
     session_cookie_domain: str
@@ -70,10 +71,16 @@ def get_settings() -> Settings:
         for value in os.getenv("ALLOWED_SIGNUP_EMAIL_DOMAINS", "").split(",")
         if value.strip()
     )
+    additional_origins = tuple(
+        value.strip().rstrip("/")
+        for value in os.getenv("FRONTEND_ADDITIONAL_ORIGINS", "").split(",")
+        if value.strip()
+    )
     return Settings(
         app_env=os.getenv("APP_ENV", "development"),
         database_url=os.getenv("DATABASE_URL", DEFAULT_DATABASE_URL),
-        frontend_origin=os.getenv("FRONTEND_ORIGIN", "http://localhost:5173"),
+        frontend_origin=os.getenv("FRONTEND_ORIGIN", "http://localhost:5173").rstrip("/"),
+        frontend_additional_origins=additional_origins,
         session_cookie_secure=_env_bool("SESSION_COOKIE_SECURE", False),
         session_cookie_samesite=os.getenv("SESSION_COOKIE_SAMESITE", "lax").strip().lower() or "lax",
         session_cookie_domain=os.getenv("SESSION_COOKIE_DOMAIN", "").strip(),

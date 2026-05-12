@@ -138,6 +138,7 @@ Key environment variables used by the services:
 **API:**
 - `PYTHONPATH`: /workspace
 - `FRONTEND_ORIGIN`: http://localhost:5173
+- `FRONTEND_ADDITIONAL_ORIGINS`: optional comma-separated CORS origins for hostname migrations
 - `ALLOWED_SIGNUP_EMAIL_DOMAINS`: comma-separated signup allowlist; empty allows any email only in development
 - `AUTH_SECRET_KEY`: secret used for auth-token encryption; required in production
 - `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM_EMAIL`: verification and reset email delivery

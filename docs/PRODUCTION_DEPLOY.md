@@ -23,6 +23,7 @@ cp .env.production.example .env.production
 
 - `SITE_ADDRESS`
 - `FRONTEND_ORIGIN`
+- `FRONTEND_ADDITIONAL_ORIGINS`, if the API must temporarily allow an old IP or alternate hostname during migration
 - `POSTGRES_PASSWORD`
 - `DATABASE_URL`
 - `ALLOWED_SIGNUP_EMAIL_DOMAINS`, as a comma-separated allowlist for self-service signup
