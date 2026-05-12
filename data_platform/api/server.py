@@ -52,6 +52,7 @@ from data_platform.services.read_api import (
     following_overview,
     home_summary,
     market_whale_concentration,
+    _apply_live_polymarket_market_rows_overlay,
     recent_whale_entries,
     latest_dashboard_snapshot,
     latest_dashboard_markets,
@@ -352,6 +353,27 @@ def _set_cache_control_headers(
     response.headers["Cache-Control"] = (
         f"{scope}, max-age={int(max_age_seconds)}, stale-while-revalidate={stale}"
     )
+
+
+def _with_live_market_status_overlays(payload: dict[str, object]) -> dict[str, object]:
+    """Apply live market status corrections to cached homepage research payloads."""
+    updated = copy.deepcopy(payload)
+    research = updated.get("research")
+    if isinstance(research, dict):
+        for key in ("market_whale_concentration", "recent_whale_entries"):
+            value = research.get(key)
+            if isinstance(value, dict):
+                research[key] = _apply_live_polymarket_market_rows_overlay(value)
+    return updated
+
+
+def _with_live_analytics_market_status_overlay(payload: dict[str, object]) -> dict[str, object]:
+    """Apply live market status corrections to cached analytics endpoint payloads."""
+    updated = copy.deepcopy(payload)
+    analytics = updated.get("analytics")
+    if isinstance(analytics, dict):
+        updated["analytics"] = _apply_live_polymarket_market_rows_overlay(analytics)
+    return updated
 
 
 def _x_bearer_token() -> str:
@@ -1048,14 +1070,14 @@ def get_dashboard_home(
 
     _set_cache_control_headers(response, max_age_seconds=HOME_SUMMARY_CACHE_TTL_SECONDS)
     try:
-        return _cached_or_build(
+        return _with_live_market_status_overlays(_cached_or_build(
             namespace="dashboard_home",
             cache=_dashboard_home_cache,
             cache_key=cache_key,
             ttl_seconds=HOME_SUMMARY_CACHE_TTL_SECONDS,
             lock=_dashboard_home_cache_lock,
             builder=build_payload,
-        )
+        ))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except (OSError, SQLAlchemyError) as exc:
@@ -1132,7 +1154,7 @@ def get_market_whale_concentration(
         lock=_market_whale_concentration_cache_lock,
     )
     if cached_response is not None:
-        return cached_response
+        return _with_live_analytics_market_status_overlay(cached_response)
 
     try:
         with session_scope() as session:
@@ -1149,7 +1171,7 @@ def get_market_whale_concentration(
             payload=response_payload,
             lock=_market_whale_concentration_cache_lock,
         )
-        return response_payload
+        return _with_live_analytics_market_status_overlay(response_payload)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except (OSError, SQLAlchemyError) as exc:
@@ -1210,7 +1232,7 @@ def get_recent_whale_entries(
         lock=_recent_whale_entries_cache_lock,
     )
     if cached_response is not None:
-        return cached_response
+        return _with_live_analytics_market_status_overlay(cached_response)
 
     try:
         with session_scope() as session:
@@ -1227,7 +1249,7 @@ def get_recent_whale_entries(
             payload=response_payload,
             lock=_recent_whale_entries_cache_lock,
         )
-        return response_payload
+        return _with_live_analytics_market_status_overlay(response_payload)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except (OSError, SQLAlchemyError) as exc:

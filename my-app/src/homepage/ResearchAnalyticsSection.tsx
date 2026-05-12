@@ -401,7 +401,7 @@ const [activeResearchTab, setActiveResearchTab] = useState<
 
   const loadAnalytics = useCallback(
     async () => {
-      const dashboard = await fetchDashboardHome(timeframe, RESEARCH_CARD_LIMIT);
+      const dashboard = await fetchDashboardHome(timeframe, RESEARCH_CARD_LIMIT, { bypassClientCache: true });
       return researchPayloadFromDashboard(dashboard) ?? {
         topUsers: [],
         recentEntries: [],

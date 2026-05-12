@@ -993,8 +993,13 @@ export function getCachedUserProfileFull(
 export async function fetchDashboardHome(
   timeframe: AnalyticsTimeframe = "all",
   limit = 5,
+  options?: { bypassClientCache?: boolean },
 ): Promise<DashboardHomePayload> {
-  return fetchCachedJson<DashboardHomePayload>(dashboardHomePath(timeframe, limit));
+  const path = dashboardHomePath(timeframe, limit);
+  if (options?.bypassClientCache) {
+    return fetchJson<DashboardHomePayload>(path, { cache: "no-store" });
+  }
+  return fetchCachedJson<DashboardHomePayload>(path);
 }
 
 export async function fetchPolymarketTweetFeed(limit = 6): Promise<PolymarketTweetFeed> {
