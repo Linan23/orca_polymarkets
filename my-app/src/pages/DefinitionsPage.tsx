@@ -1,6 +1,6 @@
 
 import TopNavbar from "../homepage/TopNavbar";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 
 
 
@@ -214,16 +214,6 @@ useLayoutEffect(() => {
     observer?.disconnect();
   };
 }, [activeSlide]);
-
-useEffect(() => {
-  scrollToCarouselTop();
-}, [activeSlide]);
-
-useEffect(() => {
-  const handleScrollToDefinitions = () => scrollToCarouselTop();
-  window.addEventListener("orca:scroll-definitions-carousel", handleScrollToDefinitions);
-  return () => window.removeEventListener("orca:scroll-definitions-carousel", handleScrollToDefinitions);
-}, []);
 
   return (
     <div className="page page-definitions">
