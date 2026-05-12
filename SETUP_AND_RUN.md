@@ -138,6 +138,10 @@ Key environment variables used by the services:
 **API:**
 - `PYTHONPATH`: /workspace
 - `FRONTEND_ORIGIN`: http://localhost:5173
+- `ALLOWED_SIGNUP_EMAIL_DOMAINS`: comma-separated signup allowlist; empty allows any email only in development
+- `AUTH_SECRET_KEY`: secret used for auth-token encryption; required in production
+- `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM_EMAIL`: verification and reset email delivery
+- `SESSION_COOKIE_SECURE`: use `true` in production behind HTTPS
 
 **Frontend:**
 - `VITE_API_BASE_URL`: http://localhost:8001

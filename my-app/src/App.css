@@ -986,7 +986,7 @@ a {
 
 .login-mode-toggle {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
   margin-bottom: 18px;
 }
@@ -1048,6 +1048,41 @@ a {
   border-radius: 12px;
   padding: 12px 14px;
   font-size: 13px;
+}
+
+.login-notice,
+.login-info,
+.login-token-box {
+  border: 1px solid rgba(82, 211, 255, 0.2);
+  background: rgba(15, 40, 74, 0.32);
+  color: #cfe2ff;
+  border-radius: 12px;
+  padding: 12px 14px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.login-token-box {
+  display: grid;
+  gap: 6px;
+  word-break: break-word;
+}
+
+.login-token-box span {
+  color: #8ea2c8;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.login-token-box strong {
+  color: #ffffff;
+}
+
+@media (max-width: 560px) {
+  .login-mode-toggle {
+    grid-template-columns: 1fr;
+  }
 }
 
 .login-subnote {

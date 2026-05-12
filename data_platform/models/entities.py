@@ -909,6 +909,12 @@ class AppAccount(Base):
     display_name: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[str] = mapped_column(String(32), default="viewer", nullable=False)
     last_login_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True))
+    email_verified_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True))
+    mfa_secret_encrypted: Mapped[str | None] = mapped_column(Text)
+    mfa_enabled_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True))
+    failed_login_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    locked_until: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True))
+    password_changed_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
     updated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
@@ -924,9 +930,52 @@ class AppSession(Base):
     session_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     account_id: Mapped[int] = mapped_column(ForeignKey("app.app_account.account_id", ondelete="CASCADE"), nullable=False)
     session_token_hash: Mapped[str] = mapped_column(String(128), nullable=False)
+    csrf_token_hash: Mapped[str | None] = mapped_column(String(128))
+    user_agent_hash: Mapped[str | None] = mapped_column(String(128))
+    ip_prefix_hash: Mapped[str | None] = mapped_column(String(128))
+    revoked_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True))
+    mfa_verified_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
     expires_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), nullable=False)
     last_seen_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
+class AppAuthToken(Base):
+    __tablename__ = "app_auth_token"
+    __table_args__ = (
+        UniqueConstraint("token_hash", name="uq_app_auth_token_hash"),
+        Index("ix_app_auth_token_account_type", "account_id", "token_type"),
+        Index("ix_app_auth_token_expires_at", "expires_at"),
+        {"schema": "app"},
+    )
+
+    token_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    account_id: Mapped[int | None] = mapped_column(ForeignKey("app.app_account.account_id", ondelete="CASCADE"))
+    email: Mapped[str | None] = mapped_column(String(320))
+    token_hash: Mapped[str] = mapped_column(String(128), nullable=False)
+    token_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    metadata_payload: Mapped[dict] = mapped_column(JSON_VARIANT, nullable=False, default=dict)
+    expires_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
+class AppAuthAuditLog(Base):
+    __tablename__ = "app_auth_audit_log"
+    __table_args__ = (
+        Index("ix_app_auth_audit_log_account_time", "account_id", "created_at"),
+        Index("ix_app_auth_audit_log_email_time", "email", "created_at"),
+        {"schema": "app"},
+    )
+
+    auth_audit_log_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    account_id: Mapped[int | None] = mapped_column(ForeignKey("app.app_account.account_id", ondelete="SET NULL"))
+    email: Mapped[str | None] = mapped_column(String(320))
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    ip_prefix_hash: Mapped[str | None] = mapped_column(String(128))
+    user_agent_hash: Mapped[str | None] = mapped_column(String(128))
+    details_payload: Mapped[dict] = mapped_column(JSON_VARIANT, nullable=False, default=dict)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
 
 
 class AppWatchlistUser(Base):

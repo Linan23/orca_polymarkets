@@ -14,6 +14,8 @@ import {
   type LoginPayload,
   type SignUpPayload,
   type WatchlistState,
+  confirmPasswordReset,
+  enableMfaAccount,
   fetchAuthSession,
   followMarketAccount,
   followUserAccount,
@@ -21,9 +23,13 @@ import {
   loginAccount,
   logoutAccount,
   patchAccountPreferences,
+  requestPasswordReset as requestPasswordResetAccount,
   signUpAccount,
+  setupMfaAccount,
   unfollowMarketAccount,
   unfollowUserAccount,
+  verifyEmailAccount,
+  verifyMfaLogin,
 } from "../lib/api";
 import { clearLegacyWatchlist, readLegacyWatchlist } from "../lib/watchlist";
 
@@ -122,8 +128,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async (payload: LoginPayload) => {
       setLoading(true);
       try {
-        const nextSession = await loginAccount(payload);
-        await applySession(nextSession);
+        const response = await loginAccount(payload);
+        if (response.session) {
+          await applySession(response.session);
+        }
+        return response;
       } finally {
         setLoading(false);
       }
@@ -135,14 +144,48 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async (payload: SignUpPayload) => {
       setLoading(true);
       try {
-        const nextSession = await signUpAccount(payload);
-        await applySession(nextSession);
+        return await signUpAccount(payload);
       } finally {
         setLoading(false);
       }
     },
-    [applySession],
+    [],
   );
+
+  const verifyEmail = useCallback(async (token: string) => {
+    setLoading(true);
+    try {
+      await applySession(await verifyEmailAccount(token));
+    } finally {
+      setLoading(false);
+    }
+  }, [applySession]);
+
+  const verifyMfa = useCallback(async (mfaToken: string, code: string) => {
+    setLoading(true);
+    try {
+      await applySession(await verifyMfaLogin(mfaToken, code));
+    } finally {
+      setLoading(false);
+    }
+  }, [applySession]);
+
+  const requestPasswordReset = useCallback(async (email: string) => requestPasswordResetAccount(email), []);
+
+  const resetPassword = useCallback(async (token: string, password: string) => {
+    setLoading(true);
+    try {
+      await applySession(await confirmPasswordReset(token, password));
+    } finally {
+      setLoading(false);
+    }
+  }, [applySession]);
+
+  const setupMfa = useCallback(async () => setupMfaAccount(), []);
+
+  const enableMfa = useCallback(async (code: string) => {
+    await applySession(await enableMfaAccount(code));
+  }, [applySession]);
 
   const logout = useCallback(async () => {
     await logoutAccount();
@@ -272,6 +315,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       refresh,
       login,
       signup,
+      verifyEmail,
+      verifyMfa,
+      requestPasswordReset,
+      confirmPasswordReset: resetPassword,
+      setupMfa,
+      enableMfa,
       logout,
       toggleUserFollow,
       toggleMarketFollow,
@@ -285,6 +334,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       refresh,
       login,
       signup,
+      verifyEmail,
+      verifyMfa,
+      requestPasswordReset,
+      resetPassword,
+      setupMfa,
+      enableMfa,
       logout,
       toggleUserFollow,
       toggleMarketFollow,

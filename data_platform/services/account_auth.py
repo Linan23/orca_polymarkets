@@ -3,19 +3,29 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 from datetime import timedelta
+from email.message import EmailMessage
+import base64
+import hmac
 import hashlib
+import smtplib
 import secrets
+import struct
+import time
 from typing import Any
 
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerifyMismatchError
-from sqlalchemy import delete, desc, func, select
+from cryptography.fernet import Fernet
+from sqlalchemy import delete, desc, func, or_, select
 from sqlalchemy.orm import Session
 
 from data_platform.models import (
     AppAccount,
     AppAccountPreferences,
+    AppAuthAuditLog,
+    AppAuthToken,
     AppSession,
     AppWatchlistMarket,
     AppWatchlistUser,
@@ -23,10 +33,18 @@ from data_platform.models import (
     UserAccount,
 )
 from data_platform.models.base import utc_now
+from data_platform.settings import Settings, get_settings
 
 
 SESSION_COOKIE_NAME = "orca_session"
 SESSION_DURATION = timedelta(days=30)
+AUTH_TOKEN_DURATION = timedelta(hours=24)
+PASSWORD_RESET_DURATION = timedelta(hours=1)
+MFA_CHALLENGE_DURATION = timedelta(minutes=5)
+LOGIN_LOCKOUT_FAILURES = 5
+LOGIN_LOCKOUT_DURATION = timedelta(minutes=15)
+RATE_LIMIT_WINDOW = timedelta(minutes=15)
+RATE_LIMIT_MAX_EVENTS = 10
 _PASSWORD_HASHER = PasswordHasher()
 ACCOUNT_ROLE_VIEWER = "viewer"
 ACCOUNT_ROLE_MODERATOR = "moderator"
@@ -58,6 +76,23 @@ DEFAULT_ACCOUNT_PREFERENCES: dict[str, Any] = {
         },
     },
 }
+
+
+@dataclass(frozen=True)
+class SessionIssue:
+    """Newly issued opaque session token and matching CSRF token."""
+
+    session_token: str
+    csrf_token: str
+
+
+@dataclass(frozen=True)
+class AuthEmailResult:
+    """Result of an email-token flow."""
+
+    sent: bool
+    dev_token: str | None = None
+    reason: str | None = None
 
 
 class DuplicateEmailError(ValueError):
@@ -114,9 +149,78 @@ def _session_token_hash(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
+def hash_token(token: str) -> str:
+    """Return the storage hash for an auth token."""
+    return _session_token_hash(token)
+
+
 def _generate_session_token() -> str:
     """Generate a new opaque session token."""
     return secrets.token_urlsafe(48)
+
+
+def generate_public_token() -> str:
+    """Generate an opaque public token for verification/reset/MFA flows."""
+    return secrets.token_urlsafe(40)
+
+
+def _hash_context_value(value: str | None) -> str | None:
+    if not value:
+        return None
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def ip_prefix(value: str | None) -> str | None:
+    """Return a coarse IP prefix for audit/rate-limit hashing."""
+    if not value:
+        return None
+    if ":" in value:
+        return ":".join(value.split(":")[:4])
+    parts = value.split(".")
+    return ".".join(parts[:3]) if len(parts) >= 3 else value
+
+
+def client_context(*, ip_address: str | None, user_agent: str | None) -> dict[str, str | None]:
+    """Return hashed request context for audit records and sessions."""
+    return {
+        "ip_prefix_hash": _hash_context_value(ip_prefix(ip_address)),
+        "user_agent_hash": _hash_context_value(user_agent),
+    }
+
+
+def signup_domain_allowed(email: str, settings: Settings | None = None) -> bool:
+    """Return whether an email can self-register."""
+    settings = settings or get_settings()
+    domain = normalize_email(email).rsplit("@", 1)[-1] if "@" in normalize_email(email) else ""
+    allowed_domains = settings.allowed_signup_email_domains
+    if not allowed_domains:
+        return settings.app_env.lower() != "production"
+    return domain in allowed_domains
+
+
+def auth_secret(settings: Settings | None = None) -> str:
+    """Return the configured auth secret or a development-only fallback."""
+    settings = settings or get_settings()
+    if settings.auth_secret_key:
+        return settings.auth_secret_key
+    if settings.app_env.lower() == "production":
+        raise RuntimeError("AUTH_SECRET_KEY is required in production.")
+    return "orca-dev-insecure-auth-secret"
+
+
+def _fernet(settings: Settings | None = None) -> Fernet:
+    digest = hashlib.sha256(auth_secret(settings).encode("utf-8")).digest()
+    return Fernet(base64.urlsafe_b64encode(digest))
+
+
+def encrypt_secret(value: str, settings: Settings | None = None) -> str:
+    """Encrypt a sensitive account secret for database storage."""
+    return _fernet(settings).encrypt(value.encode("utf-8")).decode("utf-8")
+
+
+def decrypt_secret(value: str, settings: Settings | None = None) -> str:
+    """Decrypt a sensitive account secret from database storage."""
+    return _fernet(settings).decrypt(value.encode("utf-8")).decode("utf-8")
 
 
 def _merge_dicts(base: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
@@ -176,21 +280,184 @@ def _ensure_preferences_row(session: Session, account_id: int) -> AppAccountPref
 
 def serialize_account_session(session: Session, account: AppAccount) -> dict[str, Any]:
     """Return the frontend-facing account/session payload."""
+    requires_mfa = role_meets_threshold(account.role, ACCOUNT_ROLE_MODERATOR)
+    mfa_enabled = account.mfa_enabled_at is not None
     return {
         "account": {
             "account_id": account.account_id,
             "email": account.email,
             "display_name": account.display_name,
             "role": account.role,
+            "email_verified": account.email_verified_at is not None,
+            "mfa_enabled": mfa_enabled,
             "created_at": account.created_at.isoformat() if account.created_at else None,
             "last_login_at": account.last_login_at.isoformat() if account.last_login_at else None,
+        },
+        "security_state": {
+            "email_verified": account.email_verified_at is not None,
+            "mfa_required": requires_mfa,
+            "mfa_enabled": mfa_enabled,
+            "mfa_setup_required": requires_mfa and not mfa_enabled,
         },
         "watchlist": _load_watchlist_state(session, account.account_id),
         "preferences": _load_preferences_payload(session, account.account_id),
     }
 
 
-def create_account(session: Session, *, email: str, password: str, display_name: str) -> AppAccount:
+def record_auth_event(
+    session: Session,
+    *,
+    event_type: str,
+    account: AppAccount | None = None,
+    email: str | None = None,
+    context: dict[str, str | None] | None = None,
+    details: dict[str, Any] | None = None,
+) -> None:
+    """Persist one auth/security audit event."""
+    session.add(
+        AppAuthAuditLog(
+            account_id=account.account_id if account else None,
+            email=normalize_email(email or account.email) if (email or account) else None,
+            event_type=event_type,
+            ip_prefix_hash=(context or {}).get("ip_prefix_hash"),
+            user_agent_hash=(context or {}).get("user_agent_hash"),
+            details_payload=details or {},
+            created_at=utc_now(),
+        )
+    )
+
+
+def _recent_auth_event_count(
+    session: Session,
+    *,
+    event_types: tuple[str, ...],
+    email: str | None,
+    context: dict[str, str | None] | None,
+) -> int:
+    since = utc_now() - RATE_LIMIT_WINDOW
+    predicates = [AppAuthAuditLog.created_at >= since, AppAuthAuditLog.event_type.in_(event_types)]
+    scoped = []
+    normalized_email = normalize_email(email) if email else None
+    if normalized_email:
+        scoped.append(AppAuthAuditLog.email == normalized_email)
+    ip_hash = (context or {}).get("ip_prefix_hash")
+    if ip_hash:
+        scoped.append(AppAuthAuditLog.ip_prefix_hash == ip_hash)
+    if scoped:
+        predicates.append(scoped[0] if len(scoped) == 1 else or_(*scoped))
+    return int(session.scalar(select(func.count()).select_from(AppAuthAuditLog).where(*predicates)) or 0)
+
+
+def rate_limit_exceeded(
+    session: Session,
+    *,
+    event_types: tuple[str, ...],
+    email: str | None,
+    context: dict[str, str | None] | None,
+    max_events: int = RATE_LIMIT_MAX_EVENTS,
+) -> bool:
+    """Return whether recent auth events exceed a small abuse threshold."""
+    return _recent_auth_event_count(session, event_types=event_types, email=email, context=context) >= max_events
+
+
+def issue_auth_token(
+    session: Session,
+    *,
+    account: AppAccount,
+    token_type: str,
+    duration: timedelta,
+    email: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> str:
+    """Persist and return a one-time auth token."""
+    token = generate_public_token()
+    session.add(
+        AppAuthToken(
+            account_id=account.account_id,
+            email=normalize_email(email or account.email),
+            token_hash=hash_token(token),
+            token_type=token_type,
+            metadata_payload=metadata or {},
+            expires_at=utc_now() + duration,
+            created_at=utc_now(),
+        )
+    )
+    session.flush()
+    return token
+
+
+def consume_auth_token(session: Session, *, token: str, token_type: str) -> AppAuthToken | None:
+    """Return and mark a valid one-time auth token as used."""
+    row = session.scalar(
+        select(AppAuthToken)
+        .where(AppAuthToken.token_hash == hash_token(token))
+        .where(AppAuthToken.token_type == token_type)
+    )
+    now = utc_now()
+    if row is None or row.used_at is not None or row.expires_at <= now:
+        return None
+    row.used_at = now
+    session.flush()
+    return row
+
+
+def send_auth_email(*, to_email: str, subject: str, body: str, settings: Settings | None = None) -> AuthEmailResult:
+    """Send an auth email through SMTP, or return a dev-mode no-SMTP result."""
+    settings = settings or get_settings()
+    if not settings.smtp_host or not settings.smtp_from_email:
+        return AuthEmailResult(sent=False, reason="smtp_not_configured")
+    message = EmailMessage()
+    message["From"] = settings.smtp_from_email
+    message["To"] = to_email
+    message["Subject"] = subject
+    message.set_content(body)
+    with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=10) as smtp:
+        if settings.smtp_use_tls:
+            smtp.starttls()
+        if settings.smtp_username:
+            smtp.login(settings.smtp_username, settings.smtp_password)
+        smtp.send_message(message)
+    return AuthEmailResult(sent=True)
+
+
+def send_verification_email(*, account: AppAccount, token: str, settings: Settings | None = None) -> AuthEmailResult:
+    """Send or dev-return an email verification link."""
+    settings = settings or get_settings()
+    verify_url = f"{settings.frontend_origin.rstrip('/')}/login?verify={token}"
+    result = send_auth_email(
+        to_email=account.email,
+        subject="Verify your Orca dashboard account",
+        body=f"Verify your Orca dashboard account by opening this link:\n\n{verify_url}\n\nThis link expires in 24 hours.",
+        settings=settings,
+    )
+    if not result.sent and settings.app_env.lower() != "production":
+        return AuthEmailResult(sent=False, dev_token=token, reason=result.reason)
+    return result
+
+
+def send_password_reset_email(*, account: AppAccount, token: str, settings: Settings | None = None) -> AuthEmailResult:
+    """Send or dev-return a password reset link."""
+    settings = settings or get_settings()
+    reset_url = f"{settings.frontend_origin.rstrip('/')}/login?reset={token}"
+    result = send_auth_email(
+        to_email=account.email,
+        subject="Reset your Orca dashboard password",
+        body=f"Reset your Orca dashboard password by opening this link:\n\n{reset_url}\n\nThis link expires in 1 hour.",
+        settings=settings,
+    )
+    if not result.sent and settings.app_env.lower() != "production":
+        return AuthEmailResult(sent=False, dev_token=token, reason=result.reason)
+    return result
+
+
+def create_account(
+    session: Session,
+    *,
+    email: str,
+    password: str,
+    display_name: str,
+    require_email_verification: bool = True,
+) -> AppAccount:
     """Create a new app account with an Argon2id password hash."""
     normalized_email = normalize_email(email)
     if session.scalar(select(AppAccount).where(AppAccount.email == normalized_email)) is not None:
@@ -202,7 +469,9 @@ def create_account(session: Session, *, email: str, password: str, display_name:
         password_hash=hash_password(password),
         display_name=normalize_display_name(display_name),
         role=ACCOUNT_ROLE_VIEWER,
-        is_active=True,
+        is_active=not require_email_verification,
+        email_verified_at=None if require_email_verification else now,
+        password_changed_at=now,
         created_at=now,
         updated_at=now,
     )
@@ -212,24 +481,61 @@ def create_account(session: Session, *, email: str, password: str, display_name:
     return account
 
 
-def authenticate_account(session: Session, *, email: str, password: str) -> AppAccount | None:
+def account_locked(account: AppAccount) -> bool:
+    """Return whether account login is temporarily locked."""
+    return bool(account.locked_until and account.locked_until > utc_now())
+
+
+def authenticate_account(
+    session: Session,
+    *,
+    email: str,
+    password: str,
+    context: dict[str, str | None] | None = None,
+) -> AppAccount | None:
     """Return the matching account when the password is valid."""
     normalized_email = normalize_email(email)
     account = session.scalar(select(AppAccount).where(AppAccount.email == normalized_email))
-    if account is None or not account.is_active:
+    if account is None:
+        record_auth_event(session, event_type="login_failed", email=normalized_email, context=context, details={"reason": "unknown_account"})
+        return None
+    if account_locked(account):
+        record_auth_event(session, event_type="login_failed", account=account, context=context, details={"reason": "locked"})
+        return None
+    if not account.is_active or account.email_verified_at is None:
+        record_auth_event(session, event_type="login_failed", account=account, context=context, details={"reason": "inactive_or_unverified"})
         return None
     if not verify_password(account.password_hash, password):
+        account.failed_login_count = int(account.failed_login_count or 0) + 1
+        if account.failed_login_count >= LOGIN_LOCKOUT_FAILURES:
+            account.locked_until = utc_now() + LOGIN_LOCKOUT_DURATION
+            record_auth_event(session, event_type="account_locked", account=account, context=context)
+        record_auth_event(session, event_type="login_failed", account=account, context=context, details={"reason": "bad_password"})
         return None
+    account.failed_login_count = 0
+    account.locked_until = None
+    record_auth_event(session, event_type="login_success_password", account=account, context=context)
     return account
 
 
-def create_account_session(session: Session, account: AppAccount) -> str:
+def create_account_session(
+    session: Session,
+    account: AppAccount,
+    *,
+    context: dict[str, str | None] | None = None,
+    mfa_verified: bool = False,
+) -> SessionIssue:
     """Create a persistent cookie-backed session and return the opaque token."""
     now = utc_now()
     token = _generate_session_token()
+    csrf_token = generate_public_token()
     session_row = AppSession(
         account_id=account.account_id,
         session_token_hash=_session_token_hash(token),
+        csrf_token_hash=hash_token(csrf_token),
+        user_agent_hash=(context or {}).get("user_agent_hash"),
+        ip_prefix_hash=(context or {}).get("ip_prefix_hash"),
+        mfa_verified_at=now if mfa_verified else None,
         created_at=now,
         expires_at=now + SESSION_DURATION,
         last_seen_at=now,
@@ -238,7 +544,8 @@ def create_account_session(session: Session, account: AppAccount) -> str:
     account.updated_at = now
     session.add(session_row)
     session.flush()
-    return token
+    record_auth_event(session, event_type="session_created", account=account, context=context)
+    return SessionIssue(session_token=token, csrf_token=csrf_token)
 
 
 def resolve_account_session(session: Session, token: str | None) -> tuple[AppAccount, AppSession] | None:
@@ -248,7 +555,7 @@ def resolve_account_session(session: Session, token: str | None) -> tuple[AppAcc
     session_row = session.scalar(
         select(AppSession).where(AppSession.session_token_hash == _session_token_hash(token))
     )
-    if session_row is None:
+    if session_row is None or session_row.revoked_at is not None:
         return None
     now = utc_now()
     if session_row.expires_at <= now:
@@ -264,6 +571,34 @@ def resolve_account_session(session: Session, token: str | None) -> tuple[AppAcc
     return account, session_row
 
 
+def rotate_session_csrf(session: Session, token: str | None) -> str | None:
+    """Issue a fresh CSRF token for an existing session token."""
+    if not token:
+        return None
+    session_row = session.scalar(
+        select(AppSession).where(AppSession.session_token_hash == _session_token_hash(token))
+    )
+    if session_row is None or session_row.revoked_at is not None or session_row.expires_at <= utc_now():
+        return None
+    csrf_token = generate_public_token()
+    session_row.csrf_token_hash = hash_token(csrf_token)
+    session_row.last_seen_at = utc_now()
+    session.flush()
+    return csrf_token
+
+
+def validate_session_csrf(session: Session, token: str | None, csrf_token: str | None) -> bool:
+    """Return whether a submitted CSRF token matches the stored session token."""
+    if not token or not csrf_token:
+        return False
+    session_row = session.scalar(
+        select(AppSession).where(AppSession.session_token_hash == _session_token_hash(token))
+    )
+    if session_row is None or session_row.revoked_at is not None or session_row.expires_at <= utc_now() or not session_row.csrf_token_hash:
+        return False
+    return hmac.compare_digest(session_row.csrf_token_hash, hash_token(csrf_token))
+
+
 def destroy_account_session(session: Session, token: str | None) -> bool:
     """Delete a persisted session token when it exists."""
     if not token:
@@ -273,9 +608,184 @@ def destroy_account_session(session: Session, token: str | None) -> bool:
     )
     if session_row is None:
         return False
-    session.delete(session_row)
+    session_row.revoked_at = utc_now()
     session.flush()
     return True
+
+
+def revoke_account_sessions(session: Session, account_id: int) -> int:
+    """Revoke all sessions for one account."""
+    rows = session.execute(
+        select(AppSession)
+        .where(AppSession.account_id == account_id)
+        .where(AppSession.revoked_at.is_(None))
+    ).scalars().all()
+    now = utc_now()
+    for row in rows:
+        row.revoked_at = now
+    session.flush()
+    return len(rows)
+
+
+def verify_account_email(session: Session, *, token: str, context: dict[str, str | None] | None = None) -> AppAccount | None:
+    """Verify an account email from a one-time token."""
+    token_row = consume_auth_token(session, token=token, token_type="email_verification")
+    if token_row is None or token_row.account_id is None:
+        return None
+    account = session.get(AppAccount, token_row.account_id)
+    if account is None:
+        return None
+    now = utc_now()
+    account.email_verified_at = account.email_verified_at or now
+    account.is_active = True
+    account.updated_at = now
+    record_auth_event(session, event_type="email_verified", account=account, context=context)
+    return account
+
+
+def request_password_reset(
+    session: Session,
+    *,
+    email: str,
+    context: dict[str, str | None] | None = None,
+    settings: Settings | None = None,
+) -> AuthEmailResult:
+    """Create and send a password reset token when the account exists."""
+    normalized_email = normalize_email(email)
+    account = session.scalar(select(AppAccount).where(AppAccount.email == normalized_email))
+    if account is None or not account.is_active:
+        record_auth_event(session, event_type="password_reset_requested", email=normalized_email, context=context, details={"matched": False})
+        return AuthEmailResult(sent=True)
+    token = issue_auth_token(
+        session,
+        account=account,
+        token_type="password_reset",
+        duration=PASSWORD_RESET_DURATION,
+        email=account.email,
+    )
+    record_auth_event(session, event_type="password_reset_requested", account=account, context=context, details={"matched": True})
+    return send_password_reset_email(account=account, token=token, settings=settings)
+
+
+def confirm_password_reset(
+    session: Session,
+    *,
+    token: str,
+    new_password: str,
+    context: dict[str, str | None] | None = None,
+) -> AppAccount | None:
+    """Reset an account password from a valid one-time token."""
+    token_row = consume_auth_token(session, token=token, token_type="password_reset")
+    if token_row is None or token_row.account_id is None:
+        return None
+    account = session.get(AppAccount, token_row.account_id)
+    if account is None or not account.is_active:
+        return None
+    now = utc_now()
+    account.password_hash = hash_password(new_password)
+    account.password_changed_at = now
+    account.failed_login_count = 0
+    account.locked_until = None
+    account.updated_at = now
+    revoked = revoke_account_sessions(session, account.account_id)
+    record_auth_event(session, event_type="password_reset_confirmed", account=account, context=context, details={"revoked_sessions": revoked})
+    return account
+
+
+def generate_totp_secret() -> str:
+    """Return a new base32 TOTP secret."""
+    return base64.b32encode(secrets.token_bytes(20)).decode("ascii").rstrip("=")
+
+
+def _totp_code(secret: str, for_time: int | None = None, step: int = 30, digits: int = 6) -> str:
+    counter = int((for_time if for_time is not None else time.time()) // step)
+    padded_secret = secret.upper() + "=" * ((8 - len(secret) % 8) % 8)
+    key = base64.b32decode(padded_secret)
+    digest = hmac.new(key, struct.pack(">Q", counter), hashlib.sha1).digest()
+    offset = digest[-1] & 0x0F
+    value = struct.unpack(">I", digest[offset : offset + 4])[0] & 0x7FFFFFFF
+    return str(value % (10**digits)).zfill(digits)
+
+
+def verify_totp(secret: str, code: str, *, window: int = 1) -> bool:
+    """Verify a TOTP code with a small clock-skew window."""
+    normalized = "".join(ch for ch in code if ch.isdigit())
+    if len(normalized) != 6:
+        return False
+    now = int(time.time())
+    return any(hmac.compare_digest(_totp_code(secret, now + (offset * 30)), normalized) for offset in range(-window, window + 1))
+
+
+def start_mfa_setup(account: AppAccount, *, settings: Settings | None = None) -> dict[str, str]:
+    """Return a new encrypted TOTP secret and otpauth URI payload."""
+    secret = generate_totp_secret()
+    issuer = "Orca Dashboard"
+    label = f"{issuer}:{account.email}"
+    account.mfa_secret_encrypted = encrypt_secret(secret, settings)
+    account.mfa_enabled_at = None
+    account.updated_at = utc_now()
+    otpauth_uri = (
+        "otpauth://totp/"
+        f"{label}?secret={secret}&issuer={issuer.replace(' ', '%20')}&algorithm=SHA1&digits=6&period=30"
+    )
+    return {"secret": secret, "otpauth_uri": otpauth_uri}
+
+
+def enable_mfa(
+    session: Session,
+    *,
+    account: AppAccount,
+    code: str,
+    context: dict[str, str | None] | None = None,
+    settings: Settings | None = None,
+) -> bool:
+    """Enable MFA after verifying the setup TOTP code."""
+    if not account.mfa_secret_encrypted:
+        return False
+    secret = decrypt_secret(account.mfa_secret_encrypted, settings)
+    if not verify_totp(secret, code):
+        record_auth_event(session, event_type="mfa_enable_failed", account=account, context=context)
+        return False
+    account.mfa_enabled_at = utc_now()
+    account.updated_at = utc_now()
+    record_auth_event(session, event_type="mfa_enabled", account=account, context=context)
+    return True
+
+
+def issue_mfa_challenge(session: Session, *, account: AppAccount, context: dict[str, str | None] | None = None) -> str:
+    """Create a short-lived MFA challenge token after password verification."""
+    token = issue_auth_token(
+        session,
+        account=account,
+        token_type="mfa_challenge",
+        duration=MFA_CHALLENGE_DURATION,
+        email=account.email,
+    )
+    record_auth_event(session, event_type="mfa_challenge_created", account=account, context=context)
+    return token
+
+
+def verify_mfa_challenge(
+    session: Session,
+    *,
+    token: str,
+    code: str,
+    context: dict[str, str | None] | None = None,
+    settings: Settings | None = None,
+) -> AppAccount | None:
+    """Verify a password-login MFA challenge."""
+    token_row = consume_auth_token(session, token=token, token_type="mfa_challenge")
+    if token_row is None or token_row.account_id is None:
+        return None
+    account = session.get(AppAccount, token_row.account_id)
+    if account is None or not account.mfa_secret_encrypted or account.mfa_enabled_at is None:
+        return None
+    secret = decrypt_secret(account.mfa_secret_encrypted, settings)
+    if not verify_totp(secret, code):
+        record_auth_event(session, event_type="mfa_challenge_failed", account=account, context=context)
+        return None
+    record_auth_event(session, event_type="mfa_challenge_passed", account=account, context=context)
+    return account
 
 
 def _valid_watchlist_user_ids(session: Session, user_ids: list[int]) -> list[int]:

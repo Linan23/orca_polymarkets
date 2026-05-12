@@ -43,6 +43,14 @@ class Settings:
     session_cookie_secure: bool
     session_cookie_samesite: str
     session_cookie_domain: str
+    allowed_signup_email_domains: tuple[str, ...]
+    smtp_host: str
+    smtp_port: int
+    smtp_username: str
+    smtp_password: str
+    smtp_from_email: str
+    smtp_use_tls: bool
+    auth_secret_key: str
     polymarket_active_window_start: str
     polymarket_active_window_end: str
     kalshi_active_window_start: str
@@ -57,6 +65,11 @@ class Settings:
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     """Return memoized application settings."""
+    allowed_domains = tuple(
+        value.strip().lower().lstrip("@")
+        for value in os.getenv("ALLOWED_SIGNUP_EMAIL_DOMAINS", "").split(",")
+        if value.strip()
+    )
     return Settings(
         app_env=os.getenv("APP_ENV", "development"),
         database_url=os.getenv("DATABASE_URL", DEFAULT_DATABASE_URL),
@@ -64,6 +77,14 @@ def get_settings() -> Settings:
         session_cookie_secure=_env_bool("SESSION_COOKIE_SECURE", False),
         session_cookie_samesite=os.getenv("SESSION_COOKIE_SAMESITE", "lax").strip().lower() or "lax",
         session_cookie_domain=os.getenv("SESSION_COOKIE_DOMAIN", "").strip(),
+        allowed_signup_email_domains=allowed_domains,
+        smtp_host=os.getenv("SMTP_HOST", "").strip(),
+        smtp_port=_env_int("SMTP_PORT", 587),
+        smtp_username=os.getenv("SMTP_USERNAME", "").strip(),
+        smtp_password=os.getenv("SMTP_PASSWORD", "").strip(),
+        smtp_from_email=os.getenv("SMTP_FROM_EMAIL", "").strip(),
+        smtp_use_tls=_env_bool("SMTP_USE_TLS", True),
+        auth_secret_key=os.getenv("AUTH_SECRET_KEY", "").strip(),
         polymarket_active_window_start=os.getenv("POLYMARKET_ACTIVE_WINDOW_START", ""),
         polymarket_active_window_end=os.getenv("POLYMARKET_ACTIVE_WINDOW_END", ""),
         kalshi_active_window_start=os.getenv("KALSHI_ACTIVE_WINDOW_START", ""),

@@ -102,6 +102,54 @@ class CheckResult:
     details: dict[str, Any]
 
 
+def _csrf_headers(token: str | None) -> dict[str, str]:
+    """Return a CSRF header payload for authenticated mutating requests."""
+    return {"X-CSRF-Token": token} if token else {}
+
+
+def _force_verify_smoke_account(email: str) -> None:
+    """Verify a smoke account directly when SMTP hides the raw email token."""
+    with session_scope() as session:
+        session.execute(
+            text(
+                """
+                UPDATE app.app_account
+                SET is_active = true,
+                    email_verified_at = COALESCE(email_verified_at, created_at),
+                    updated_at = now()
+                WHERE email = :email
+                """
+            ),
+            {"email": email},
+        )
+
+
+def _complete_signup_session(client: TestClient, *, email: str, password: str, signup_payload: dict[str, Any]) -> tuple[bool, dict[str, Any], str | None, str]:
+    """Complete a signup into an authenticated smoke-test session."""
+    dev_token = signup_payload.get("dev_verification_token") if isinstance(signup_payload, dict) else None
+    if isinstance(dev_token, str) and dev_token:
+        response = client.post("/api/auth/verify-email", json={"token": dev_token})
+        source = "verify-email"
+    else:
+        _force_verify_smoke_account(email)
+        response = client.post("/api/auth/login", json={"email": email, "password": password})
+        source = "forced-verify-login"
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = {"raw_body": response.text[:200]}
+    csrf_token = payload.get("csrf_token") if isinstance(payload, dict) else None
+    if not csrf_token:
+        csrf_response = client.get("/api/auth/csrf")
+        if csrf_response.status_code == 200:
+            try:
+                csrf_payload = csrf_response.json()
+                csrf_token = csrf_payload.get("csrf_token") if isinstance(csrf_payload, dict) else None
+            except ValueError:
+                csrf_token = None
+    return response.status_code == 200, payload if isinstance(payload, dict) else {}, csrf_token, source
+
+
 def _expected_alembic_revisions() -> tuple[str, ...]:
     """Return the Alembic head revisions declared by this checkout."""
     config = Config(str(REPO_ROOT / "alembic.ini"))
@@ -610,11 +658,13 @@ def _run_api_checks() -> list[CheckResult]:
                 signup_ok,
                 {
                     "status_code": signup_response.status_code,
-                    "has_cookie": SESSION_COOKIE_NAME in signup_response.cookies,
+                    "verification_required": signup_payload.get("verification_required") if isinstance(signup_payload, dict) else None,
+                    "email_sent": signup_payload.get("email_sent") if isinstance(signup_payload, dict) else None,
                     "payload_keys": sorted(signup_payload.keys()) if isinstance(signup_payload, dict) else [],
                 },
             )
         )
+        auth_csrf_token: str | None = None
         if signup_ok:
             with session_scope() as session:
                 stored_password_hash = session.execute(
@@ -628,6 +678,23 @@ def _run_api_checks() -> list[CheckResult]:
                     {
                         "email": auth_email,
                         "password_hash_prefix": stored_password_hash[:32] if stored_password_hash else None,
+                    },
+                )
+            )
+            complete_ok, complete_payload, auth_csrf_token, auth_source = _complete_signup_session(
+                client,
+                email=auth_email,
+                password=auth_password,
+                signup_payload=signup_payload,
+            )
+            results.append(
+                CheckResult(
+                    f"api:/api/auth/{auth_source}",
+                    complete_ok,
+                    {
+                        "has_cookie": SESSION_COOKIE_NAME in client.cookies,
+                        "has_csrf": bool(auth_csrf_token),
+                        "payload_keys": sorted(complete_payload.keys()),
                     },
                 )
             )
@@ -666,7 +733,10 @@ def _run_api_checks() -> list[CheckResult]:
         )
 
         if candidate_user_id is not None:
-            follow_user_response = client.post(f"/api/account/follow/users/{candidate_user_id}")
+            follow_user_response = client.post(
+                f"/api/account/follow/users/{candidate_user_id}",
+                headers=_csrf_headers(auth_csrf_token),
+            )
             follow_user_ok = follow_user_response.status_code == 200
             try:
                 follow_user_payload = follow_user_response.json()
@@ -685,6 +755,7 @@ def _run_api_checks() -> list[CheckResult]:
 
         preferences_response = client.patch(
             "/api/account/preferences",
+            headers=_csrf_headers(auth_csrf_token),
             json={
                 "homepage": {"research_timeframe": "30d"},
                 "leaderboard": {
@@ -712,6 +783,7 @@ def _run_api_checks() -> list[CheckResult]:
 
         invalid_preferences_response = client.patch(
             "/api/account/preferences",
+            headers=_csrf_headers(auth_csrf_token),
             json={"homepage": {"research_timeframe": "1d"}},
         )
         results.append(
@@ -733,6 +805,10 @@ def _run_api_checks() -> list[CheckResult]:
                 },
             )
             second_signup_ok = second_signup.status_code == 200
+            try:
+                second_signup_payload = second_signup.json()
+            except ValueError:
+                second_signup_payload = {"raw_body": second_signup.text[:200]}
             results.append(
                 CheckResult(
                     "api:/api/auth/signup second_account",
@@ -740,6 +816,21 @@ def _run_api_checks() -> list[CheckResult]:
                     {"status_code": second_signup.status_code},
                 )
             )
+            second_csrf_token: str | None = None
+            if second_signup_ok:
+                second_complete_ok, _, second_csrf_token, second_auth_source = _complete_signup_session(
+                    second_client,
+                    email=second_email,
+                    password=auth_password,
+                    signup_payload=second_signup_payload,
+                )
+                results.append(
+                    CheckResult(
+                        f"api:/api/auth/{second_auth_source} second_account",
+                        second_complete_ok,
+                        {"has_cookie": SESSION_COOKIE_NAME in second_client.cookies, "has_csrf": bool(second_csrf_token)},
+                    )
+                )
 
             second_me_before = second_client.get("/api/auth/me")
             second_watchlist_before = (((second_me_before.json() if second_me_before.status_code == 200 else {}) or {}).get("session") or {}).get("watchlist") or {}
@@ -760,7 +851,11 @@ def _run_api_checks() -> list[CheckResult]:
                 "user_ids": [candidate_user_id, candidate_user_id, 0] if candidate_user_id is not None else [],
                 "market_slugs": [candidate_market_slug, candidate_market_slug, "missing-market"] if candidate_market_slug else [],
             }
-            import_response = second_client.post("/api/account/watchlist/import-local", json=import_payload)
+            import_response = second_client.post(
+                "/api/account/watchlist/import-local",
+                headers=_csrf_headers(second_csrf_token),
+                json=import_payload,
+            )
             import_ok = import_response.status_code == 200
             try:
                 import_result = import_response.json()
@@ -798,7 +893,7 @@ def _run_api_checks() -> list[CheckResult]:
             )
         )
 
-        logout_response = client.post("/api/auth/logout")
+        logout_response = client.post("/api/auth/logout", headers=_csrf_headers(auth_csrf_token))
         logout_ok = logout_response.status_code == 200
         results.append(
             CheckResult(

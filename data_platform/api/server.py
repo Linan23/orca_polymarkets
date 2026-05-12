@@ -31,20 +31,37 @@ from data_platform.services.account_auth import (
     SESSION_COOKIE_NAME,
     SESSION_DURATION,
     authenticate_account,
+    client_context,
+    confirm_password_reset,
     create_account,
     create_account_session,
     destroy_account_session,
+    enable_mfa,
     follow_market,
     follow_user,
     import_watchlist,
+    issue_auth_token,
+    issue_mfa_challenge,
     normalize_account_role,
     normalize_display_name,
+    rate_limit_exceeded,
+    record_auth_event,
+    request_password_reset,
     resolve_account_session,
+    revoke_account_sessions,
     role_meets_threshold,
+    rotate_session_csrf,
+    send_verification_email,
     serialize_account_session,
+    signup_domain_allowed,
+    start_mfa_setup,
     unfollow_market,
     unfollow_user,
     update_account_preferences,
+    validate_session_csrf,
+    verify_account_email,
+    verify_mfa_challenge,
+    AUTH_TOKEN_DURATION,
 )
 from data_platform.services.read_api import (
     database_health,
@@ -168,6 +185,38 @@ class LoginRequest(BaseModel):
 
     email: EmailStr
     password: str = Field(min_length=1, max_length=128)
+
+
+class VerifyEmailRequest(BaseModel):
+    """Request payload for email verification."""
+
+    token: str = Field(min_length=16, max_length=256)
+
+
+class PasswordResetRequest(BaseModel):
+    """Request payload for requesting a password reset email."""
+
+    email: EmailStr
+
+
+class PasswordResetConfirmRequest(BaseModel):
+    """Request payload for confirming a password reset."""
+
+    token: str = Field(min_length=16, max_length=256)
+    password: str = Field(min_length=8, max_length=128)
+
+
+class MfaVerifyRequest(BaseModel):
+    """Request payload for verifying a login MFA challenge."""
+
+    mfa_token: str = Field(min_length=16, max_length=256)
+    code: str = Field(min_length=6, max_length=16)
+
+
+class MfaEnableRequest(BaseModel):
+    """Request payload for enabling TOTP MFA on the signed-in account."""
+
+    code: str = Field(min_length=6, max_length=16)
 
 
 class LocalWatchlistImportRequest(BaseModel):
@@ -478,6 +527,13 @@ def _latest_polymarket_tweets(limit: int) -> dict[str, object]:
     }
 
 
+def _request_context(request: Request) -> dict[str, str | None]:
+    """Return hashed request metadata for auth operations."""
+    forwarded_for = request.headers.get("x-forwarded-for", "")
+    ip_address = forwarded_for.split(",", 1)[0].strip() or (request.client.host if request.client else None)
+    return client_context(ip_address=ip_address, user_agent=request.headers.get("user-agent"))
+
+
 def _set_session_cookie(response: Response, token: str) -> None:
     """Attach the persistent auth cookie to a response."""
     max_age = int(SESSION_DURATION.total_seconds())
@@ -497,6 +553,20 @@ def _set_session_cookie(response: Response, token: str) -> None:
     )
 
 
+def _set_csrf_cookie(response: Response, token: str) -> None:
+    """Attach a readable CSRF cookie for the frontend to mirror in a header."""
+    cookie_kwargs: dict[str, Any] = {
+        "max_age": int(SESSION_DURATION.total_seconds()),
+        "httponly": False,
+        "samesite": settings.session_cookie_samesite,
+        "secure": settings.session_cookie_secure,
+        "path": "/",
+    }
+    if settings.session_cookie_domain:
+        cookie_kwargs["domain"] = settings.session_cookie_domain
+    response.set_cookie(key="orca_csrf", value=token, **cookie_kwargs)
+
+
 def _clear_session_cookie(response: Response) -> None:
     """Delete the auth cookie from a response."""
     cookie_kwargs: dict[str, Any] = {
@@ -508,6 +578,17 @@ def _clear_session_cookie(response: Response) -> None:
     if settings.session_cookie_domain:
         cookie_kwargs["domain"] = settings.session_cookie_domain
     response.delete_cookie(key=SESSION_COOKIE_NAME, **cookie_kwargs)
+    response.delete_cookie(key="orca_csrf", **cookie_kwargs)
+
+
+def _require_csrf(session: object, request: Request) -> None:
+    """Require a valid CSRF token for cookie-authenticated mutations."""
+    if not validate_session_csrf(
+        session,
+        request.cookies.get(SESSION_COOKIE_NAME),
+        request.headers.get("x-csrf-token"),
+    ):
+        raise HTTPException(status_code=403, detail="Invalid CSRF token.")
 
 
 def _require_account(session: object, request: Request) -> AppAccount:
@@ -521,9 +602,17 @@ def _require_account(session: object, request: Request) -> AppAccount:
 
 def _require_role(session: object, request: Request, minimum_role: str) -> AppAccount:
     """Resolve the signed-in account and enforce a minimum role."""
-    account = _require_account(session, request)
+    resolved = resolve_account_session(session, request.cookies.get(SESSION_COOKIE_NAME))
+    if resolved is None:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+    account, session_row = resolved
     if not role_meets_threshold(account.role, minimum_role):
         raise HTTPException(status_code=403, detail="Insufficient permissions.")
+    if role_meets_threshold(minimum_role, ACCOUNT_ROLE_MODERATOR):
+        if account.mfa_enabled_at is None:
+            raise HTTPException(status_code=403, detail="MFA setup is required for this account.")
+        if session_row.mfa_verified_at is None:
+            raise HTTPException(status_code=403, detail="MFA verification is required.")
     return account
 
 
@@ -552,20 +641,60 @@ async def root() -> dict[str, str]:
 
 
 @app.post("/api/auth/signup")
-async def post_auth_signup(payload: SignUpRequest, response: Response) -> dict[str, object]:
-    """Create a new app account and immediately sign it in."""
+async def post_auth_signup(payload: SignUpRequest, request: Request) -> dict[str, object]:
+    """Create a new unverified app account and send an email verification token."""
+    context = _request_context(request)
     try:
         with session_scope() as session:
+            if not signup_domain_allowed(str(payload.email), settings):
+                record_auth_event(
+                    session,
+                    event_type="signup_rejected",
+                    email=str(payload.email),
+                    context=context,
+                    details={"reason": "email_domain_not_allowed"},
+                )
+                raise HTTPException(status_code=403, detail="This email domain is not allowed for signup.")
+            if rate_limit_exceeded(
+                session,
+                event_types=("signup_rejected", "signup_created"),
+                email=str(payload.email),
+                context=context,
+            ):
+                record_auth_event(session, event_type="signup_rejected", email=str(payload.email), context=context, details={"reason": "rate_limited"})
+                raise HTTPException(status_code=429, detail="Too many signup attempts. Try again later.")
             account = create_account(
                 session,
                 email=payload.email,
                 password=payload.password,
                 display_name=payload.display_name,
+                require_email_verification=True,
             )
-            token = create_account_session(session, account)
-            session_payload = serialize_account_session(session, account)
-        _set_session_cookie(response, token)
-        return {"session": session_payload}
+            token = issue_auth_token(
+                session,
+                account=account,
+                token_type="email_verification",
+                duration=AUTH_TOKEN_DURATION,
+                email=account.email,
+            )
+            email_result = send_verification_email(account=account, token=token, settings=settings)
+            if not email_result.sent and not email_result.dev_token and settings.app_env.lower() == "production":
+                raise HTTPException(status_code=503, detail="Email verification is not configured.")
+            record_auth_event(
+                session,
+                event_type="signup_created",
+                account=account,
+                context=context,
+                details={"verification_email_sent": email_result.sent},
+            )
+            return {
+                "verification_required": True,
+                "email_sent": email_result.sent,
+                "dev_verification_token": email_result.dev_token,
+                "message": "Check your email to verify your account.",
+            }
+    except HTTPException:
+        raise
     except DuplicateEmailError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
@@ -575,17 +704,175 @@ async def post_auth_signup(payload: SignUpRequest, response: Response) -> dict[s
 
 
 @app.post("/api/auth/login")
-async def post_auth_login(payload: LoginRequest, response: Response) -> dict[str, object]:
+async def post_auth_login(payload: LoginRequest, request: Request, response: Response) -> dict[str, object]:
     """Authenticate an existing app account and issue a cookie-backed session."""
+    context = _request_context(request)
     try:
         with session_scope() as session:
-            account = authenticate_account(session, email=payload.email, password=payload.password)
+            if rate_limit_exceeded(
+                session,
+                event_types=("login_failed", "account_locked"),
+                email=str(payload.email),
+                context=context,
+            ):
+                raise HTTPException(status_code=429, detail="Too many login attempts. Try again later.")
+            account = authenticate_account(session, email=payload.email, password=payload.password, context=context)
             if account is None:
                 raise HTTPException(status_code=401, detail="Invalid email or password.")
-            token = create_account_session(session, account)
+            if role_meets_threshold(account.role, ACCOUNT_ROLE_MODERATOR) and account.mfa_enabled_at is not None:
+                mfa_token = issue_mfa_challenge(session, account=account, context=context)
+                return {"mfa_required": True, "mfa_token": mfa_token}
+            issue = create_account_session(session, account, context=context, mfa_verified=False)
             session_payload = serialize_account_session(session, account)
-        _set_session_cookie(response, token)
-        return {"session": session_payload}
+        _set_session_cookie(response, issue.session_token)
+        _set_csrf_cookie(response, issue.csrf_token)
+        return {"session": session_payload, "csrf_token": issue.csrf_token}
+    except HTTPException:
+        raise
+    except (OSError, SQLAlchemyError) as exc:
+        raise _service_error(exc) from exc
+
+
+@app.post("/api/auth/verify-email")
+async def post_auth_verify_email(payload: VerifyEmailRequest, request: Request, response: Response) -> dict[str, object]:
+    """Verify an email token and sign the account in."""
+    context = _request_context(request)
+    try:
+        with session_scope() as session:
+            account = verify_account_email(session, token=payload.token, context=context)
+            if account is None:
+                raise HTTPException(status_code=400, detail="Invalid or expired verification token.")
+            issue = create_account_session(session, account, context=context)
+            session_payload = serialize_account_session(session, account)
+        _set_session_cookie(response, issue.session_token)
+        _set_csrf_cookie(response, issue.csrf_token)
+        return {"session": session_payload, "csrf_token": issue.csrf_token}
+    except HTTPException:
+        raise
+    except (OSError, SQLAlchemyError) as exc:
+        raise _service_error(exc) from exc
+
+
+@app.get("/api/auth/csrf")
+async def get_auth_csrf(request: Request, response: Response) -> dict[str, object]:
+    """Return a fresh CSRF token for the current authenticated session."""
+    try:
+        with session_scope() as session:
+            account = _require_account(session, request)
+            csrf_token = rotate_session_csrf(session, request.cookies.get(SESSION_COOKIE_NAME))
+            if csrf_token is None:
+                raise HTTPException(status_code=401, detail="Authentication required.")
+            record_auth_event(session, event_type="csrf_rotated", account=account, context=_request_context(request))
+        _set_csrf_cookie(response, csrf_token)
+        return {"csrf_token": csrf_token}
+    except HTTPException:
+        raise
+    except (OSError, SQLAlchemyError) as exc:
+        raise _service_error(exc) from exc
+
+
+@app.post("/api/auth/password-reset/request")
+async def post_password_reset_request(payload: PasswordResetRequest, request: Request) -> dict[str, object]:
+    """Request a password reset email."""
+    context = _request_context(request)
+    try:
+        with session_scope() as session:
+            if rate_limit_exceeded(
+                session,
+                event_types=("password_reset_requested",),
+                email=str(payload.email),
+                context=context,
+            ):
+                raise HTTPException(status_code=429, detail="Too many password reset attempts. Try again later.")
+            result = request_password_reset(session, email=str(payload.email), context=context, settings=settings)
+            return {
+                "ok": True,
+                "email_sent": result.sent,
+                "dev_reset_token": result.dev_token,
+            }
+    except HTTPException:
+        raise
+    except (OSError, SQLAlchemyError) as exc:
+        raise _service_error(exc) from exc
+
+
+@app.post("/api/auth/password-reset/confirm")
+async def post_password_reset_confirm(
+    payload: PasswordResetConfirmRequest,
+    request: Request,
+    response: Response,
+) -> dict[str, object]:
+    """Confirm a password reset token and sign in with a fresh session."""
+    context = _request_context(request)
+    try:
+        with session_scope() as session:
+            account = confirm_password_reset(session, token=payload.token, new_password=payload.password, context=context)
+            if account is None:
+                raise HTTPException(status_code=400, detail="Invalid or expired password reset token.")
+            issue = create_account_session(session, account, context=context)
+            session_payload = serialize_account_session(session, account)
+        _set_session_cookie(response, issue.session_token)
+        _set_csrf_cookie(response, issue.csrf_token)
+        return {"session": session_payload, "csrf_token": issue.csrf_token}
+    except HTTPException:
+        raise
+    except (OSError, SQLAlchemyError) as exc:
+        raise _service_error(exc) from exc
+
+
+@app.post("/api/auth/mfa/verify")
+async def post_auth_mfa_verify(payload: MfaVerifyRequest, request: Request, response: Response) -> dict[str, object]:
+    """Complete a password-login MFA challenge."""
+    context = _request_context(request)
+    try:
+        with session_scope() as session:
+            account = verify_mfa_challenge(session, token=payload.mfa_token, code=payload.code, context=context, settings=settings)
+            if account is None:
+                raise HTTPException(status_code=401, detail="Invalid MFA code.")
+            issue = create_account_session(session, account, context=context, mfa_verified=True)
+            session_payload = serialize_account_session(session, account)
+        _set_session_cookie(response, issue.session_token)
+        _set_csrf_cookie(response, issue.csrf_token)
+        return {"session": session_payload, "csrf_token": issue.csrf_token}
+    except HTTPException:
+        raise
+    except (OSError, SQLAlchemyError) as exc:
+        raise _service_error(exc) from exc
+
+
+@app.post("/api/auth/mfa/setup")
+async def post_auth_mfa_setup(request: Request) -> dict[str, object]:
+    """Start TOTP MFA setup for the signed-in account."""
+    try:
+        with session_scope() as session:
+            _require_csrf(session, request)
+            account = _require_account(session, request)
+            if not role_meets_threshold(account.role, ACCOUNT_ROLE_MODERATOR):
+                raise HTTPException(status_code=403, detail="MFA setup is currently required for moderator/admin accounts.")
+            payload = start_mfa_setup(account, settings=settings)
+            record_auth_event(session, event_type="mfa_setup_started", account=account, context=_request_context(request))
+            return payload
+    except HTTPException:
+        raise
+    except (OSError, SQLAlchemyError) as exc:
+        raise _service_error(exc) from exc
+
+
+@app.post("/api/auth/mfa/enable")
+async def post_auth_mfa_enable(payload: MfaEnableRequest, request: Request, response: Response) -> dict[str, object]:
+    """Enable TOTP MFA for the signed-in account after code verification."""
+    try:
+        with session_scope() as session:
+            _require_csrf(session, request)
+            account = _require_account(session, request)
+            if not enable_mfa(session, account=account, code=payload.code, context=_request_context(request), settings=settings):
+                raise HTTPException(status_code=400, detail="Invalid MFA code.")
+            destroy_account_session(session, request.cookies.get(SESSION_COOKIE_NAME))
+            issue = create_account_session(session, account, context=_request_context(request), mfa_verified=True)
+            session_payload = serialize_account_session(session, account)
+        _set_session_cookie(response, issue.session_token)
+        _set_csrf_cookie(response, issue.csrf_token)
+        return {"session": session_payload, "csrf_token": issue.csrf_token}
     except HTTPException:
         raise
     except (OSError, SQLAlchemyError) as exc:
@@ -652,6 +939,7 @@ async def post_auth_logout(request: Request, response: Response) -> dict[str, bo
     """Invalidate the current auth session and clear the cookie."""
     try:
         with session_scope() as session:
+            _require_csrf(session, request)
             destroy_account_session(session, request.cookies.get(SESSION_COOKIE_NAME))
         _clear_session_cookie(response)
         return {"ok": True}
@@ -664,6 +952,7 @@ async def get_auth_me(request: Request) -> dict[str, object]:
     """Return the signed-in account payload for frontend bootstrap."""
     try:
         with session_scope() as session:
+            _require_csrf(session, request)
             account = _require_account(session, request)
             return {"session": serialize_account_session(session, account)}
     except HTTPException:
@@ -677,6 +966,7 @@ async def post_follow_user(user_id: int, request: Request) -> dict[str, object]:
     """Add a trader to the signed-in account watchlist."""
     try:
         with session_scope() as session:
+            _require_csrf(session, request)
             account = _require_account(session, request)
             return {"watchlist": follow_user(session, account_id=account.account_id, user_id=user_id)}
     except HTTPException:
@@ -692,6 +982,7 @@ async def delete_follow_user(user_id: int, request: Request) -> dict[str, object
     """Remove a trader from the signed-in account watchlist."""
     try:
         with session_scope() as session:
+            _require_csrf(session, request)
             account = _require_account(session, request)
             return {"watchlist": unfollow_user(session, account_id=account.account_id, user_id=user_id)}
     except HTTPException:
@@ -705,6 +996,7 @@ async def post_follow_market(market_slug: str, request: Request) -> dict[str, ob
     """Add a market to the signed-in account watchlist."""
     try:
         with session_scope() as session:
+            _require_csrf(session, request)
             account = _require_account(session, request)
             return {"watchlist": follow_market(session, account_id=account.account_id, market_slug=market_slug)}
     except HTTPException:
@@ -720,6 +1012,7 @@ async def delete_follow_market(market_slug: str, request: Request) -> dict[str, 
     """Remove a market from the signed-in account watchlist."""
     try:
         with session_scope() as session:
+            _require_csrf(session, request)
             account = _require_account(session, request)
             return {"watchlist": unfollow_market(session, account_id=account.account_id, market_slug=market_slug)}
     except HTTPException:
@@ -733,6 +1026,7 @@ async def patch_account_preferences(payload: AccountPreferencesPatchRequest, req
     """Persist validated stable UI preferences for the signed-in account."""
     try:
         with session_scope() as session:
+            _require_csrf(session, request)
             account = _require_account(session, request)
             preferences = update_account_preferences(
                 session,
@@ -802,6 +1096,7 @@ async def patch_admin_account(
     """Update account role, activation state, or display name with admin privileges."""
     try:
         with session_scope() as session:
+            _require_csrf(session, request)
             caller = _require_role(session, request, ACCOUNT_ROLE_ADMIN)
             account = session.get(AppAccount, account_id)
             if account is None:
@@ -820,6 +1115,17 @@ async def patch_admin_account(
                 account.is_active = payload.is_active
             if payload.model_dump(exclude_none=True):
                 account.updated_at = utc_now()
+                revoked_sessions = 0
+                if payload.role is not None or payload.is_active is not None:
+                    revoked_sessions = revoke_account_sessions(session, account.account_id)
+                record_auth_event(
+                    session,
+                    event_type="admin_account_updated",
+                    account=account,
+                    email=account.email,
+                    context=_request_context(request),
+                    details={"updated_by": caller.account_id, "revoked_sessions": revoked_sessions},
+                )
             return {"account": _serialize_admin_account(account)}
     except HTTPException:
         raise

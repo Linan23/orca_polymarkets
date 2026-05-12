@@ -48,12 +48,20 @@ export type AuthAccount = {
   email: string;
   display_name: string;
   role: AccountRole;
+  email_verified?: boolean;
+  mfa_enabled?: boolean;
   created_at: string | null;
   last_login_at: string | null;
 };
 
 export type AuthSession = {
   account: AuthAccount;
+  security_state?: {
+    email_verified?: boolean;
+    mfa_required?: boolean;
+    mfa_enabled?: boolean;
+    mfa_setup_required?: boolean;
+  };
   watchlist: WatchlistState;
   preferences: AccountPreferences;
 };
@@ -67,6 +75,25 @@ export type SignUpPayload = {
 export type LoginPayload = {
   email: string;
   password: string;
+};
+
+export type SignUpResponse = {
+  verification_required: boolean;
+  email_sent: boolean;
+  dev_verification_token?: string | null;
+  message: string;
+};
+
+export type LoginResponse = {
+  session?: AuthSession;
+  csrf_token?: string;
+  mfa_required?: boolean;
+  mfa_token?: string;
+};
+
+export type MfaSetupResponse = {
+  secret: string;
+  otpauth_uri: string;
 };
 
 export type DashboardMarketRow = {
@@ -746,6 +773,7 @@ const SESSION_CACHE_PREFIX = "orca:dashboard-read:v2:";
 
 const clientReadCache = new Map<string, { expiresAt: number; value: unknown }>();
 const clientReadInflight = new Map<string, Promise<unknown>>();
+let csrfToken: string | null = null;
 
 export class ApiError extends Error {
   status: number;
@@ -759,10 +787,48 @@ export class ApiError extends Error {
   }
 }
 
+function readCookie(name: string) {
+  if (typeof document === "undefined") return null;
+  return document.cookie
+    .split(";")
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(`${name}=`))
+    ?.slice(name.length + 1) ?? null;
+}
+
+function isMutatingMethod(method: string) {
+  return ["POST", "PATCH", "PUT", "DELETE"].includes(method.toUpperCase());
+}
+
+function csrfExemptPath(path: string) {
+  return (
+    path.startsWith("/api/auth/login") ||
+    path.startsWith("/api/auth/signup") ||
+    path.startsWith("/api/auth/verify-email") ||
+    path.startsWith("/api/auth/mfa/verify") ||
+    path.startsWith("/api/auth/password-reset/")
+  );
+}
+
+async function fetchCsrfTokenRaw(): Promise<string | null> {
+  const response = await fetch(`${API_BASE_URL}/api/auth/csrf`, { credentials: "include", cache: "no-store" });
+  if (!response.ok) return null;
+  const payload = (await response.json()) as { csrf_token?: string };
+  csrfToken = payload.csrf_token ?? readCookie("orca_csrf");
+  return csrfToken;
+}
+
 async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const method = init?.method ?? "GET";
+  const headers = new Headers(init?.headers);
+  if (isMutatingMethod(method) && !csrfExemptPath(path)) {
+    csrfToken = csrfToken ?? readCookie("orca_csrf") ?? (await fetchCsrfTokenRaw());
+    if (csrfToken) headers.set("X-CSRF-Token", csrfToken);
+  }
   const response = await fetch(`${API_BASE_URL}${path}`, {
     credentials: "include",
     ...init,
+    headers,
   });
   if (!response.ok) {
     let payload: unknown = null;
@@ -856,35 +922,92 @@ async function fetchCachedJson<T>(path: string, ttlMs = DASHBOARD_READ_CLIENT_CA
 
 export async function fetchAuthSession(): Promise<AuthSession> {
   const payload = await fetchJson<{ session: AuthSession }>("/api/auth/me");
+  await fetchCsrfTokenRaw();
   return payload.session;
 }
 
-export async function signUpAccount(payload: SignUpPayload): Promise<AuthSession> {
-  const response = await fetchJson<{ session: AuthSession }>("/api/auth/signup", {
+export async function signUpAccount(payload: SignUpPayload): Promise<SignUpResponse> {
+  return fetchJson<SignUpResponse>("/api/auth/signup", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
     body: JSON.stringify(payload),
   });
-  return response.session;
 }
 
-export async function loginAccount(payload: LoginPayload): Promise<AuthSession> {
-  const response = await fetchJson<{ session: AuthSession }>("/api/auth/login", {
+export async function loginAccount(payload: LoginPayload): Promise<LoginResponse> {
+  const response = await fetchJson<LoginResponse>("/api/auth/login", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
     body: JSON.stringify(payload),
   });
-  return response.session;
+  csrfToken = response.csrf_token ?? csrfToken;
+  return response;
 }
 
 export async function logoutAccount(): Promise<void> {
   await fetchJson<{ ok: boolean }>("/api/auth/logout", {
     method: "POST",
   });
+  csrfToken = null;
+}
+
+export async function verifyEmailAccount(token: string): Promise<AuthSession> {
+  const response = await fetchJson<LoginResponse>("/api/auth/verify-email", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token }),
+  });
+  csrfToken = response.csrf_token ?? csrfToken;
+  if (!response.session) throw new Error("Unable to verify account.");
+  return response.session;
+}
+
+export async function verifyMfaLogin(mfaToken: string, code: string): Promise<AuthSession> {
+  const response = await fetchJson<LoginResponse>("/api/auth/mfa/verify", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ mfa_token: mfaToken, code }),
+  });
+  csrfToken = response.csrf_token ?? csrfToken;
+  if (!response.session) throw new Error("Unable to verify MFA.");
+  return response.session;
+}
+
+export async function requestPasswordReset(email: string): Promise<{ ok: boolean; email_sent: boolean; dev_reset_token?: string | null }> {
+  return fetchJson("/api/auth/password-reset/request", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email }),
+  });
+}
+
+export async function confirmPasswordReset(token: string, password: string): Promise<AuthSession> {
+  const response = await fetchJson<LoginResponse>("/api/auth/password-reset/confirm", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token, password }),
+  });
+  csrfToken = response.csrf_token ?? csrfToken;
+  if (!response.session) throw new Error("Unable to reset password.");
+  return response.session;
+}
+
+export async function setupMfaAccount(): Promise<MfaSetupResponse> {
+  return fetchJson<MfaSetupResponse>("/api/auth/mfa/setup", { method: "POST" });
+}
+
+export async function enableMfaAccount(code: string): Promise<AuthSession> {
+  const response = await fetchJson<{ session: AuthSession; csrf_token?: string }>("/api/auth/mfa/enable", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code }),
+  });
+  csrfToken = response.csrf_token ?? csrfToken;
+  return response.session;
 }
 
 export async function followUserAccount(userId: number): Promise<WatchlistState> {

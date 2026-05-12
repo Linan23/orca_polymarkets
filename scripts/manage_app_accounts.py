@@ -73,6 +73,7 @@ def cmd_create(args: argparse.Namespace) -> int:
             email=args.email,
             password=password,
             display_name=normalize_display_name(args.display_name),
+            require_email_verification=False,
         )
         account.role = normalize_account_role(args.role)
         account.updated_at = utc_now()

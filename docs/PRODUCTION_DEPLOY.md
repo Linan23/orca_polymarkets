@@ -25,13 +25,16 @@ cp .env.production.example .env.production
 - `FRONTEND_ORIGIN`
 - `POSTGRES_PASSWORD`
 - `DATABASE_URL`
-- `SESSION_COOKIE_SECURE=true` once HTTPS is active
+- `ALLOWED_SIGNUP_EMAIL_DOMAINS`, as a comma-separated allowlist for self-service signup
+- `AUTH_SECRET_KEY`, as a long random secret used for auth token encryption
+- `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, and `SMTP_FROM_EMAIL` for verification and reset emails
+- `SESSION_COOKIE_SECURE=true`; production auth should run behind HTTPS
 - optional ingestion keys such as `DUNE_API_KEY`
 
 Keep `DATABASE_URL`, `POSTGRES_DB`, `POSTGRES_USER`, and `POSTGRES_PASSWORD` consistent.
 
-For first bring-up on a raw VM, `SITE_ADDRESS=http://SERVER_IP` and `FRONTEND_ORIGIN=http://SERVER_IP` are acceptable.
-After DNS and TLS are ready, switch to the final domain and set `SESSION_COOKIE_SECURE=true`.
+For first bring-up on a raw VM, `SITE_ADDRESS=http://SERVER_IP` and `FRONTEND_ORIGIN=http://SERVER_IP` are acceptable only for non-secure testing.
+After DNS and TLS are ready, switch to the final domain before enabling real user signup.
 
 ## Deploy
 

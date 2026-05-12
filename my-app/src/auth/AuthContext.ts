@@ -4,7 +4,10 @@ import type {
   AccountPreferencesPatch,
   AuthAccount,
   LoginPayload,
+  LoginResponse,
+  MfaSetupResponse,
   SignUpPayload,
+  SignUpResponse,
   WatchlistState,
 } from "../lib/api";
 
@@ -15,8 +18,14 @@ export type AuthContextValue = {
   watchlist: WatchlistState;
   preferences: AccountPreferences;
   refresh: () => Promise<void>;
-  login: (payload: LoginPayload) => Promise<void>;
-  signup: (payload: SignUpPayload) => Promise<void>;
+  login: (payload: LoginPayload) => Promise<LoginResponse>;
+  signup: (payload: SignUpPayload) => Promise<SignUpResponse>;
+  verifyEmail: (token: string) => Promise<void>;
+  verifyMfa: (mfaToken: string, code: string) => Promise<void>;
+  requestPasswordReset: (email: string) => Promise<{ ok: boolean; email_sent: boolean; dev_reset_token?: string | null }>;
+  confirmPasswordReset: (token: string, password: string) => Promise<void>;
+  setupMfa: () => Promise<MfaSetupResponse>;
+  enableMfa: (code: string) => Promise<void>;
   logout: () => Promise<void>;
   toggleUserFollow: (userId: number) => Promise<void>;
   toggleMarketFollow: (marketSlug: string) => Promise<void>;

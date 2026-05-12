@@ -54,6 +54,15 @@ The VM frontend service runs `npm run build` and serves the built `dist/` bundle
 
 Optional live tweet cards require `X_BEARER_TOKEN` in the VM environment. Without it, the homepage keeps the tweet-card layout and links users to `@Polymarket` on X instead of showing fake placeholder posts.
 
+Auth hardening requires these VM environment values before real user signup is enabled:
+
+- `ALLOWED_SIGNUP_EMAIL_DOMAINS`: comma-separated approved email domains.
+- `AUTH_SECRET_KEY`: long random secret for encrypting MFA secrets and token material.
+- `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM_EMAIL`: email verification and password reset delivery.
+- `SESSION_COOKIE_SECURE=true` when the site is served through HTTPS.
+
+Moderator and admin accounts should enable MFA after first login. Accounts created with `scripts/manage_app_accounts.py` are created active and email-verified for operator use.
+
 ## Continuous ML confidence cycle
 
 Manual run:
