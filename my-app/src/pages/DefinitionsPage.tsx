@@ -60,7 +60,7 @@ const slides = [
     type: "definitions",
   },
   {
-    title: "How the ML Works",
+    title: "ML Definitions",
     eyebrow: "Machine Learning",
     type: "ml",
     definitions: [
@@ -133,6 +133,33 @@ const slides = [
         term: "Update With New Data",
         description:
           "As new market and whale data comes in, Orca can refresh predictions and improve future validation.",
+      },
+    ],
+  },
+  {
+    title: "How ML Works",
+    eyebrow: "ML Process",
+    type: "ml-process",
+    definitions: [
+      {
+        term: "1. Input",
+        description:
+          "Orca starts with Polymarket data: current market probability, whale trades, trade size, trusted whale activity, and recent market movement.",
+      },
+      {
+        term: "2. Read the Signal",
+        description:
+          "The model checks which side whales are supporting, how trusted those whales are, and whether similar whale activity has mattered before.",
+      },
+      {
+        term: "3. Output",
+        description:
+          "The dashboard shows a 12-hour and 24-hour market probability forecast, plus a confidence label that tells users how seriously to treat it.",
+      },
+      {
+        term: "4. Validate",
+        description:
+          "When enough time passes, Orca compares the forecast with what actually happened and uses that history to judge future predictions.",
       },
     ],
   },
@@ -285,12 +312,12 @@ useLayoutEffect(() => {
         </div>
       </div>
 
-      {/* SLIDE 2: ML */}
+      {/* SLIDE 2: ML DEFINITIONS */}
       <div className="carousel-slide" ref={(node) => { slideRefs.current[1] = node; }}>
         <div className=" carousel-card definitions-panel" ref={(node) => { cardRefs.current[1] = node; }}>
         <div className="definitions-panel-header">
   <p className="eyebrow">Machine Learning</p>
-  <h2>How the ML Works</h2>
+  <h2>ML Definitions</h2>
 </div>
 
           <div className="definitions-list definitions-list-ml">
@@ -306,16 +333,36 @@ useLayoutEffect(() => {
         </div>
       </div>
 
-      {/* SLIDE 3: TRUST */}
+      {/* SLIDE 3: HOW ML WORKS */}
       <div className="carousel-slide" ref={(node) => { slideRefs.current[2] = node; }}>
         <div className="carousel-card definitions-panel" ref={(node) => { cardRefs.current[2] = node; }}>
+     <div className="definitions-panel-header">
+  <p className="eyebrow">ML Process</p>
+  <h2>How ML Works</h2>
+</div>
+
+       <div className="definitions-list definitions-list-steps">
+  {slides[2].definitions?.map((item) => (
+    <div className="definition-row" key={item.term}>
+      <h3>{item.term}</h3>
+      <p>{item.description}</p>
+    </div>
+  ))}
+</div>
+
+        </div>
+      </div>
+
+      {/* SLIDE 4: TRUST */}
+      <div className="carousel-slide" ref={(node) => { slideRefs.current[3] = node; }}>
+        <div className="carousel-card definitions-panel" ref={(node) => { cardRefs.current[3] = node; }}>
      <div className="definitions-panel-header">
   <p className="eyebrow">Trust Score</p>
   <h2>How the Trust Score Works</h2>
 </div>
 
        <div className="definitions-list">
-  {slides[2].definitions?.map((item) => (
+  {slides[3].definitions?.map((item) => (
     <div className="definition-row" key={item.term}>
       <h3>{item.term}</h3>
       <p>{item.description}</p>

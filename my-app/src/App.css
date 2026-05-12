@@ -3151,6 +3151,13 @@ a {
   gap: 10px;
 }
 
+.page-definitions .definitions-list.definitions-list-steps {
+  grid-template-columns: 1fr;
+  max-width: 920px;
+  margin: 0 auto;
+  gap: 12px;
+}
+
 .page-definitions .definition-row {
   display: grid;
   grid-template-columns: 1fr;
