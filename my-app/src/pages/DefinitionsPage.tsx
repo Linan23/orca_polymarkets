@@ -183,17 +183,20 @@ const [activeSlide, setActiveSlide] = useState(0);
 const [activeSlideHeight, setActiveSlideHeight] = useState<number | null>(null);
 const carouselTopRef = useRef<HTMLDivElement | null>(null);
 const slideRefs = useRef<Array<HTMLDivElement | null>>([]);
+const cardRefs = useRef<Array<HTMLDivElement | null>>([]);
 
-const scrollToCarouselTop = () => {
-  carouselTopRef.current?.scrollIntoView({ block: "start", behavior: "auto" });
+const scrollToCardTop = (slideIndex: number) => {
+  cardRefs.current[slideIndex]?.scrollIntoView({ block: "start", behavior: "auto" });
 };
 
 const setSlideAndScroll = (nextSlide: number | ((current: number) => number)) => {
+  let nextIndex = activeSlide;
   setActiveSlide((current) => {
     const resolved = typeof nextSlide === "function" ? nextSlide(current) : nextSlide;
-    return Math.min(Math.max(resolved, 0), slides.length - 1);
+    nextIndex = Math.min(Math.max(resolved, 0), slides.length - 1);
+    return nextIndex;
   });
-  requestAnimationFrame(scrollToCarouselTop);
+  requestAnimationFrame(() => scrollToCardTop(nextIndex));
 };
 
 useLayoutEffect(() => {
@@ -262,7 +265,7 @@ useLayoutEffect(() => {
     >
       {/* SLIDE 1: DEFINITIONS */}
       <div className="carousel-slide" ref={(node) => { slideRefs.current[0] = node; }}>
-        <div className="carousel-card definitions-panel">
+        <div className="carousel-card definitions-panel" ref={(node) => { cardRefs.current[0] = node; }}>
           <div className="definitions-panel-header">
             <p className="eyebrow">Glossary</p>
             <h2>Key Definitions</h2>
@@ -281,7 +284,7 @@ useLayoutEffect(() => {
 
       {/* SLIDE 2: ML */}
       <div className="carousel-slide" ref={(node) => { slideRefs.current[1] = node; }}>
-        <div className=" carousel-card definitions-panel">
+        <div className=" carousel-card definitions-panel" ref={(node) => { cardRefs.current[1] = node; }}>
         <div className="definitions-panel-header">
   <p className="eyebrow">Machine Learning</p>
   <h2>How the ML Works</h2>
@@ -302,7 +305,7 @@ useLayoutEffect(() => {
 
       {/* SLIDE 3: TRUST */}
       <div className="carousel-slide" ref={(node) => { slideRefs.current[2] = node; }}>
-        <div className="carousel-card definitions-panel">
+        <div className="carousel-card definitions-panel" ref={(node) => { cardRefs.current[2] = node; }}>
      <div className="definitions-panel-header">
   <p className="eyebrow">Trust Score</p>
   <h2>How the Trust Score Works</h2>
