@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import RequireAuth from "./auth/RequireAuth";
+import PageTitle from "./components/PageTitle";
 import ScrollToTop from "./components/ScrollToTop";
 import { prefetchCommonRoutes, routeLoaders } from "./lib/routePrefetch";
 
@@ -37,6 +38,7 @@ export default function App() {
 
   return (
     <>
+      <PageTitle />
       <ScrollToTop />
       <Suspense fallback={<RouteFallback />}>
         <Routes>
