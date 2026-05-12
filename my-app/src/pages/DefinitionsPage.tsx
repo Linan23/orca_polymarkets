@@ -154,7 +154,7 @@ const slides = [
       {
         term: "3. Output",
         description:
-          "The dashboard shows a 12-hour and 24-hour market probability forecast, plus a confidence label that tells users how seriously to treat it.",
+          "The forecast starts from the current market probability, then adjusts it based on trusted whale pressure and similar past patterns. Confidence is higher when similar past forecasts were usually right, and lower when the model has less proof.",
       },
       {
         term: "4. Validate",
@@ -169,34 +169,34 @@ const slides = [
     type: "trust",
     definitions: [
       {
-        term: "Find Whale Activity",
+        term: "1. Find Whale Activity",
         description:
-          "Orca first looks for traders with large positions, high volume, or repeated activity in Polymarket markets.",
+          "Orca first looks for traders who make large trades, hold meaningful positions, or trade often enough to stand out in Polymarket markets.",
       },
       {
-        term: "Check Trade History",
+        term: "2. Review Past Behavior",
         description:
-          "The system reviews each trader’s past markets, profit and loss, timing, buying behavior, selling behavior, and trading frequency.",
+          "Next, it checks how that trader behaved before: what they bought or sold, how often they traded, how long they held positions, and whether past trades tended to work.",
       },
       {
-        term: "Score Reliability",
+        term: "3. Score Reliability",
         description:
-          "A higher trust score means the trader has shown stronger historical signal quality. A lower score means the trader has weaker or less consistent history.",
+          "The system turns that history into a trust score. A higher score means the trader has shown more useful and consistent signals. A lower score means the history is weaker or less proven.",
       },
       {
-        term: "Separate Whale Types",
+        term: "4. Group Whale Types",
         description:
-          "A whale has meaningful activity. A potential whale shows some whale-like behavior but needs more history. A trusted whale has stronger evidence of useful past signals.",
+          "Traders are grouped by strength. A potential whale shows early whale-like activity, a whale has meaningful activity, and a trusted whale has stronger evidence from past behavior.",
       },
       {
-        term: "Apply Model Weight",
+        term: "5. Apply Influence",
         description:
-          "Trusted whales can carry more influence in the ML model than weaker whales. This helps the model avoid treating every large trader the same.",
+          "Trusted whales carry more weight in the ML forecast than weaker or less-proven whales. This helps the model avoid treating every large trade as equally important.",
       },
       {
-        term: "Update Over Time",
+        term: "6. Update Over Time",
         description:
-          "Trust scores can change as new trades are collected. Better future performance can strengthen a score, while weak or inconsistent behavior can reduce it.",
+          "Trust scores are not permanent. As new trades are collected, strong future behavior can raise a score, while weak or inconsistent behavior can lower it.",
       },
     ],
   },
