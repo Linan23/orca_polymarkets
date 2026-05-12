@@ -53,6 +53,11 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Validate history/partition lifecycle rollout state.")
     parser.add_argument("--database-url", default=get_settings().database_url)
     parser.add_argument(
+        "--no-require-sample-data",
+        action="store_true",
+        help="Skip expensive row-count checks and validate only history/partition structure.",
+    )
+    parser.add_argument(
         "--allow-empty-position-snapshots",
         action="store_true",
         help="Allow zero rows in position snapshot legacy/shadow tables for scoped crawls without tracked positions.",
@@ -65,7 +70,12 @@ def _count(session: Any, qualified_name: str) -> int:
     return int(session.execute(text(f'SELECT COUNT(*) FROM "{schema_name}"."{table_name}"')).scalar_one())
 
 
-def run_checks(database_url: str, *, allow_empty_position_snapshots: bool = False) -> list[CheckResult]:
+def run_checks(
+    database_url: str,
+    *,
+    allow_empty_position_snapshots: bool = False,
+    require_sample_data: bool = True,
+) -> list[CheckResult]:
     results: list[CheckResult] = []
     with session_scope(database_url) as session:
         rows = session.execute(
@@ -84,6 +94,35 @@ def run_checks(database_url: str, *, allow_empty_position_snapshots: bool = Fals
         object_map = {str(row.qualified_name): str(row.object_type) for row in rows}
         missing = [name for name, object_type in REQUIRED_OBJECTS.items() if object_map.get(name) != object_type]
         results.append(CheckResult("required_objects", not missing, {"missing": missing}))
+
+        if not require_sample_data:
+            results.append(
+                CheckResult(
+                    "history_count_checks",
+                    True,
+                    {
+                        "required": False,
+                        "skipped": "large history and shadow row counts are only required when sample data is required",
+                    },
+                )
+            )
+            partition_count = int(
+                session.execute(
+                    text(
+                        """
+                        SELECT count(*)
+                        FROM pg_inherits
+                        JOIN pg_class c ON c.oid = inhrelid
+                        JOIN pg_class p ON p.oid = inhparent
+                        JOIN pg_namespace n ON n.oid = p.relnamespace
+                        WHERE (n.nspname = 'analytics' AND p.relname IN ('scrape_run_part', 'transaction_fact_part', 'orderbook_snapshot_part', 'position_snapshot_part', 'whale_score_snapshot_part'))
+                           OR (n.nspname = 'raw' AND p.relname = 'api_payload_part')
+                        """
+                    )
+                ).scalar_one()
+            )
+            results.append(CheckResult("partition_children_present", partition_count >= 6, {"partition_count": partition_count}))
+            return results
 
         comparisons = [
             ("analytics.user_account", "analytics.user_account_history", "user_id"),
@@ -219,6 +258,7 @@ def main() -> int:
     results = run_checks(
         args.database_url,
         allow_empty_position_snapshots=args.allow_empty_position_snapshots,
+        require_sample_data=not args.no_require_sample_data,
     )
     ok = all(item.ok for item in results)
     payload = {"ok": ok, "checks": [asdict(item) for item in results]}

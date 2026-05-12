@@ -941,6 +941,7 @@ def _run_optional_checks(
     build_dashboard: bool,
     *,
     allow_empty_position_snapshots: bool = False,
+    require_sample_data: bool = False,
 ) -> list[CheckResult]:
     """Run optional mutating checks."""
     results: list[CheckResult] = []
@@ -973,6 +974,7 @@ def _run_optional_checks(
         for item in run_history_partition_checks(
             "",
             allow_empty_position_snapshots=allow_empty_position_snapshots,
+            require_sample_data=require_sample_data,
         )
     )
 
@@ -1044,6 +1046,7 @@ def main() -> None:
             run_bootstrap=args.run_bootstrap,
             build_dashboard=args.build_dashboard,
             allow_empty_position_snapshots=allow_empty_position_snapshots,
+            require_sample_data=args.require_sample_data,
         )
     )
 
