@@ -154,7 +154,7 @@ const slides = [
       {
         term: "3. Output",
         description:
-          "The forecast starts from the current market probability, then adjusts it based on trusted whale pressure and similar past patterns. Confidence is higher when similar past forecasts were usually right, and lower when the model has less proof.",
+          "Orca starts with the current market probability, adds the buying or selling pressure from trusted whales, then compares that setup with similar past markets. The result is a 12-hour and 24-hour forecast, plus a confidence level based on how often similar forecasts were right before.",
       },
       {
         term: "4. Validate",
