@@ -136,24 +136,6 @@ function primaryTrendCases(cases: MarketProfileMlPredictionCase[], preferredSide
     .sort((left, right) => windowHours(left.window) - windowHours(right.window));
 }
 
-function forecastMarketSummary(item: MarketProfileMlPredictionCase) {
-  const sideLabel = formatLabel(item.side_label);
-  const futureValue = modelFutureOdds(item);
-  const oppositeValue = complementProbability(futureValue);
-  const oppositeLabel = oppositeSideLabel(item.side_label);
-  const hours = windowHours(item.window);
-  if (typeof futureValue !== "number" || typeof oppositeValue !== "number") {
-    return `The forecast is still being prepared for the next ${hours} hours.`;
-  }
-  if (futureValue > 52) {
-    return `Whale activity indicates the market may move toward ${sideLabel} in the next ${hours} hours.`;
-  }
-  if (oppositeValue > 52) {
-    return `Whale activity indicates the market may move toward ${oppositeLabel} in the next ${hours} hours.`;
-  }
-  return `Whale activity does not show a clear market direction for the next ${hours} hours.`;
-}
-
 function historicalValidationDescription(item: MarketProfileMlPredictionCase) {
   const trainedAccuracyPct = item.validation_accuracy_pct ?? item.direction_signal_accuracy_pct;
   if (item.historical_validation_tier === "market_closed") {
@@ -303,10 +285,7 @@ function netSupportInsight(item: MarketProfileMlPredictionCase) {
   return {
     label: "Net Support",
     value: resolvedNet > 0 ? "More whale buying" : "More whale selling",
-    detail:
-      resolvedNet > 0
-        ? "Whale entries outweigh exits on this side."
-        : "Whale exits outweigh entries on this side.",
+    detail: resolvedNet > 0 ? "Whale entries outweigh exits." : "Whale exits outweigh entries.",
   };
 }
 
@@ -919,7 +898,6 @@ function MarketPredictionOutcomeSummary({ cases }: { cases: MarketProfileMlPredi
               ))}
             </div>
             <div className="market-ml-outcome-footer">
-              <span>{forecastMarketSummary(item)}</span>
               <span>Accuracy: {historicalValidationDescription(item)}</span>
             </div>
           </article>
