@@ -154,19 +154,15 @@ export default function LoginPage() {
           email,
           password,
         });
-        const devHint = response.dev_verification_token
-          ? ` Development verification token: ${response.dev_verification_token}`
-          : "";
-        setNotice(`${response.message || "Check your email to verify your account."}${devHint}`);
+        setNotice(response.message || "Check your email to verify your account.");
         setPassword("");
         setConfirmPassword("");
       } else if (resetToken) {
         await confirmPasswordReset(resetToken, password);
         navigate(returnTo, { replace: true });
       } else {
-        const response = await requestPasswordReset(email);
-        const devHint = response.dev_reset_token ? ` Development reset token: ${response.dev_reset_token}` : "";
-        setNotice(`If this account exists, a password reset link has been sent.${devHint}`);
+        await requestPasswordReset(email);
+        setNotice("If this account exists, a password reset link has been sent.");
       }
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "Unable to complete this request right now.");
