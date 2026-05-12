@@ -340,10 +340,6 @@ export default function LoginPage() {
           {(error || notice) && !mfaToken && !needsMfaSetup ? null : notice && <div className="login-notice">{notice}</div>}
           {error && (mfaToken || needsMfaSetup) && <div className="login-error">{error}</div>}
 
-          <p className="login-subnote">
-            Email verification, CSRF-protected sessions, and extra admin MFA keep account data safer.
-          </p>
-
           <Link to="/" className="back-home">
             {"<- Back to homepage"}
           </Link>
