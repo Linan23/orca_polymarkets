@@ -3,6 +3,11 @@ import { useAuth } from "../auth/AuthContext";
 import logo from "../assets/orca.png";
 import { prefetchRoute } from "../lib/routePrefetch";
 
+function scrollDefinitionsCarouselIfCurrentPage() {
+  if (window.location.pathname !== "/definitions") return;
+  window.dispatchEvent(new Event("orca:scroll-definitions-carousel"));
+}
+
 export default function TopNavbar() {
   const { account, isAuthenticated, logout } = useAuth();
 
@@ -30,7 +35,13 @@ export default function TopNavbar() {
               Leaderboard
             </NavLink>
 
-            <NavLink to="/definitions" className={getLinkClass} onMouseEnter={() => prefetchRoute("/definitions")} onFocus={() => prefetchRoute("/definitions")}>
+            <NavLink
+              to="/definitions"
+              className={getLinkClass}
+              onClick={scrollDefinitionsCarouselIfCurrentPage}
+              onMouseEnter={() => prefetchRoute("/definitions")}
+              onFocus={() => prefetchRoute("/definitions")}
+            >
               Definitions
             </NavLink>
 

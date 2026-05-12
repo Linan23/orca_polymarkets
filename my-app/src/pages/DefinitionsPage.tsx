@@ -184,6 +184,18 @@ const [activeSlideHeight, setActiveSlideHeight] = useState<number | null>(null);
 const carouselTopRef = useRef<HTMLDivElement | null>(null);
 const slideRefs = useRef<Array<HTMLDivElement | null>>([]);
 
+const scrollToCarouselTop = () => {
+  carouselTopRef.current?.scrollIntoView({ block: "start", behavior: "auto" });
+};
+
+const setSlideAndScroll = (nextSlide: number | ((current: number) => number)) => {
+  setActiveSlide((current) => {
+    const resolved = typeof nextSlide === "function" ? nextSlide(current) : nextSlide;
+    return Math.min(Math.max(resolved, 0), slides.length - 1);
+  });
+  requestAnimationFrame(scrollToCarouselTop);
+};
+
 useLayoutEffect(() => {
   const activeNode = slideRefs.current[activeSlide];
   if (!activeNode) return;
@@ -204,8 +216,14 @@ useLayoutEffect(() => {
 }, [activeSlide]);
 
 useEffect(() => {
-  carouselTopRef.current?.scrollIntoView({ block: "start", behavior: "auto" });
+  scrollToCarouselTop();
 }, [activeSlide]);
+
+useEffect(() => {
+  const handleScrollToDefinitions = () => scrollToCarouselTop();
+  window.addEventListener("orca:scroll-definitions-carousel", handleScrollToDefinitions);
+  return () => window.removeEventListener("orca:scroll-definitions-carousel", handleScrollToDefinitions);
+}, []);
 
   return (
     <div className="page page-definitions">
@@ -240,7 +258,7 @@ useEffect(() => {
       type="button"
       aria-label="Previous glossary card"
       disabled={activeSlide === 0}
-      onClick={() => setActiveSlide((prev) => Math.max(prev - 1, 0))}
+      onClick={() => setSlideAndScroll((prev) => prev - 1)}
     >
       ‹
     </button>
@@ -318,9 +336,7 @@ useEffect(() => {
       type="button"
       aria-label="Next glossary card"
       disabled={activeSlide === slides.length - 1}
-      onClick={() =>
-        setActiveSlide((prev) => Math.min(prev + 1, slides.length - 1))
-      }
+      onClick={() => setSlideAndScroll((prev) => prev + 1)}
     >
       ›
     </button>
@@ -331,7 +347,7 @@ useEffect(() => {
         <div
           key={i}
           className={`dot ${activeSlide === i ? "active" : ""}`}
-          onClick={() => setActiveSlide(i)}
+          onClick={() => setSlideAndScroll(i)}
         />
       ))}
     </div>
