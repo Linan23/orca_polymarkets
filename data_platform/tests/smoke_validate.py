@@ -21,12 +21,20 @@ if str(REPO_ROOT) not in sys.path:
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
+if os.getenv("ORCA_SMOKE_SEND_EMAILS", "").strip().lower() not in {"1", "true", "yes", "on"}:
+    os.environ["APP_ENV"] = "smoke"
+    os.environ["SMTP_HOST"] = ""
+    os.environ["SMTP_USERNAME"] = ""
+    os.environ["SMTP_PASSWORD"] = ""
+    os.environ["SMTP_FROM_EMAIL"] = ""
+
 from data_platform.api.server import app
 from data_platform.services.account_auth import SESSION_COOKIE_NAME
 from data_platform.db.bootstrap import create_database_objects
 from data_platform.db.session import session_scope
 from data_platform.services.dashboard_builder import build_dashboard_snapshot
 from data_platform.services.whale_scoring import build_whale_score_snapshot
+from data_platform.settings import get_settings
 from data_platform.tests.history_partition_check import run_checks as run_history_partition_checks
 
 
@@ -150,6 +158,14 @@ def _complete_signup_session(client: TestClient, *, email: str, password: str, s
     return response.status_code == 200, payload if isinstance(payload, dict) else {}, csrf_token, source
 
 
+def _smoke_email(prefix: str) -> str:
+    """Return a smoke-test email that respects the configured signup domain allowlist."""
+    configured_domain = os.getenv("SMOKE_AUTH_EMAIL_DOMAIN", "").strip().lower().lstrip("@")
+    allowed_domains = get_settings().allowed_signup_email_domains
+    domain = configured_domain or (allowed_domains[0] if allowed_domains else "example.com")
+    return f"{prefix}-{uuid4().hex[:12]}@{domain}"
+
+
 def _expected_alembic_revisions() -> tuple[str, ...]:
     """Return the Alembic head revisions declared by this checkout."""
     config = Config(str(REPO_ROOT / "alembic.ini"))
@@ -238,36 +254,39 @@ def _run_database_checks(require_sample_data: bool, *, allow_empty_position_snap
             )
         )
 
-        preferred_username_count = int(
-            session.execute(
-                text("SELECT COUNT(*) FROM analytics.user_account WHERE COALESCE(preferred_username, '') <> ''")
-            ).scalar_one()
-        )
-        named_polymarket_wallets = int(
-            session.execute(
-                text(
-                    """
-                    SELECT COUNT(DISTINCT lower(COALESCE(trade->>'proxyWallet', '')))
-                    FROM raw.api_payload payload_row
-                    CROSS JOIN LATERAL jsonb_array_elements(payload_row.payload->'trades') AS trade
-                    WHERE payload_row.entity_type = 'trades'
-                      AND COALESCE(trade->>'name', '') <> ''
-                      AND NOT (trade->>'name' ~* '^0x[0-9a-f]{8,}(-[0-9]+)?$')
-                    """
-                )
-            ).scalar_one()
-        )
-        results.append(
-            CheckResult(
-                "preferred_username_backfill",
-                (not require_sample_data) or named_polymarket_wallets == 0 or preferred_username_count > 0,
-                {
-                    "required": require_sample_data,
-                    "named_polymarket_wallets": named_polymarket_wallets,
-                    "preferred_username_count": preferred_username_count,
-                },
+        if require_sample_data:
+            preferred_username_count = int(
+                session.execute(
+                    text("SELECT COUNT(*) FROM analytics.user_account WHERE COALESCE(preferred_username, '') <> ''")
+                ).scalar_one()
             )
-        )
+            named_polymarket_wallets = int(
+                session.execute(
+                    text(
+                        """
+                        SELECT COUNT(DISTINCT lower(COALESCE(trade->>'proxyWallet', '')))
+                        FROM raw.api_payload payload_row
+                        CROSS JOIN LATERAL jsonb_array_elements(payload_row.payload->'trades') AS trade
+                        WHERE payload_row.entity_type = 'trades'
+                          AND COALESCE(trade->>'name', '') <> ''
+                          AND NOT (trade->>'name' ~* '^0x[0-9a-f]{8,}(-[0-9]+)?$')
+                        """
+                    )
+                ).scalar_one()
+            )
+            preferred_username_ok = named_polymarket_wallets == 0 or preferred_username_count > 0
+            preferred_username_details = {
+                "required": require_sample_data,
+                "named_polymarket_wallets": named_polymarket_wallets,
+                "preferred_username_count": preferred_username_count,
+            }
+        else:
+            preferred_username_ok = True
+            preferred_username_details = {
+                "required": require_sample_data,
+                "skipped": "raw payload username scan is only required when sample data is required",
+            }
+        results.append(CheckResult("preferred_username_backfill", preferred_username_ok, preferred_username_details))
     return results
 
 
@@ -636,7 +655,7 @@ def _run_api_checks() -> list[CheckResult]:
                 )
             )
 
-        auth_email = f"smoke-{uuid4().hex[:12]}@example.com"
+        auth_email = _smoke_email("smoke")
         auth_password = "SmokePass123!"
         signup_response = client.post(
             "/api/auth/signup",
@@ -795,7 +814,7 @@ def _run_api_checks() -> list[CheckResult]:
         )
 
         with TestClient(app) as second_client:
-            second_email = f"smoke-{uuid4().hex[:12]}@example.com"
+            second_email = _smoke_email("smoke")
             second_signup = second_client.post(
                 "/api/auth/signup",
                 json={
