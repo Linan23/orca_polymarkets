@@ -145,13 +145,16 @@ def timeframe_start(timeframe: str) -> datetime | None:
 
 def _latest_whale_batch(session: Session) -> tuple[Any, Any] | None:
     """Return the latest coherent whale-score batch identifiers."""
+    latest_snapshot_time = session.scalar(select(func.max(WhaleScoreSnapshot.snapshot_time)))
+    if latest_snapshot_time is None:
+        return None
     return session.execute(
         select(
             WhaleScoreSnapshot.snapshot_time,
             WhaleScoreSnapshot.scoring_version,
         )
+        .where(WhaleScoreSnapshot.snapshot_time == latest_snapshot_time)
         .order_by(
-            desc(WhaleScoreSnapshot.snapshot_time),
             desc(WhaleScoreSnapshot.whale_score_snapshot_id),
         )
         .limit(1)
