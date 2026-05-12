@@ -186,17 +186,20 @@ const slideRefs = useRef<Array<HTMLDivElement | null>>([]);
 const cardRefs = useRef<Array<HTMLDivElement | null>>([]);
 
 const scrollToCardTop = (slideIndex: number) => {
-  cardRefs.current[slideIndex]?.scrollIntoView({ block: "start", behavior: "auto" });
+  const target = cardRefs.current[slideIndex];
+  if (!target) return;
+  const topbarOffset = 80;
+  const targetTop = target.getBoundingClientRect().top + window.scrollY - topbarOffset;
+  window.scrollTo({ top: Math.max(0, targetTop), left: 0, behavior: "auto" });
 };
 
 const setSlideAndScroll = (nextSlide: number | ((current: number) => number)) => {
-  let nextIndex = activeSlide;
-  setActiveSlide((current) => {
-    const resolved = typeof nextSlide === "function" ? nextSlide(current) : nextSlide;
-    nextIndex = Math.min(Math.max(resolved, 0), slides.length - 1);
-    return nextIndex;
+  const resolved = typeof nextSlide === "function" ? nextSlide(activeSlide) : nextSlide;
+  const nextIndex = Math.min(Math.max(resolved, 0), slides.length - 1);
+  setActiveSlide(nextIndex);
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => scrollToCardTop(nextIndex));
   });
-  requestAnimationFrame(() => scrollToCardTop(nextIndex));
 };
 
 useLayoutEffect(() => {
@@ -253,7 +256,7 @@ useLayoutEffect(() => {
       disabled={activeSlide === 0}
       onClick={() => setSlideAndScroll((prev) => prev - 1)}
     >
-      ‹
+      ←
     </button>
 
     <div
@@ -331,7 +334,7 @@ useLayoutEffect(() => {
       disabled={activeSlide === slides.length - 1}
       onClick={() => setSlideAndScroll((prev) => prev + 1)}
     >
-      ›
+      →
     </button>
 
     {/* DOTS */}
