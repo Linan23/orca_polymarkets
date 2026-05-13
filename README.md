@@ -108,9 +108,9 @@ Open `http://localhost:5173`.
 ## Common Checks
 
 ```bash
-python -m compileall data_platform scripts
-python scripts/secret_scan.py
-python data_platform/tests/smoke_validate.py
+.venv/bin/python -m compileall data_platform scripts
+.venv/bin/python scripts/secret_scan.py
+.venv/bin/python data_platform/tests/smoke_validate.py
 npm --prefix my-app run lint
 npm --prefix my-app run build
 ```

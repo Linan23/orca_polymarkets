@@ -750,6 +750,7 @@ class UserProfile(Base):
     user_profile_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     dashboard_id: Mapped[int] = mapped_column(ForeignKey("analytics.dashboard.dashboard_id"), nullable=False)
     user_id: Mapped[int] = mapped_column(ForeignKey("analytics.user_account.user_id"), nullable=False)
+    whale_status: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     primary_market_ref: Mapped[str | None] = mapped_column(String(255))
     historical_actions_summary: Mapped[dict | None] = mapped_column(JSON_VARIANT)
     insider_stats: Mapped[dict | None] = mapped_column(JSON_VARIANT)
@@ -829,6 +830,56 @@ class MlMarketPredictionSnapshot(Base):
     reliability_payload: Mapped[dict] = mapped_column(JSON_VARIANT, nullable=False, default=dict)
     prediction_payload: Mapped[dict] = mapped_column(JSON_VARIANT, nullable=False, default=dict)
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
+class MlMarketPredictionValidation(Base):
+    __tablename__ = "ml_market_prediction_validation"
+    __table_args__ = (
+        UniqueConstraint(
+            "ml_market_prediction_snapshot_id",
+            name="uq_ml_market_prediction_validation_snapshot",
+        ),
+        Index("ix_ml_market_prediction_validation_market_window", "market_slug", "prediction_window_hours"),
+        Index("ix_ml_market_prediction_validation_status", "validation_status", "validated_at"),
+        {"schema": "analytics"},
+    )
+
+    ml_market_prediction_validation_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    ml_market_prediction_snapshot_id: Mapped[int] = mapped_column(
+        ForeignKey("analytics.ml_market_prediction_snapshot.ml_market_prediction_snapshot_id"),
+        nullable=False,
+    )
+    platform_id: Mapped[int] = mapped_column(ForeignKey("analytics.platform.platform_id"), nullable=False)
+    market_contract_id: Mapped[int] = mapped_column(
+        ForeignKey("analytics.market_contract.market_contract_id"),
+        nullable=False,
+    )
+    market_slug: Mapped[str] = mapped_column(String(255), nullable=False)
+    side_label: Mapped[str] = mapped_column(String(128), nullable=False)
+    prediction_window_hours: Mapped[int] = mapped_column(Integer, nullable=False)
+    observation_time: Mapped[DateTime] = mapped_column(DateTime(timezone=True), nullable=False)
+    prediction_target_time: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True))
+    prediction_generated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), nullable=False)
+    current_odds_pct: Mapped[float | None] = mapped_column(MONEY)
+    predicted_future_odds_pct: Mapped[float | None] = mapped_column(MONEY)
+    predicted_delta_pts: Mapped[float | None] = mapped_column(MONEY)
+    actual_future_odds_pct: Mapped[float | None] = mapped_column(MONEY)
+    actual_delta_pts: Mapped[float | None] = mapped_column(MONEY)
+    signed_error_pts: Mapped[float | None] = mapped_column(MONEY)
+    absolute_error_pts: Mapped[float | None] = mapped_column(MONEY)
+    squared_error_pts: Mapped[float | None] = mapped_column(MONEY)
+    predicted_direction: Mapped[str | None] = mapped_column(String(16))
+    actual_direction: Mapped[str | None] = mapped_column(String(16))
+    direction_match: Mapped[bool | None] = mapped_column(Boolean)
+    validation_status: Mapped[str] = mapped_column(String(32), nullable=False, default="missing_actual")
+    actual_source: Mapped[str | None] = mapped_column(String(64))
+    actual_source_detail: Mapped[str | None] = mapped_column(Text)
+    actual_observed_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True))
+    target_delay_seconds: Mapped[int | None] = mapped_column(Integer)
+    validation_payload: Mapped[dict] = mapped_column(JSON_VARIANT, nullable=False, default=dict)
+    validated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+    updated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
 
 
 class UserLeaderboard(Base):

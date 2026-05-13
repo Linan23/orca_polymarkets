@@ -44,7 +44,7 @@ Do not commit `/etc/orca.env` or copy real values into `.env.production.example`
 ## Deploy From Git
 
 ```bash
-cd /home/lynchej/orca_polymarkets
+cd /home/<vm-user>/orca_polymarkets
 git pull origin main
 scripts/setup_vm.sh
 ```

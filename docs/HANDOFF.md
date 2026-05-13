@@ -45,7 +45,7 @@ Full details: [SETUP_LOCAL.md](SETUP_LOCAL.md).
 Update through Git:
 
 ```bash
-cd /home/lynchej/orca_polymarkets
+cd /home/<vm-user>/orca_polymarkets
 git pull origin main
 scripts/setup_vm.sh
 ```

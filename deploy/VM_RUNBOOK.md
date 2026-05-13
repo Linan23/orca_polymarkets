@@ -5,7 +5,7 @@ The canonical VM deployment guide is [../docs/DEPLOY_VM.md](../docs/DEPLOY_VM.md
 Quick deploy:
 
 ```bash
-cd /home/lynchej/orca_polymarkets
+cd /home/<vm-user>/orca_polymarkets
 git pull origin main
 scripts/setup_vm.sh
 ```
