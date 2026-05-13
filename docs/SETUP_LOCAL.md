@@ -23,6 +23,21 @@ scripts/setup_local.sh --skip-frontend
 
 `--snapshot` imports an approved database snapshot. Do not commit snapshots to Git.
 
+## Where To Change Setup Values
+
+| Need to change | File/location |
+| --- | --- |
+| Local environment values | `.env` |
+| Local environment template | `.env.example` |
+| Local setup script behavior | `scripts/setup_local.sh` |
+| Local Docker database/API/frontend services | `compose.yaml` |
+| Backend API URL used by frontend | `VITE_API_BASE_URL` in `.env` |
+| Frontend origin allowed by backend | `FRONTEND_ORIGIN` in `.env` |
+| Local database connection | `DATABASE_URL` in `.env` |
+| Signup domains, auth secret, SMTP | `.env` |
+
+Do not edit `.env.example` with real credentials. Use it only as the template for new developers.
+
 ## Run The Website Locally
 
 Start the API:

@@ -25,6 +25,22 @@ SESSION_COOKIE_SAMESITE=lax
 
 Use `SESSION_COOKIE_SECURE=true` only when the site is served through HTTPS.
 
+## Where To Change VM Setup Values
+
+| Need to change | File/location |
+| --- | --- |
+| Server environment values | `/etc/orca.env` |
+| Server environment template | `.env.production.example` |
+| VM setup/deploy script behavior | `scripts/setup_vm.sh` |
+| API service start command | `scripts/run_api_vm.sh` |
+| Frontend service start command | `scripts/run_frontend_vm.sh` |
+| Live ingest service start command | `scripts/run_ingest_live_vm.sh` |
+| Analytics refresh command | `scripts/run_analytics_refresh_vm.sh` |
+| Systemd service definitions | `deploy/systemd/` |
+| Production Docker services | `compose.prod.yaml` |
+
+Do not commit `/etc/orca.env` or copy real values into `.env.production.example`.
+
 ## Deploy From Git
 
 ```bash

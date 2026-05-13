@@ -78,6 +78,20 @@ scripts/setup_vm.sh --snapshot /path/to/shared_data_snapshot.sql
 
 The VM script expects server-only configuration in `/etc/orca.env`. Do not put real credentials in Git.
 
+Setup values are changed in these places:
+
+| Need to change | File/location |
+| --- | --- |
+| Local developer environment values | `.env` copied from `.env.example` |
+| Local setup script behavior | `scripts/setup_local.sh` |
+| VM/server environment values | `/etc/orca.env` copied from `.env.production.example` |
+| VM setup/deploy script behavior | `scripts/setup_vm.sh` |
+| Docker local services | `compose.yaml` |
+| Docker production services | `compose.prod.yaml` |
+| Frontend API origin | `VITE_API_BASE_URL` in `.env` or `/etc/orca.env` |
+| Backend allowed frontend origin | `FRONTEND_ORIGIN` in `.env` or `/etc/orca.env` |
+| Auth, signup domains, SMTP | `.env` locally; `/etc/orca.env` on VM |
+
 ## Quick Local Run
 
 ```bash
