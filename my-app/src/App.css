@@ -57,6 +57,7 @@ a {
   font-weight: 800;
 }
 
+/* Used by: HomePage (HomepageSummaryCards), AnalyticsPage */
 .summary-section {
   padding: 8px 32px 28px;
 }
@@ -75,6 +76,7 @@ a {
   font-weight: 800;
 }
 
+/* Used by: HomePage Summary Cards, Analytics Dashboard */
 .summary-grid {
   display: grid;
   grid-template-columns: repeat(12, minmax(0, 1fr));
@@ -95,6 +97,7 @@ a {
   min-height: 100%;
 }
 
+/* Used by: HomePage summary cards with feature grid */
 .summary-card-feature {
   grid-column: span 6;
   background:
@@ -223,12 +226,14 @@ a {
   font-size: 0.95rem;
 }
 
+/* Used by: AnalyticsPage, ResearchAnalyticsSection */
 .analytics-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
 }
 
+/* Used by: HomePage ResearchAnalytics, AnalyticsPage */
 .research-analytics-grid > .leaderboard-card {
   display: flex;
   flex-direction: column;
@@ -344,6 +349,7 @@ a {
 
 /* ================= NEWS ================= */
 
+/* Used by: HomePage (PolymarketNewsGallery component) */
 .pm-news-section {
   padding: 8px 32px 28px;
 }
@@ -398,6 +404,7 @@ a {
   display: none;
 }
 
+/* Used by: PolymarketNewsGallery (news cards) */
 .pm-news-card {
   flex: 0 0 300px;
   min-height: 190px;
@@ -512,6 +519,7 @@ a {
 
 /* ================= LEADERBOARD ================= */
 
+/* Used by: LeaderboardPage, FollowingPage, ResearchAnalytics, UserProfile */
 .leaderboard-card {
   background: rgba(8, 18, 40, 0.88);
   border: 1px solid rgba(120, 142, 190, 0.18);
@@ -825,6 +833,7 @@ a {
   }
 }
 
+/* Used by: LeaderboardPage filters and toggles */
 .leaderboard-toggle {
   display: inline-flex;
   align-items: center;
@@ -954,6 +963,7 @@ a {
 
 /* ================= LOGIN PAGE ================= */
 
+/* Used by: LoginPage */
 .login-page {
   min-height: 100vh;
   display: flex;
@@ -1108,6 +1118,7 @@ a {
 
 /* ===== FULL WIDTH NAVBAR ===== */
 
+/* Used by: TopNavbar component (across all pages) */
 .topbar {
   position: sticky;
   top: 0;
@@ -1238,6 +1249,7 @@ a {
 }
 
 /* ================= Market Pfp ================= */
+/* Used by: MarketProfile page */
 .market-profile-page {
   min-height: 100vh;
   padding: 32px;
@@ -1596,6 +1608,7 @@ a {
   }
 }
 
+/* Used by: MarketProfile, UserProfile (follow/unfollow button) */
 .follow-btn {
   appearance: none;
   -webkit-appearance: none;
@@ -1696,6 +1709,7 @@ a {
 }
 
 /* ================= User PFP ================= */
+/* Used by: UserProfile page (trader overview and tabs) */
 .trader-overview-box,
 .trader-tabs-box {
   padding: 24px;
@@ -1935,6 +1949,7 @@ a {
   word-break: break-word;
 }
 
+/* Used by: FollowingPage (following traders overview) */
 .timeline-list {
   display: grid;
   gap: 12px;
@@ -2036,6 +2051,7 @@ a {
   }
 }
 
+/* Used by: UserProfile page (main container) */
 .user-profile-page {
   min-height: 100vh;
   padding: 32px;
@@ -2161,6 +2177,7 @@ a {
   color: rgba(226, 232, 240, 0.72);
 }
 
+/* Used by: UserProfile (charts and donut visualizations) */
 .donut-layout {
   display: grid;
   grid-template-columns: minmax(220px, 260px) minmax(0, 1fr);
@@ -2380,6 +2397,7 @@ a {
   font-size: 0.9rem;
 }
 
+/* Used by: UserProfile tabs (data tables for positions, history) */
 .table-wrap {
   overflow-x: auto;
   border-radius: 18px;
@@ -2864,6 +2882,7 @@ a {
   background: rgba(127, 29, 29, 0.45);
 }
 
+/* Used by: UserProfile watchlist section */
 @media (max-width: 1100px) {
   .insight-strip {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -3051,6 +3070,7 @@ a {
   }
 }
 
+/* Used by: DefinitionsPage */
 .page-definitions {
   min-height: 100vh;
   background: #061326;
@@ -3240,6 +3260,7 @@ a {
 }
 
 
+/* Used by: HomePage (main hero and dashboard sections) */
 .home-dashboard {
   min-height: 100vh;
   background:
@@ -3387,6 +3408,7 @@ a {
   }
 }
 
+/* Used by: HomePage (coverage pie charts) */
 .coverage-pie-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
@@ -4422,6 +4444,7 @@ font-weight:700;
 }
 
 
+/* Used by: AboutUsPage */
 .page-about {
   min-height: 100vh;
   background: #061326;
@@ -4921,7 +4944,7 @@ font-weight:700;
     flex: 0 0 auto;
   }
 }
-
+/* ===== ML in market profile ===== */
 .market-ml-trend-card {
   margin-bottom: 24px;
 }
@@ -5681,7 +5704,7 @@ font-weight:700;
   }
 }
 
-
+/* ===== Carousel in about us===== */
 .carousel-container {
   position: relative;
   overflow: hidden;
