@@ -184,20 +184,11 @@ def _backfill_part_source_cutoff() -> None:
 def upgrade() -> None:
     _add_source_cutoff_column("whale_score_snapshot")
     _add_source_cutoff_column("whale_score_snapshot_part")
-    # Do not run historical cutoff backfills during service startup. On a populated
-    # VM this can hold an exclusive migration lock long enough to keep the API
-    # offline. New whale score jobs write this field directly; older rows may
-    # remain NULL until a maintenance backfill is run deliberately.
-    _create_index_if_missing(
-        "ix_whale_score_snapshot_source_cutoff",
-        "whale_score_snapshot",
-        ["platform_id", "source_data_cutoff", "snapshot_time"],
-    )
-    _create_index_if_missing(
-        "ix_whale_score_snapshot_part_source_cutoff",
-        "whale_score_snapshot_part",
-        ["platform_id", "source_data_cutoff", "snapshot_time"],
-    )
+    # Do not run historical cutoff backfills or large index builds during
+    # service startup. On a populated VM these can hold migration locks long
+    # enough to keep the API offline. New whale score jobs write this field
+    # directly; older rows and optional indexes should be handled by deliberate
+    # maintenance jobs.
     _create_whale_score_all_view(WHALE_SCORE_COLUMNS_WITH_CUTOFF)
 
 
