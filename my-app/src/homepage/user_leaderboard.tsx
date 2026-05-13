@@ -63,11 +63,11 @@ function UserRows({
         const isProfitSort = sortBy === "profitability";
 
         return (
-          <div key={`${user.user_id}-${user.external_user_ref}`} className="leaderboard-row">
-            <div className={`leaderboard-rank ${getRankClass(rank)}`}>{rank}</div>
-            <div className="leaderboard-avatar">
-              {tier === "trusted" ? "★" : tier === "whale" ? "◉" : tier === "potential" ? "◎" : "·"}
-            </div>
+            <div key={`${user.user_id}-${user.external_user_ref}`} className="leaderboard-row">
+              <div className={`leaderboard-rank ${getRankClass(rank)}`}>{rank}</div>
+              <div className="leaderboard-avatar">
+                {tier === "trusted" ? "★" : tier === "whale" ? "◉" : tier === "potential" ? "◎" : "·"}
+              </div>
 
             <div className="leaderboard-main">
               <div className="leaderboard-main-top">

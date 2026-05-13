@@ -35,14 +35,19 @@ FOCUS_DOMAIN_ALIASES: dict[str, str] = {
     "gaming": "video-games",
     "finance": "finance",
     "financial": "finance",
-    "tradfi": "finance",
     "stock": "finance",
     "stocks": "finance",
-    "stock-market": "finance",
-    "markets": "finance",
+    "equity": "finance",
+    "equities": "finance",
     "macro": "finance",
+    "macroeconomics": "finance",
     "economy": "finance",
-    "economics": "finance",
+    "economic": "finance",
+    "rates": "finance",
+    "fed": "finance",
+    "federal reserve": "finance",
+    "earnings": "finance",
+    "commodities": "finance",
 }
 
 DOMAIN_KEYWORDS: dict[str, tuple[str, ...]] = {
@@ -138,54 +143,42 @@ DOMAIN_KEYWORDS: dict[str, tuple[str, ...]] = {
         "stock market",
         "equity",
         "equities",
-        "shares",
         "earnings",
         "revenue",
-        "eps",
         "guidance",
-        "market cap",
         "fed",
         "federal reserve",
         "interest rate",
         "interest rates",
         "rate cut",
-        "rate cuts",
         "rate hike",
-        "rate hikes",
         "inflation",
         "cpi",
         "ppi",
         "recession",
         "gdp",
-        "unemployment",
         "jobs report",
-        "payrolls",
-        "commodity",
+        "unemployment",
         "commodities",
+        "commodity",
         "oil",
         "gold",
-        "silver",
         "etf",
-        "etfs",
-        "bank",
-        "banks",
-        "jpmorgan",
-        "goldman",
         "ipo",
+        "m&a",
         "merger",
         "acquisition",
-        "buyout",
-        "s&p 500",
-        "sp500",
-        "nasdaq",
-        "dow jones",
+        "bank",
+        "banks",
         "treasury",
         "bond",
         "bonds",
-        "yield",
-        "yields",
-        "mortgage rate",
-        "mortgage rates",
+        "s&p",
+        "nasdaq",
+        "dow jones",
+        "tesla earnings",
+        "nvidia earnings",
+        "apple earnings",
     ),
     "video-games": (
         "video game",
@@ -248,16 +241,9 @@ DOMAIN_REGEXES: dict[str, tuple[re.Pattern[str], ...]] = {
         re.compile(r"(?<![a-z])fed(?![a-z])"),
         re.compile(r"(?<![a-z])cpi(?![a-z])"),
         re.compile(r"(?<![a-z])ppi(?![a-z])"),
-        re.compile(r"(?<![a-z])gdp(?![a-z])"),
-        re.compile(r"(?<![a-z])eps(?![a-z])"),
         re.compile(r"(?<![a-z])ipo(?![a-z])"),
-        re.compile(r"(?<![a-z])etfs?(?![a-z])"),
-        re.compile(r"s&p\s*500"),
-        re.compile(r"\bspx\b"),
-        re.compile(r"\bqqq\b"),
-        re.compile(r"\bdjia\b"),
-        re.compile(r"\bm&a\b"),
-        re.compile(r"\$[a-z]{1,5}\b"),
+        re.compile(r"(?<![a-z])etf(?![a-z])"),
+        re.compile(r"\b[a-z]{1,5}\s+earnings\b"),
     ),
     "video-games": (
         re.compile(r"esports"),
@@ -298,6 +284,46 @@ VIDEO_GAMES_STRONG_KEYWORDS: tuple[str, ...] = (
     "league of legends",
 )
 
+PHYSICAL_SPORTS_KEYWORDS: tuple[str, ...] = (
+    "nba",
+    "nfl",
+    "mlb",
+    "nhl",
+    "soccer",
+    "football",
+    "basketball",
+    "baseball",
+    "hockey",
+    "tennis",
+    "golf",
+    "ufc",
+    "mma",
+    "boxing",
+    "cricket",
+    "formula 1",
+    "f1",
+    "nascar",
+    "premier league",
+    "champions league",
+    "laliga",
+    "bundesliga",
+)
+
+ESPORTS_KEYWORDS: tuple[str, ...] = (
+    "esports",
+    "esport",
+    "counter-strike",
+    "counter strike",
+    "cs2",
+    "valorant",
+    "dota",
+    "league of legends",
+    "rocket league",
+    "team liquid",
+    "fnatic",
+    "gaming",
+)
+
 
 @lru_cache(maxsize=None)
 def _compile_keyword_regex(keyword: str) -> re.Pattern[str]:
@@ -325,12 +351,19 @@ def _video_games_matches(haystack: str) -> bool:
     return any(_keyword_matches(haystack, keyword) for keyword in VIDEO_GAMES_STRONG_KEYWORDS)
 
 
-def _domain_terms_match(haystack: str, domain: str) -> bool:
+def _domain_matches(haystack: str, domain: str) -> bool:
     keywords = DOMAIN_KEYWORDS.get(domain, ())
     regexes = DOMAIN_REGEXES.get(domain, ())
     return any(_keyword_matches(haystack, keyword) for keyword in keywords) or any(
         regex.search(haystack) for regex in regexes
     )
+
+
+def _finance_matches(haystack: str) -> bool:
+    """Match traditional finance while keeping crypto-specific markets separate."""
+    if _domain_matches(haystack, "crypto"):
+        return False
+    return _domain_matches(haystack, "finance")
 
 
 def add_focus_domain_argument(parser: Any) -> None:
@@ -340,9 +373,8 @@ def add_focus_domain_argument(parser: Any) -> None:
         action="append",
         default=[],
         help=(
-            "Repeatable market scope filter. Supported domains: politics, crypto, technology, "
-            "video-games, finance. Aliases like geopolitics/political, cryptocurrency, tech, "
-            "'video games', stocks, and macro are accepted."
+            "Repeatable market scope filter. Supported domains: politics, crypto, technology, video-games, finance. "
+            "Aliases like geopolitics/political, cryptocurrency, tech, stocks, macro, and 'video games' are accepted."
         ),
     )
 
@@ -403,9 +435,11 @@ def matched_focus_domains(texts: Iterable[Any], focus_domains: Iterable[str] | N
             if _video_games_matches(haystack):
                 matches.add(domain)
             continue
-        if domain == "finance" and _domain_terms_match(haystack, "crypto"):
+        if domain == "finance":
+            if _finance_matches(haystack):
+                matches.add(domain)
             continue
-        if _domain_terms_match(haystack, domain):
+        if _domain_matches(haystack, domain):
             matches.add(domain)
     return matches
 
@@ -413,6 +447,16 @@ def matched_focus_domains(texts: Iterable[Any], focus_domains: Iterable[str] | N
 def matches_focus_domains(texts: Iterable[Any], focus_domains: Iterable[str] | None) -> bool:
     """Return whether any requested focus domain matches the provided text corpus."""
     return bool(matched_focus_domains(texts, focus_domains))
+
+
+def is_physical_sports_market(texts: Iterable[Any], *, category: str | None = None) -> bool:
+    """Return whether a market appears to be physical sports rather than esports/video games."""
+    haystack = "\n".join(flatten_scope_texts([category, *list(texts)]))
+    if not haystack:
+        return False
+    if any(_keyword_matches(haystack, keyword) for keyword in ESPORTS_KEYWORDS):
+        return False
+    return any(_keyword_matches(haystack, keyword) for keyword in PHYSICAL_SPORTS_KEYWORDS)
 
 
 def build_market_scope_texts(
@@ -500,27 +544,6 @@ def polymarket_trade_payload_matches_focus_domains(
             payload.get("outcome"),
             payload.get("asset"),
             payload.get("conditionId"),
-        ]
-    )
-    return matches_focus_domains(texts, focus_domains)
-
-
-def kalshi_trade_payload_matches_focus_domains(
-    payload: dict[str, Any],
-    focus_domains: Iterable[str] | None,
-) -> bool:
-    """Return whether a Kalshi trade payload falls inside the requested scope."""
-    if not canonicalize_focus_domains(focus_domains):
-        return True
-    texts = flatten_scope_texts(
-        [
-            payload.get("ticker"),
-            payload.get("title"),
-            payload.get("subtitle"),
-            payload.get("event_title"),
-            payload.get("event_ticker"),
-            payload.get("series_ticker"),
-            payload.get("market"),
         ]
     )
     return matches_focus_domains(texts, focus_domains)

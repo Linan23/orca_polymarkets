@@ -2,16 +2,13 @@
 
 This runner orchestrates the existing entrypoints in a stable order:
 1. Bootstrap the database schema.
-2. Run Polymarket event discovery.
+2. Refresh Polymarket market discovery.
 3. Optionally run the broad Polymarket market/trader crawl.
 4. Run Polymarket trades ingestion.
 5. Run Polymarket order-book snapshots.
 6. Run Polymarket positions for configured wallets.
-7. Run Kalshi trades ingestion.
-8. Run Kalshi order-book snapshots.
-9. Run the optional Dune query ingest.
-10. Build preliminary whale scores.
-11. Build the derived dashboard snapshot.
+7. Build preliminary whale scores.
+8. Build the derived dashboard snapshot.
 """
 
 from __future__ import annotations
@@ -35,10 +32,8 @@ RUNTIME_DIR = ROOT_DIR / "data_platform" / "runtime"
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from data_platform.settings import get_settings
 from data_platform.services.market_scope import add_focus_domain_argument, canonicalize_focus_domains
 
-DEFAULT_KALSHI_ENVIRONMENT = "prod"
 DEFAULT_INTERVAL_SECONDS = 900.0
 DEFAULT_TIMEZONE = "America/New_York"
 DEFAULT_SUMMARY_LOG_FILE = RUNTIME_DIR / "ingest_cycle_runs.jsonl"
@@ -120,36 +115,13 @@ def parse_args() -> argparse.Namespace:
         default=0,
         help="Maximum total public trade pages fetched per broad crawl cycle. 0 means unlimited.",
     )
-    parser.add_argument(
-        "--public-crawl-per-request-delay-seconds",
-        type=float,
-        default=0.5,
-        help="Delay between broad public-crawl trade page requests.",
-    )
     parser.add_argument("--polymarket-trades-limit", type=int, default=200, help="Trade row limit for the Polymarket trades step.")
     parser.add_argument("--orderbook-market-limit", type=int, default=10, help="Tracked Polymarket markets sampled in the order-book step.")
-    parser.add_argument(
-        "--kalshi-environment",
-        choices=["demo", "prod"],
-        default=DEFAULT_KALSHI_ENVIRONMENT,
-        help="Kalshi environment for trades and order-book steps.",
-    )
-    parser.add_argument("--kalshi-trades-limit", type=int, default=25, help="Trade row limit for the Kalshi trades step.")
-    parser.add_argument(
-        "--kalshi-orderbook-market-limit",
-        type=int,
-        default=10,
-        help="Tracked Kalshi markets sampled in the order-book step.",
-    )
-    parser.add_argument("--enable-dune", action="store_true", help="Enable the optional Dune query ingest step.")
-    parser.add_argument("--dune-query-id", default=os.getenv("DUNE_QUERY_ID", "2103719"), help="Saved Dune query id.")
     parser.add_argument("--skip-bootstrap", action="store_true", help="Skip the schema bootstrap step.")
     parser.add_argument("--skip-discovery", action="store_true", help="Skip the Polymarket discovery step.")
     parser.add_argument("--skip-polymarket-trades", action="store_true", help="Skip the Polymarket trades step.")
     parser.add_argument("--skip-orderbook", action="store_true", help="Skip the Polymarket order-book snapshot step.")
     parser.add_argument("--skip-positions", action="store_true", help="Skip the Polymarket positions step.")
-    parser.add_argument("--skip-kalshi", action="store_true", help="Skip the Kalshi trades step.")
-    parser.add_argument("--skip-kalshi-orderbook", action="store_true", help="Skip the Kalshi order-book snapshot step.")
     parser.add_argument("--skip-whale-scores", action="store_true", help="Skip the preliminary whale scoring step.")
     parser.add_argument("--skip-dashboard", action="store_true", help="Skip the derived dashboard snapshot step.")
     parser.add_argument(
@@ -212,16 +184,10 @@ def parse_args() -> argparse.Namespace:
         parser.error("--public-crawl-max-pages-per-market must be >= 0.")
     if args.public_crawl_max_total_trade_pages < 0:
         parser.error("--public-crawl-max-total-trade-pages must be >= 0.")
-    if args.public_crawl_per_request_delay_seconds < 0:
-        parser.error("--public-crawl-per-request-delay-seconds must be >= 0.")
     if args.polymarket_trades_limit <= 0:
         parser.error("--polymarket-trades-limit must be > 0.")
     if args.orderbook_market_limit <= 0:
         parser.error("--orderbook-market-limit must be > 0.")
-    if args.kalshi_trades_limit <= 0:
-        parser.error("--kalshi-trades-limit must be > 0.")
-    if args.kalshi_orderbook_market_limit <= 0:
-        parser.error("--kalshi-orderbook-market-limit must be > 0.")
     if args.interval_seconds_effective < 0:
         parser.error("Interval must be >= 0.")
     if bool(args.window_start) != bool(args.window_end):
@@ -243,8 +209,6 @@ def parse_args() -> argparse.Namespace:
         parser.error("--jitter-seconds must be >= 0.")
     if args.max_cycles < 0:
         parser.error("--max-cycles must be >= 0.")
-    if args.enable_dune and not args.dune_query_id.strip():
-        parser.error("--dune-query-id must not be empty when the Dune step is enabled.")
     try:
         args.focus_domains = canonicalize_focus_domains(args.focus_domain)
     except ValueError as exc:
@@ -355,13 +319,10 @@ def pipeline_commands(args: argparse.Namespace) -> list[tuple[str, list[str]]]:
     py = sys.executable
     focus_domain_flags = sum((["--focus-domain", domain] for domain in args.focus_domains), [])
     runtime_dir = RUNTIME_DIR
-    discovery_output = runtime_dir / "discovered_events.jsonl"
+    discovery_output = runtime_dir / "polymarket_discovery.jsonl"
     polymarket_trades_output = runtime_dir / "polymarket_trades.jsonl"
     positions_output = runtime_dir / "positions.jsonl"
     polymarket_orderbook_output = runtime_dir / "polymarket_orderbook_snapshots.jsonl"
-    kalshi_trades_output = runtime_dir / "kalshi_trades.jsonl"
-    kalshi_orderbook_output = runtime_dir / "kalshi_orderbook_snapshots.jsonl"
-    dune_output = runtime_dir / "dune_query_results.jsonl"
 
     if not args.skip_bootstrap:
         commands.append(("bootstrap_db", [py, "bootstrap_db.py"]))
@@ -372,13 +333,20 @@ def pipeline_commands(args: argparse.Namespace) -> list[tuple[str, list[str]]]:
                 "polymarket_discovery",
                 [
                     py,
-                    "polymarket-data/discover_events_scraper.py",
-                    "--fetch-full-details",
-                    "--write-to-db",
-                    "--max-requests",
+                    "data_platform/jobs/polymarket_market_trader_crawl.py",
+                    "--global-pages",
+                    "0",
+                    "--market-limit",
                     "1",
-                    "--limit",
+                    "--closed-market-limit",
+                    "0",
+                    "--max-pages-per-market",
+                    "0",
+                    "--trade-limit",
+                    "1",
+                    "--refresh-event-limit",
                     str(args.discovery_limit),
+                    "--fetch-full-details",
                     "--output-file",
                     str(discovery_output),
                     *focus_domain_flags,
@@ -416,8 +384,6 @@ def pipeline_commands(args: argparse.Namespace) -> list[tuple[str, list[str]]]:
                     str(args.public_crawl_max_pages_per_market),
                     "--max-total-trade-pages",
                     str(args.public_crawl_max_total_trade_pages),
-                    "--per-request-delay-seconds",
-                    str(args.public_crawl_per_request_delay_seconds),
                     *focus_domain_flags,
                 ],
             )
@@ -478,68 +444,8 @@ def pipeline_commands(args: argparse.Namespace) -> list[tuple[str, list[str]]]:
                 )
             )
 
-    if not args.skip_kalshi:
-        commands.append(
-            (
-                "kalshi_trades",
-                [
-                    py,
-                    "kalshi-scraper/main.py",
-                    "--environment",
-                    args.kalshi_environment,
-                    "--endpoint",
-                    "trades",
-                    "--write-to-db",
-                    "--max-requests",
-                    "1",
-                    "--limit",
-                    str(args.kalshi_trades_limit),
-                    "--output-file",
-                    str(kalshi_trades_output),
-                    *focus_domain_flags,
-                ],
-            )
-        )
-
-    if not args.skip_kalshi_orderbook:
-        commands.append(
-            (
-                "kalshi_orderbook",
-                [
-                    py,
-                    "data_platform/jobs/kalshi_orderbook_snapshot.py",
-                    "--environment",
-                    args.kalshi_environment,
-                    "--market-limit",
-                    str(args.kalshi_orderbook_market_limit),
-                    "--max-requests",
-                    "1",
-                    "--output-file",
-                    str(kalshi_orderbook_output),
-                    *focus_domain_flags,
-                ],
-            )
-        )
-
-    if args.enable_dune:
-        commands.append(
-            (
-                "dune_query",
-                [
-                    py,
-                    "data_platform/jobs/dune_query_ingest.py",
-                    "--query-id",
-                    args.dune_query_id,
-                    "--max-requests",
-                    "1",
-                    "--output-file",
-                    str(dune_output),
-                ],
-            )
-        )
-
     if not args.skip_whale_scores:
-        commands.append(("build_whale_scores", [py, "build_whale_scores.py"]))
+        commands.append(("build_whale_scores", [py, "data_platform/jobs/build_whale_scores.py"]))
 
     if not args.skip_dashboard:
         commands.append(("build_dashboard_snapshot", [py, "build_dashboard_snapshot.py"]))

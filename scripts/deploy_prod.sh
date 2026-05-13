@@ -33,7 +33,7 @@ if ! "${COMPOSE[@]}" exec -T db sh -lc 'pg_isready -U "$POSTGRES_USER" -d "$POST
 fi
 
 echo "Applying Alembic migrations..."
-"${COMPOSE[@]}" run --rm api python -m alembic -c alembic.ini upgrade head
+"${COMPOSE[@]}" run --rm api python -m alembic -c alembic.ini upgrade heads
 
 echo "Starting API and web services..."
 "${COMPOSE[@]}" up -d api web

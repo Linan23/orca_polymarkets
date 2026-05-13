@@ -64,11 +64,11 @@ jobs:
 
       - name: Apply migrations
         run: |
-          python -m alembic -c alembic.ini upgrade head
+          python -m alembic -c alembic.ini upgrade heads
 
       - name: Compile core modules
         run: |
-          python -m compileall data_platform build_dashboard_snapshot.py bootstrap_db.py scripts/setup_collab_db.py
+          python -m compileall data_platform scripts build_dashboard_snapshot.py bootstrap_db.py
 
       - name: Run smoke validation
         run: |

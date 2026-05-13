@@ -20,7 +20,7 @@ From the repository root:
 Upgrade a fresh database to the latest schema:
 
 ```bash
-.venv/bin/alembic -c alembic.ini upgrade head
+.venv/bin/alembic -c alembic.ini upgrade heads
 ```
 
 Show the current revision:
@@ -49,7 +49,7 @@ Downgrade one revision:
 
 ## Existing Databases Created Before Alembic
 
-If your local database was created with `bootstrap_db.py` before Alembic was added, do not run `upgrade head` directly against that existing populated database.
+If your local database was created with `bootstrap_db.py` before Alembic was added, do not run `upgrade heads` directly against that existing populated database.
 
 Instead, mark the current schema as already being at the baseline revision:
 
@@ -69,5 +69,5 @@ Alembic uses:
 That means the usual local setup still works:
 
 ```bash
-export DATABASE_URL="postgresql+psycopg://postgres:postgres@localhost:5432/whaling"
+export DATABASE_URL="postgresql+psycopg://<user>:<password>@<host>:<port>/<db_name>"
 ```

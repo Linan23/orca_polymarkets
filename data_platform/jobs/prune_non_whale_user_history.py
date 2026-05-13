@@ -303,8 +303,8 @@ def parse_args() -> argparse.Namespace:
         "--platform",
         action="append",
         default=[],
-        choices=["polymarket", "kalshi"],
-        help="Repeatable platform scope. Defaults to every platform in analytics.platform.",
+        choices=["polymarket"],
+        help="Repeatable platform scope. Defaults to Polymarket.",
     )
     parser.add_argument("--sample-size", type=int, default=12)
     parser.add_argument("--apply", action="store_true", help="Actually delete rows. Dry-run by default.")
@@ -550,7 +550,7 @@ def apply_prune(session: Session, *, platform_ids: list[int]) -> dict[str, int]:
 def main() -> int:
     args = parse_args()
     with session_scope(args.database_url or None) as session:
-        platform_ids = _platform_ids(session, args.platform)
+        platform_ids = _platform_ids(session, args.platform or ["polymarket"])
         summary = build_prune_summary(session, platform_ids=platform_ids, sample_size=args.sample_size)
         summary["mode"] = "apply" if args.apply else "dry-run"
         summary["platform_ids"] = platform_ids

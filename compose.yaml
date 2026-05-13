@@ -11,21 +11,6 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
 
-  app_api:
-    build:
-      context: .
-      dockerfile: docker/python-api.Dockerfile
-    working_dir: /workspace
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8002 --reload
-    ports:
-      - "8008:8008"
-    volumes:
-      - .:/workspace
-    environment:
-      PYTHONPATH: /workspace
-    depends_on:
-      - db
-
   data_platform_api:
     build:
       context: .
@@ -39,7 +24,7 @@ services:
     environment:
       PYTHONPATH: /workspace
       DATABASE_URL: postgresql+psycopg://app:password@db:5432/app_db
-      FRONTEND_ORIGIN: http://139.147.9.248:5173
+      FRONTEND_ORIGIN: http://localhost:5173
     depends_on:
       - db
 
@@ -55,8 +40,8 @@ services:
       - .:/workspace
       - react_node_modules:/workspace/my-app/node_modules
     environment:
-      VITE_API_BASE_URL: http://139.147.9.248:8001
-      FRONTEND_ORIGIN: http://139.147.9.248:5173
+      VITE_API_BASE_URL: http://localhost:8001
+      FRONTEND_ORIGIN: http://localhost:5173
     depends_on:
       - data_platform_api
 

@@ -28,15 +28,9 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from data_platform.db.session import session_scope
-from data_platform.ml.prediction_confidence import (
-    DEFAULT_CONFIDENCE_MODEL_PATH,
-    apply_trained_confidence,
-    load_confidence_artifact,
-)
 from data_platform.models import MlMarketPredictionSnapshot
 from data_platform.models.base import utc_now
 from data_platform.services.ml_reports import WHALE_ANCHORED_DELTA_JSON_PATH
-from data_platform.services.market_scope import DEFAULT_FOCUS_DOMAINS, matched_focus_domains
 
 
 DEFAULT_MODEL_VERSION = "market_profile_hybrid_whale_trend_v1"
@@ -45,23 +39,11 @@ PREDICTION_WINDOWS = (12, 24)
 DEFAULT_INSERT_BATCH_SIZE = 1000
 DEFAULT_LIVE_FEATURE_MARKET_LIMIT = 1000
 MAX_SIGNAL_DELTA_BY_WINDOW = {12: 6.0, 24: 9.0}
-HIGH_CONFIDENCE_DIRECTION_WINDOW_HOURS = 12
-HIGH_CONFIDENCE_DIRECTION_MIN_DELTA_PTS = 5.0
-HIGH_CONFIDENCE_24H_MIN_DELTA_PTS = 6.0
-HIGH_CONFIDENCE_24H_MIN_TOTAL_PRESSURE = 1000.0
 PHYSICAL_SPORTS_TERMS = (
     "nba", "nfl", "mlb", "nhl", "ufc", "soccer", "football", "tennis", "golf",
     "cricket", "rugby", "baseball", "basketball", "hockey", "formula 1", "f1",
 )
 ESPORTS_TERMS = ("esports", "e-sports", "video game", "video-games", "gaming")
-FOCUS_CATEGORY_LABELS = {
-    "video-games": "Video Game",
-    "crypto": "Crypto",
-    "finance": "Finance",
-    "technology": "Technology",
-    "politics": "Politics",
-}
-FOCUS_CATEGORY_PRIORITY = ("video-games", "crypto", "finance", "technology", "politics")
 
 
 def is_physical_sports_market(texts: list[Any], *, category: Any = None) -> bool:
@@ -70,29 +52,6 @@ def is_physical_sports_market(texts: list[Any], *, category: Any = None) -> bool
     if any(term in joined for term in ESPORTS_TERMS):
         return False
     return any(term in joined for term in PHYSICAL_SPORTS_TERMS)
-
-
-def _focused_category_for(row: dict[str, Any]) -> str:
-    """Return the dashboard-focused category label for prediction payloads."""
-    raw_category = str(row.get("event_category") or "").strip()
-    if raw_category.casefold() in {"geopolitics", "world politics", "world"}:
-        return "Geopolitics"
-    matches = matched_focus_domains(
-        [
-            raw_category,
-            row.get("market_slug"),
-            row.get("question"),
-            row.get("event_title"),
-            row.get("event_slug"),
-            row.get("outcome_a_label"),
-            row.get("outcome_b_label"),
-        ],
-        DEFAULT_FOCUS_DOMAINS,
-    )
-    for domain in FOCUS_CATEGORY_PRIORITY:
-        if domain in matches:
-            return FOCUS_CATEGORY_LABELS[domain]
-    return raw_category or "uncategorized"
 
 ACTIVE_MARKETS_SQL = text(
     """
@@ -516,40 +475,14 @@ def _live_prediction_for(
             0.0,
             0.92,
         )
-    is_high_confidence_12h_slice = (
-        window_hours == HIGH_CONFIDENCE_DIRECTION_WINDOW_HOURS
-        and predicted_direction != "flat"
-        and confidence >= 0.7
-        and abs(predicted_delta_pts) >= HIGH_CONFIDENCE_DIRECTION_MIN_DELTA_PTS
-    )
-    is_high_confidence_24h_slice = (
-        window_hours == 24
-        and predicted_direction != "flat"
-        and confidence >= 0.7
-        and abs(predicted_delta_pts) >= HIGH_CONFIDENCE_24H_MIN_DELTA_PTS
-        and total_pressure >= HIGH_CONFIDENCE_24H_MIN_TOTAL_PRESSURE
-    )
-    is_high_confidence_validated_slice = is_high_confidence_12h_slice or is_high_confidence_24h_slice
-    is_directional_watch = predicted_direction != "flat" and confidence >= 0.7 and abs(predicted_delta_pts) >= 1.0
     if predicted_direction == "flat":
         signal_tier = "abstain"
         display_tier = "review"
         tier_reason = "live model expects no material 12-24h move"
-    elif is_high_confidence_validated_slice:
-        signal_tier = "watch"
-        display_tier = "show"
-        tier_reason = (
-            "historical validation supports this 24h Watch signal when predicted movement is at least 6 points with strong whale pressure"
-            if is_high_confidence_24h_slice
-            else "historical validation supports this 12h Watch signal when predicted movement is at least 5 points"
-        )
-    elif is_directional_watch:
+    elif confidence >= 0.7 and abs(predicted_delta_pts) >= 1.0:
         signal_tier = "watch"
         display_tier = "review"
-        if window_hours == 24 and abs(predicted_delta_pts) >= HIGH_CONFIDENCE_DIRECTION_MIN_DELTA_PTS:
-            tier_reason = "24h Watch signals remain review-only until validation reaches the 70% target"
-        else:
-            tier_reason = "directional whale signal is below the historically high-confidence movement threshold"
+        tier_reason = "recent whale pressure supports a directional watch signal"
     else:
         signal_tier = "abstain"
         display_tier = "review"
@@ -559,31 +492,10 @@ def _live_prediction_for(
     interval_low = round(_clamp(predicted_future_odds_pct - interval_width, 0.0, 100.0), 4)
     interval_high = round(_clamp(predicted_future_odds_pct + interval_width, 0.0, 100.0), 4)
     target_time = generated_at + timedelta(hours=window_hours)
-    raw_event_category = str(row.get("event_category") or "uncategorized")
-    event_category = _focused_category_for(row)
-    if is_high_confidence_validated_slice:
-        validation_tier = "high_confidence_historical_slice"
-        validation_reason = (
-            "24h Watch with at least 6pt predicted movement and whale pressure above 1000 reached 81.48% direction match in the older validation sample"
-            if is_high_confidence_24h_slice
-            else "12h Watch with at least 5pt predicted movement reached 81.82% direction match in the older validation sample"
-        )
-    elif signal_tier == "watch":
-        validation_tier = "review_only"
-        validation_reason = "watch signal is visible, but this slice has not validated above the 70% target yet"
-    else:
-        validation_tier = "insufficient_validated_accuracy"
-        validation_reason = "abstain and weak-signal slices validated poorly and should not be treated as reliable direction forecasts"
-
-    display_reasons = ["live_whale_signal_model", validation_tier]
-    review_reasons = (
-        []
-        if validation_tier == "high_confidence_historical_slice"
-        else [validation_tier if signal_tier == "watch" else "insufficient_watch_confidence"]
-    )
+    event_category = str(row.get("event_category") or "uncategorized")
+    display_reasons = ["live_whale_signal_model"]
+    review_reasons = [] if signal_tier == "watch" else ["insufficient_watch_confidence"]
     reliability_warnings = [] if has_whale_signal else ["no_recent_whale_signal_for_side"]
-    if validation_tier != "high_confidence_historical_slice":
-        reliability_warnings.append(validation_tier)
     latest_entry_time = features.get("latest_entry_time")
 
     whale_anchor = {
@@ -613,7 +525,6 @@ def _live_prediction_for(
         "focus_category": event_category,
         "focused_fit_category": event_category,
         "market_family": event_category,
-        "source_event_category": raw_event_category,
         "current_odds_pct": round(current_odds_pct, 4),
         "predicted_future_odds_pct": predicted_future_odds_pct,
         "predicted_delta_pts": predicted_delta_pts,
@@ -624,14 +535,6 @@ def _live_prediction_for(
         "review_reasons": review_reasons,
         "direction_signal_tier": signal_tier,
         "direction_signal_tier_reason": tier_reason,
-        "historical_validation_tier": validation_tier,
-        "historical_validation_reason": validation_reason,
-        "historical_validation_direction_match_pct": (
-            81.48 if is_high_confidence_24h_slice else 81.82 if is_high_confidence_12h_slice else None
-        ),
-        "historical_validation_sample_size": (
-            27 if is_high_confidence_24h_slice else 22 if is_high_confidence_12h_slice else None
-        ),
         "direction_signal_predicted_direction": predicted_direction,
         "direction_signal_confidence": round(confidence, 4),
         "reliability_warnings": reliability_warnings,
@@ -670,11 +573,10 @@ def _pending_payload(
         "question": str(row.get("question") or ""),
         "side_label": side_label,
         "observation_time": generated_at.isoformat(),
-        "event_category": _focused_category_for(row),
-        "focus_category": _focused_category_for(row),
-        "focused_fit_category": _focused_category_for(row),
-        "market_family": _focused_category_for(row),
-        "source_event_category": str(row.get("event_category") or "uncategorized"),
+        "event_category": str(row.get("event_category") or "uncategorized"),
+        "focus_category": str(row.get("event_category") or "uncategorized"),
+        "focused_fit_category": str(row.get("event_category") or "uncategorized"),
+        "market_family": str(row.get("event_category") or "uncategorized"),
         "current_odds_pct": current_odds_pct,
         "predicted_future_odds_pct": None,
         "predicted_delta_pts": None,
@@ -715,7 +617,6 @@ def _snapshot_row(
     live_prediction: dict[str, Any] | None,
     model_version: str,
     feature_schema_version: str,
-    confidence_artifact: dict[str, Any] | None,
 ) -> dict[str, Any]:
     """Return one database row for a market side/window prediction snapshot."""
     payload = dict(
@@ -738,12 +639,10 @@ def _snapshot_row(
     payload["prediction_generated_at"] = generated_at.isoformat()
     payload["model_version"] = model_version
     payload["feature_schema_version"] = feature_schema_version
-    payload = apply_trained_confidence(payload, confidence_artifact)
 
     observation_time = _parse_iso(str(payload.get("observation_time") or "")) or generated_at
     prediction_target_time = _parse_iso(str(payload.get("prediction_target_time") or ""))
     whale_entry_time = _parse_iso(str(payload.get("whale_entry_time") or ""))
-    trained_as_of = _parse_iso(str(payload.get("trained_confidence_trained_at") or ""))
     prediction_available = payload.get("predicted_future_odds_pct") is not None
     prediction_status = (
         "prediction_available"
@@ -764,10 +663,6 @@ def _snapshot_row(
         "review_reasons": payload.get("review_reasons") or [],
         "reliability_warnings": payload.get("reliability_warnings") or [],
         "direction_signal_tier_reason": payload.get("direction_signal_tier_reason"),
-        "trained_confidence_available": payload.get("trained_confidence_available"),
-        "trained_confidence_score": payload.get("trained_confidence_score"),
-        "confidence_source": payload.get("confidence_source"),
-        "expected_direction_error_pts": payload.get("expected_direction_error_pts"),
     }
 
     return {
@@ -787,7 +682,7 @@ def _snapshot_row(
         "prediction_status": prediction_status,
         "model_version": model_version,
         "feature_schema_version": feature_schema_version,
-        "trained_as_of": trained_as_of,
+        "trained_as_of": None,
         "prediction_generated_at": generated_at,
         "data_freshness_status": "current_market_contract_snapshot",
         "prediction_source": prediction_source,
@@ -816,7 +711,6 @@ def generate_prediction_snapshots(
     feature_schema_version: str,
     create_table: bool,
     live_feature_market_limit: int,
-    confidence_model_path: Path | None = DEFAULT_CONFIDENCE_MODEL_PATH,
 ) -> dict[str, Any]:
     """Generate and persist all-market prediction snapshot rows."""
     if create_table:
@@ -829,7 +723,6 @@ def generate_prediction_snapshots(
         }
 
     local_index = _read_local_prediction_index(local_report_path)
-    confidence_artifact = load_confidence_artifact(confidence_model_path)
     generated_at = utc_now()
     raw_market_rows = session.execute(
         ACTIVE_MARKETS_SQL,
@@ -897,7 +790,6 @@ def generate_prediction_snapshots(
                         live_prediction=live_prediction,
                         model_version=model_version,
                         feature_schema_version=feature_schema_version,
-                        confidence_artifact=confidence_artifact,
                     )
                 )
 
@@ -943,9 +835,6 @@ def generate_prediction_snapshots(
         "pending_prediction_row_count": pending_prediction_count,
         "model_version": model_version,
         "feature_schema_version": feature_schema_version,
-        "confidence_model_loaded": bool(confidence_artifact),
-        "confidence_model_version": confidence_artifact.get("model_version") if confidence_artifact else None,
-        "confidence_model_trained_at": confidence_artifact.get("trained_at") if confidence_artifact else None,
     }
 
 
@@ -959,11 +848,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--local-report-path", default=str(WHALE_ANCHORED_DELTA_JSON_PATH))
     parser.add_argument("--model-version", default=DEFAULT_MODEL_VERSION)
     parser.add_argument("--feature-schema-version", default=DEFAULT_FEATURE_SCHEMA_VERSION)
-    parser.add_argument(
-        "--confidence-model-path",
-        default=os.getenv("ML_PREDICTION_CONFIDENCE_MODEL_PATH", str(DEFAULT_CONFIDENCE_MODEL_PATH)),
-        help="Optional trained confidence artifact generated from closed-market validations.",
-    )
     parser.add_argument(
         "--live-feature-market-limit",
         type=int,
@@ -991,7 +875,6 @@ def main() -> int:
             feature_schema_version=args.feature_schema_version,
             create_table=bool(args.create_table),
             live_feature_market_limit=int(args.live_feature_market_limit),
-            confidence_model_path=Path(args.confidence_model_path) if args.confidence_model_path else None,
         )
     print(json.dumps(summary, sort_keys=True))
     return 0 if summary.get("ok") else 1

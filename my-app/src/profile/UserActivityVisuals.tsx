@@ -5,8 +5,8 @@ import {
   type OutcomeBias,
   type TagExposureSlice,
 } from "../lib/api";
-import { getCategoryColor } from "../lib/categoryFormatting";
 
+const DONUT_COLORS = ["#38bdf8", "#22c55e", "#f97316", "#eab308", "#a78bfa", "#94a3b8"];
 const OUTCOME_COLORS: Record<OutcomeBias["label"], string> = {
   yes: "#38bdf8",
   no: "#f97316",
@@ -34,7 +34,7 @@ export function TagExposureDonut({ slices }: { slices: TagExposureSlice[] }) {
     id: index,
     value: slice.trade_count,
     label: slice.label,
-    color: getCategoryColor(slice.label, index),
+    color: DONUT_COLORS[index % DONUT_COLORS.length],
   }));
 
   return (
@@ -52,7 +52,7 @@ export function TagExposureDonut({ slices }: { slices: TagExposureSlice[] }) {
               valueFormatter: (item) => {
                 const slice = activeSlices[Number(item.id)];
                 const percent = totalTrades > 0 ? item.value / totalTrades : 0;
-                return `${formatCompact(slice?.trade_count ?? item.value)} trades · ${formatPercent(percent)}`;
+                return `${item.label}: ${formatCompact(slice?.trade_count ?? item.value)} trades · ${formatPercent(percent)}`;
               },
             },
           ]}

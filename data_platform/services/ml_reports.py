@@ -132,11 +132,8 @@ def week10_11_residual_movement_report() -> dict[str, Any]:
         "title": "Week 10-11 Residual Whale Movement ML Report",
         "scope": {
             "market": "polymarket",
-            "excluded_markets": ["kalshi"],
-            "exclusion_reason": (
-                "Kalshi wallet-level trader identity cannot be tracked with the same confidence, "
-                "so whale trust, entry, exit, holding-time, and realized-strategy features are not reliable there."
-            ),
+            "excluded_markets": [],
+            "exclusion_reason": "Orca's active ML scope is Polymarket-only.",
         },
         "claim": (
             "Whale behavior improves 12h and 24h residual market-movement prediction on the larger "

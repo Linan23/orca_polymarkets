@@ -271,7 +271,7 @@ def build_dashboard_snapshot(
 
     user_profile_count = 0
     user_leaderboard_count = 0
-    for user_id, score in scored_users:
+    for rank, (user_id, score) in enumerate(scored_users[:user_limit], start=1):
         aggregates = user_trade_aggregates[user_id]
         resolved_performance = resolved_performance_by_user.get(user_id)
         resolved_summary = {
@@ -311,7 +311,6 @@ def build_dashboard_snapshot(
                     "flagged": bool(score.insider_penalty and float(score.insider_penalty) > 0),
                     "penalty": float(score.insider_penalty or 0),
                 },
-                whale_status=bool(score.is_whale or score.is_trusted_whale),
                 profit_loss=0,
                 wallet_balance=None,
                 wallet_transactions_summary={
@@ -335,9 +334,6 @@ def build_dashboard_snapshot(
                 win_rate_chart_type="line",
             )
         )
-        user_profile_count += 1
-
-    for rank, (user_id, score) in enumerate(scored_users[:user_limit], start=1):
         session.add(
             UserLeaderboard(
                 dashboard_id=dashboard.dashboard_id,
@@ -350,6 +346,7 @@ def build_dashboard_snapshot(
                 score_value=score.trust_score,
             )
         )
+        user_profile_count += 1
         user_leaderboard_count += 1
 
     trusted_users = [item for item in scored_users if item[1].is_trusted_whale]

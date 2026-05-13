@@ -219,7 +219,7 @@ def main() -> int:
     print(f"- SHA256: {checksum_path}")
     print(f"- manifest: {manifest_path}")
     print("\nCollaborator import command:")
-    print(f'./scripts/bootstrap.sh --snapshot "{snapshot_path}"')
+    print(f'./scripts/setup_local.sh --snapshot "{snapshot_path}"')
     return 0
 
 

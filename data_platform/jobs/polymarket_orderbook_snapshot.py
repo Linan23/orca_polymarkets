@@ -10,7 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -48,9 +48,6 @@ from data_platform.services.market_scope import (
 
 CLOB_BOOK_URL = "https://clob.polymarket.com/book"
 ZERO = Decimal("0")
-MIN_SANE_SNAPSHOT_TIME = datetime(2020, 1, 1, tzinfo=timezone.utc)
-MAX_SANE_SNAPSHOT_FUTURE = timedelta(days=1)
-RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 
 
 def parse_args() -> argparse.Namespace:
@@ -258,53 +255,6 @@ def _decimal_field(value: Any) -> Decimal | None:
 
 
 
-def _parse_retry_after(value: str | None) -> float | None:
-    """Return a Retry-After delay in seconds when the header is usable."""
-    if not value:
-        return None
-    text = value.strip()
-    if not text:
-        return None
-    try:
-        return max(float(text), 0.0)
-    except ValueError:
-        parsed = parse_datetime(text)
-        if parsed is None:
-            return None
-        return max((parsed - datetime.now(timezone.utc)).total_seconds(), 0.0)
-
-
-def _is_sane_snapshot_time(value: datetime) -> bool:
-    """Return whether an API timestamp can be used for partitioned raw storage."""
-    if value.tzinfo is None:
-        value = value.replace(tzinfo=timezone.utc)
-    now = datetime.now(timezone.utc)
-    return MIN_SANE_SNAPSHOT_TIME <= value <= now + MAX_SANE_SNAPSHOT_FUTURE
-
-
-def _parse_clob_timestamp(value: Any) -> datetime | None:
-    """Parse CLOB timestamps, treating numeric strings as Unix seconds/ms."""
-    if value in (None, ""):
-        return None
-    if isinstance(value, (int, float)):
-        parsed = parse_datetime(value)
-        return parsed if parsed is not None and _is_sane_snapshot_time(parsed) else None
-    text = str(value).strip()
-    if not text:
-        return None
-    if text.isdigit():
-        for divisor in (1, 1000):
-            try:
-                parsed = datetime.fromtimestamp(int(text) / divisor, tz=timezone.utc)
-            except (OverflowError, OSError, ValueError):
-                continue
-            if _is_sane_snapshot_time(parsed):
-                return parsed
-        return None
-    parsed = parse_datetime(text)
-    return parsed if parsed is not None and _is_sane_snapshot_time(parsed) else None
-
-
 def _aggregate_book_payload(market: MarketContract, token_ids: list[str], books: list[dict[str, Any]]) -> dict[str, Any]:
     """Aggregate token-level books into one market-level snapshot payload.
 
@@ -323,7 +273,7 @@ def _aggregate_book_payload(market: MarketContract, token_ids: list[str], books:
     snapshot_times: list[datetime] = []
 
     for book in books:
-        book_time = _parse_clob_timestamp(book.get("timestamp"))
+        book_time = parse_datetime(book.get("timestamp"))
         if book_time is not None:
             snapshot_times.append(book_time)
     for level in primary_book.get("bids", []) if isinstance(primary_book.get("bids"), list) else []:
@@ -392,16 +342,6 @@ def compute_retry_delay(attempt: int, args: argparse.Namespace) -> float:
     return min(args.backoff_cap_seconds, args.backoff_base_seconds * (2 ** attempt))
 
 
-def _http_retry_delay(exc: Exception, attempt: int, args: argparse.Namespace) -> float:
-    """Return Retry-After when present, otherwise exponential backoff."""
-    delay = compute_retry_delay(attempt, args)
-    if isinstance(exc, httpx.HTTPStatusError) and exc.response is not None:
-        retry_after = _parse_retry_after(exc.response.headers.get("Retry-After"))
-        if retry_after is not None:
-            delay = max(delay, min(retry_after, args.backoff_cap_seconds))
-    return delay
-
-
 
 def fetch_books(client: httpx.Client, token_ids: list[str], args: argparse.Namespace) -> dict[str, dict[str, Any]]:
     """Fetch order-book summaries for the requested token ids."""
@@ -421,13 +361,10 @@ def fetch_books(client: httpx.Client, token_ids: list[str], args: argparse.Names
                 if isinstance(payload, dict):
                     books[token_id] = payload
                 break
-            except (httpx.RequestError, httpx.HTTPStatusError) as exc:
-                if isinstance(exc, httpx.HTTPStatusError) and exc.response is not None:
-                    if exc.response.status_code not in RETRYABLE_STATUS_CODES:
-                        raise
+            except (httpx.RequestError, httpx.HTTPStatusError):
                 if attempt >= args.max_retries:
                     raise
-                time.sleep(_http_retry_delay(exc, attempt, args))
+                time.sleep(compute_retry_delay(attempt, args))
     return books
 
 

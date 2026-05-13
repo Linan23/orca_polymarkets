@@ -7,8 +7,8 @@ cd "$REPO_DIR"
 source .venv/bin/activate
 export DATABASE_URL="${DATABASE_URL:-postgresql+psycopg://app:password@localhost:5433/app_db}"
 
-docker compose -f app/compose.yaml up -d db
-python -m alembic -c alembic.ini upgrade head
+docker compose up -d db
+python -m alembic -c alembic.ini upgrade heads
 
 has_focus_domain=0
 for arg in "$@"; do
@@ -29,9 +29,4 @@ if [[ "$has_focus_domain" -eq 0 ]]; then
   )
 fi
 
-window_args=(
-  --window-start "${LIVE_INGEST_WINDOW_START:-00:00}"
-  --window-end "${LIVE_INGEST_WINDOW_END:-00:00}"
-)
-
-exec python data_platform/jobs/run_live_ingest.py "${focus_args[@]}" "${window_args[@]}" "$@"
+exec python data_platform/jobs/run_live_ingest.py "${focus_args[@]}" "$@"

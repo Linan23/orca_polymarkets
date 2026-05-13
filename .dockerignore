@@ -10,9 +10,7 @@ __pycache__/
 .env.production
 .env.*
 !.env.example
-!kalshi-scraper/.env.example
 my-app/node_modules
 node_modules
 data_platform/runtime
 releases
-

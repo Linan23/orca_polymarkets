@@ -1,389 +1,70 @@
 # Jobs
 
-This directory holds runnable automation entrypoints for the data platform.
+`data_platform/jobs/` contains active CLI entrypoints for Polymarket ingest, analytics refresh, data retention, and ML report generation.
 
-## Main Orchestration Runner
+## Ingest
 
-Primary runner:
-- `run_ingest_cycle.py`
-
-Example:
+Refresh active/recent markets and public trader flow:
 
 ```bash
-.venv/bin/python data_platform/jobs/run_ingest_cycle.py \
-  --polymarket-wallet 0x92a54267b56800430b2be9af0f768d18134f9631 \
-  --discovery-limit 5 \
-  --polymarket-trades-limit 100 \
-  --orderbook-market-limit 5 \
-  --kalshi-environment prod \
-  --kalshi-trades-limit 10 \
-  --kalshi-orderbook-market-limit 5 \
-  --enable-dune \
-  --dune-query-id 2103719
-```
-
-Broad public market/trader crawl without wallet-specific positions:
-
-```bash
-.venv/bin/python data_platform/jobs/run_ingest_cycle.py \
-  --enable-polymarket-public-crawl \
-  --public-crawl-market-limit 25 \
-  --public-crawl-closed-market-limit 10 \
-  --public-crawl-closed-within-days 7 \
-  --public-crawl-global-pages 2 \
-  --public-crawl-max-pages-per-market 3 \
-  --public-crawl-max-total-trade-pages 20 \
-  --skip-positions
-```
-
-Loop every hour during a daily active window with jitter:
-
-```bash
-.venv/bin/python data_platform/jobs/run_ingest_cycle.py \
-  --polymarket-wallet 0x92a54267b56800430b2be9af0f768d18134f9631 \
-  --loop \
-  --interval-hours 1 \
-  --window-start 09:00 \
-  --window-end 17:00 \
-  --timezone America/New_York \
-  --jitter-seconds 30
-```
-
-What it does:
-1. bootstraps the database schema
-2. runs Polymarket discovery
-3. optionally runs the broad Polymarket market/trader crawl
-4. runs Polymarket trades
-5. runs Polymarket order-book snapshots for top tracked markets
-6. runs Polymarket positions for each configured wallet
-7. runs Kalshi trades
-8. runs Kalshi order-book snapshots for top tracked markets
-9. runs the optional Dune query ingest
-10. builds the preliminary whale score snapshot
-11. builds the derived dashboard snapshot
-
-The runner writes JSONL archives to `data_platform/runtime/` so normal pipeline runs do not modify tracked sample files in the repository.
-It also writes one compact cycle summary per run to `data_platform/runtime/ingest_cycle_runs.jsonl` by default.
-
-Useful runner flags:
-- `--loop` to keep crawling until interrupted
-- `--max-cycles` to stop after a fixed number of cycles when looping
-- `--interval-hours`, `--interval-minutes`, or `--interval-seconds` (use one; default is 15 minutes)
-- `--window-start`, `--window-end` for a daily HH:MM crawl window
-- `--timezone` for window checks
-- `--jitter-seconds` to avoid perfectly fixed cadence
-- `--summary-log-file` to change or disable the JSONL cycle log
-- `--enable-polymarket-public-crawl` to populate traders from public trade flow
-- `--public-crawl-market-limit`, `--public-crawl-closed-market-limit`, `--public-crawl-global-pages`, `--public-crawl-max-pages-per-market`
-- `--public-crawl-closed-within-hours` or `--public-crawl-closed-within-days` to bound recent closed-market crawl
-- `--public-crawl-max-total-trade-pages` to cap one crawl cycle regardless of how many markets qualify
-
-## Service-Split Jobs
-
-Near-live operation is now split into dedicated jobs:
-
-### Fast ingest loop
-
-```bash
-.venv/bin/python data_platform/jobs/run_live_ingest.py
-```
-
-Defaults:
-- 2-minute cadence
-- Polymarket discovery every 5 cycles
-- Polymarket public crawl every cycle
-- Polymarket positions every 5 cycles when wallets are configured
-- Kalshi trades/orderbooks every cycle
-- default focus domains: `politics`, `crypto`, `technology`, `video-games`, `finance`
-- no whale/dashboard rebuild in this loop
-
-One-shot validation:
-
-```bash
-.venv/bin/python data_platform/jobs/run_live_ingest.py --window-start 00:00 --window-end 23:59 --max-cycles 1
-```
-
-### Analytics refresh loop
-
-```bash
-.venv/bin/python data_platform/jobs/run_analytics_refresh.py
-```
-
-One-shot validation:
-
-```bash
-.venv/bin/python data_platform/jobs/run_analytics_refresh.py --max-cycles 1
-```
-
-### Continuous ML confidence cycle
-
-```bash
-.venv/bin/python data_platform/jobs/run_ml_prediction_confidence_cycle.py \
-  --promotion-mode gated \
-  --watch-precision-target 0.70 \
-  --strong-precision-target 0.80 \
-  --max-mae-regression-pts 0.5
-```
-
-What it does:
-1. validate matured 12h/24h prediction snapshots
-2. train a candidate confidence artifact
-3. compare the candidate with the active artifact on chronological holdout rows
-4. promote only when the gated accuracy/error checks pass
-5. generate fresh market-profile prediction snapshots
-
-### Nightly maintenance
-
-Dry-run retention report:
-
-```bash
-.venv/bin/python data_platform/jobs/run_retention_maintenance.py --dry-run --skip-snapshot
-```
-
-The dry-run defaults to `--retention-report-count-mode auto`, which uses planner estimates for high-volume raw/trade/whale tables and capped exact counts elsewhere.
-
-Policy and handoff docs:
-- `data_platform/config/retention_policy.json`
-- `docs/DATA_RETENTION.md`
-
-```bash
-.venv/bin/python data_platform/jobs/run_retention_maintenance.py --skip-snapshot
-```
-
-What it does:
-1. create current and next-month partitions
-2. backfill partition-shadow tables
-3. roll up old orderbook and position snapshots
-4. delete orphan `analytics.market_event` rows in batches
-5. garbage-collect unreferenced `raw.api_payload` and `raw.api_payload_part` rows in batches
-6. optionally write a full snapshot backup artifact
-
-One-shot shadow backfill:
-
-```bash
-.venv/bin/python data_platform/jobs/backfill_partition_shadows.py --batch-size 2000
-```
-
-VM wrapper scripts:
-- `scripts/run_ingest_live_vm.sh`
-- `scripts/run_analytics_refresh_vm.sh`
-- `scripts/run_ml_prediction_confidence_cycle_vm.sh`
-- `scripts/run_retention_rollup_vm.sh`
-
-`scripts/run_ingest_live_vm.sh` injects the focused crawl domains for the VM deployment unless you explicitly pass your own `--focus-domain` flags.
-
-Example `systemd` units:
-- `deploy/systemd/orca-ingest-live.service`
-- `deploy/systemd/orca-analytics-refresh.service`
-- `deploy/systemd/orca-ml-confidence-cycle.service`
-- `deploy/systemd/orca-ml-confidence-cycle.timer`
-- `deploy/systemd/orca-retention-rollup.service`
-- `deploy/systemd/orca-backup-snapshot.timer`
-
-Operational runbook:
-- `deploy/VM_RUNBOOK.md`
-
-You can also set wallets with:
-
-```bash
-export POLYMARKET_WALLETS="0xwallet1,0xwallet2"
-```
-
-The Dune step requires a repo-level `.env` file with:
-
-```env
-DUNE_API_KEY=your_dune_api_key
-DUNE_QUERY_ID=2103719
-```
-
-Then enable it with:
-
-```bash
---enable-dune
-```
-
-## Standalone Jobs
-
-Run only the Dune step:
-
-```bash
-.venv/bin/python data_platform/jobs/dune_query_ingest.py --query-id 2103719
-```
-
-Run only the Polymarket order-book step:
-
-```bash
-.venv/bin/python data_platform/jobs/polymarket_orderbook_snapshot.py --market-limit 5 --max-requests 1
-```
-
-Run only the Polymarket trades step:
-
-```bash
-.venv/bin/python data_platform/jobs/polymarket_trades_ingest.py --limit 200 --max-requests 1
-```
-
-Run the broad Polymarket market/trader crawl:
-
-```bash
-.venv/bin/python data_platform/jobs/polymarket_market_trader_crawl.py \
-  --fetch-full-details \
+python data_platform/jobs/polymarket_market_trader_crawl.py \
   --market-limit 25 \
   --closed-market-limit 10 \
-  --closed-within-days 7 \
-  --global-pages 2 \
-  --trade-limit 200 \
-  --max-pages-per-market 3 \
-  --max-total-trade-pages 20
+  --closed-within-days 7
 ```
 
-Backfill trades for deterministically resolved closed Polymarket markets:
+Ingest recent trades:
 
 ```bash
-.venv/bin/python data_platform/jobs/polymarket_resolved_trades_backfill.py \
-  --market-limit 5 \
-  --trade-limit 200 \
-  --max-pages-per-market 5
+python data_platform/jobs/polymarket_trades_ingest.py --limit 200 --max-requests 1
 ```
 
-Persist reusable resolved-condition coverage for whale scoring:
+Capture orderbook snapshots:
 
 ```bash
-.venv/bin/python refresh_resolved_conditions.py
+python data_platform/jobs/polymarket_orderbook_snapshot.py --market-limit 25 --max-requests 1
 ```
 
-Backfill only deterministically resolved conditions with no ingested trades yet:
+Run the combined ingest cycle:
 
 ```bash
-.venv/bin/python data_platform/jobs/polymarket_resolved_trades_backfill.py \
-  --only-uncovered \
-  --market-limit 10 \
-  --trade-limit 100 \
-  --max-pages-per-market 3
+python data_platform/jobs/run_ingest_cycle.py --enable-polymarket-public-crawl
 ```
 
-Run batched resolved-market backfill until a budget is hit:
+Run the near-live loop:
 
 ```bash
-.venv/bin/python data_platform/jobs/polymarket_resolved_trades_backfill.py \
-  --only-uncovered \
-  --market-limit 5 \
-  --trade-limit 200 \
-  --max-pages-per-market 5 \
-  --batch-count 4 \
-  --target-written-trades 5000
+python data_platform/jobs/run_live_ingest.py
 ```
 
-Run only the Kalshi order-book step:
+## Analytics
 
 ```bash
-.venv/bin/python data_platform/jobs/kalshi_orderbook_snapshot.py --environment prod --market-limit 5 --max-requests 1
+python data_platform/jobs/run_analytics_refresh.py
+python data_platform/jobs/build_whale_scores.py
+python build_dashboard_snapshot.py
 ```
 
-Build only the whale score snapshot:
+Root dashboard snapshot wrappers are kept for deployment compatibility. New job code should live under `data_platform/jobs/`.
+
+## ML
+
+Common report jobs:
 
 ```bash
-.venv/bin/python data_platform/jobs/build_whale_scores.py
+python data_platform/jobs/evaluate_ml_category_validation.py
+python data_platform/jobs/evaluate_ml_trend_direction_classifier.py
+python data_platform/jobs/evaluate_ml_whale_anchored_delta.py
+python data_platform/jobs/generate_ml_market_prediction_snapshots.py
 ```
 
-Export the first ML dataset from resolved Polymarket user/market history:
+Generated ML report JSON/Markdown should normally stay outside commits unless the file is intentionally part of handoff documentation.
+
+## Retention
 
 ```bash
-.venv/bin/python data_platform/jobs/export_ml_dataset.py
+python data_platform/jobs/run_retention_maintenance.py --dry-run
+python data_platform/jobs/run_retention_maintenance.py --apply
 ```
 
-Train the baseline profitability model on that dataset:
-
-```bash
-.venv/bin/python data_platform/jobs/train_ml_baseline.py
-```
-
-Export the market-level snapshot dataset for outcome prediction:
-
-```bash
-.venv/bin/python data_platform/jobs/export_market_ml_dataset.py
-```
-
-Train the canonical grouped market model with LightGBM plus rolling diagnostics:
-
-```bash
-.venv/bin/python data_platform/jobs/train_market_model.py --task outcome --evaluation-mode rolling
-```
-
-Train only the trade-covered regime as a separate model slice:
-
-```bash
-.venv/bin/python data_platform/jobs/train_market_model.py --task outcome --evaluation-mode rolling --regime trade_covered
-```
-
-Train the cold-start regime with its metadata-and-prior feature path:
-
-```bash
-.venv/bin/python data_platform/jobs/train_market_model.py --task outcome --evaluation-mode rolling --regime cold_start
-```
-
-Train the grouped time-aware market outcome baseline:
-
-```bash
-.venv/bin/python data_platform/jobs/train_market_ml_baseline.py
-```
-
-Train the grouped time-aware LightGBM market outcome model:
-
-```bash
-.venv/bin/python data_platform/jobs/train_market_lightgbm.py
-```
-
-Compare price-only and price-plus-whale market models:
-
-```bash
-.venv/bin/python data_platform/jobs/compare_market_feature_sets.py
-```
-
-Compare LightGBM price-only and price-plus-whale market models:
-
-```bash
-.venv/bin/python data_platform/jobs/compare_market_feature_sets_lightgbm.py
-```
-
-Compare Random Forest and LightGBM on the same grouped market split:
-
-```bash
-.venv/bin/python data_platform/jobs/compare_market_model_families.py
-```
-
-Compare residual whale movement model families for the Week 10-11 claim model:
-
-```bash
-.venv/bin/python data_platform/jobs/compare_market_movement_residual_models.py --regime trade_covered
-.venv/bin/python data_platform/jobs/compare_market_movement_residual_models.py --estimators random_forest,ridge,lightgbm,lightgbm_conservative --regime trade_covered
-```
-
-Analyze residual whale signal beyond price:
-
-```bash
-.venv/bin/python data_platform/jobs/analyze_market_whale_signal.py
-```
-
-Analyze whale lift only where pre-cutoff trades exist:
-
-```bash
-.venv/bin/python data_platform/jobs/analyze_market_whale_signal.py --regime trade_covered
-```
-
-Note:
-- the market export behind this comparison now uses historical-as-of-cutoff whale features (`ml_market_snapshot_v3`)
-- this path is heavier than the earlier prototype, but the current incremental export path is fast enough for normal iteration
-- LightGBM is the primary model family; Random Forest remains benchmark-only for transition safety
-- whale lift is now gated on the `trade_covered` regime rather than the mixed all-row export
-
-Load a shared snapshot into Docker PostgreSQL:
-
-```bash
-./data_platform/open_psql.sh < path/to/shared_data_snapshot.sql
-```
-
-For full collaborator onboarding, use:
-
-```bash
-./scripts/bootstrap.sh
-```
+Review dry-run output before applying destructive cleanup.

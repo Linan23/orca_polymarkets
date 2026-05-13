@@ -1,7 +1,7 @@
-"""Week 4/5 readiness gate for data collection and cleaning completeness.
+"""Readiness gate for Polymarket data collection and cleaning completeness.
 
 This gate validates that the data platform has:
-1. core ingestion coverage for required platforms
+1. core Polymarket ingestion coverage
 2. expected user-activity coverage
 3. acceptable scrape freshness
 4. passing data-quality checks
@@ -74,10 +74,10 @@ def _table_count_for_platform(session: Any, table_name: str, platform_id: int) -
     )
 
 
-def run_checks(require_data: bool, require_dune: bool, max_scrape_age_hours: float) -> list[ReadinessCheck]:
-    """Run Week 4/5 readiness checks."""
+def run_checks(require_data: bool, max_scrape_age_hours: float) -> list[ReadinessCheck]:
+    """Run Polymarket readiness checks."""
     results: list[ReadinessCheck] = []
-    required_platforms = ["polymarket", "kalshi"] + (["dune"] if require_dune else [])
+    required_platforms = ["polymarket"]
 
     with session_scope() as session:
         platform_ids = _load_platform_ids(session)
@@ -106,7 +106,7 @@ def run_checks(require_data: bool, require_dune: bool, max_scrape_age_hours: flo
                 for key, table_name in REQUIRED_TABLES.items()
             }
 
-        # Week 4 pipeline coverage: markets + trades + orderbook for both platforms.
+        # Pipeline coverage: markets + trades + orderbook.
         for platform_name in required_platforms:
             counts = per_platform_counts[platform_name]
             ok = True
@@ -133,9 +133,8 @@ def run_checks(require_data: bool, require_dune: bool, max_scrape_age_hours: flo
                 )
             )
 
-        # Week 4 user-activity coverage.
+        # User-activity coverage.
         polymarket_counts = per_platform_counts.get("polymarket", {})
-        kalshi_counts = per_platform_counts.get("kalshi", {})
         results.append(
             ReadinessCheck(
                 "polymarket_user_activity_coverage",
@@ -149,21 +148,6 @@ def run_checks(require_data: bool, require_dune: bool, max_scrape_age_hours: flo
                     "user_account": polymarket_counts.get("user_account", 0),
                     "position_snapshot": polymarket_counts.get("position_snapshot", 0),
                     "transaction_fact": polymarket_counts.get("transaction_fact", 0),
-                    "strict_mode": require_data,
-                },
-            )
-        )
-        results.append(
-            ReadinessCheck(
-                "kalshi_user_activity_coverage",
-                (not require_data)
-                or (
-                    kalshi_counts.get("user_account", 0) > 0
-                    and kalshi_counts.get("transaction_fact", 0) > 0
-                ),
-                {
-                    "user_account": kalshi_counts.get("user_account", 0),
-                    "transaction_fact": kalshi_counts.get("transaction_fact", 0),
                     "strict_mode": require_data,
                 },
             )
@@ -191,7 +175,7 @@ def run_checks(require_data: bool, require_dune: bool, max_scrape_age_hours: flo
             )
         )
 
-    # Week 5 cleaning gate: reuse quality checks.
+    # Cleaning gate: reuse quality checks.
     quality_results = run_data_quality_checks(require_data=require_data)
     failed_quality = [row.name for row in quality_results if not row.ok]
     results.append(
@@ -223,16 +207,11 @@ def render_text(results: list[ReadinessCheck]) -> str:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run the Week 4/5 readiness gate.")
+    parser = argparse.ArgumentParser(description="Run the Polymarket readiness gate.")
     parser.add_argument(
         "--require-data",
         action="store_true",
         help="Enable strict mode that requires non-empty platform datasets.",
-    )
-    parser.add_argument(
-        "--require-dune",
-        action="store_true",
-        help="Require Dune ingestion coverage in strict mode.",
     )
     parser.add_argument(
         "--max-scrape-age-hours",
@@ -252,7 +231,6 @@ def main() -> int:
     args = parse_args()
     results = run_checks(
         require_data=args.require_data,
-        require_dune=args.require_dune,
         max_scrape_age_hours=args.max_scrape_age_hours,
     )
     failed = [row for row in results if not row.ok]
@@ -277,4 +255,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

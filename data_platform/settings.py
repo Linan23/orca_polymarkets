@@ -54,8 +54,6 @@ class Settings:
     auth_secret_key: str
     polymarket_active_window_start: str
     polymarket_active_window_end: str
-    kalshi_active_window_start: str
-    kalshi_active_window_end: str
     market_stale_minutes: int
     orderbook_stale_minutes: int
     trade_feed_stale_minutes: int
@@ -94,8 +92,6 @@ def get_settings() -> Settings:
         auth_secret_key=os.getenv("AUTH_SECRET_KEY", "").strip(),
         polymarket_active_window_start=os.getenv("POLYMARKET_ACTIVE_WINDOW_START", ""),
         polymarket_active_window_end=os.getenv("POLYMARKET_ACTIVE_WINDOW_END", ""),
-        kalshi_active_window_start=os.getenv("KALSHI_ACTIVE_WINDOW_START", ""),
-        kalshi_active_window_end=os.getenv("KALSHI_ACTIVE_WINDOW_END", ""),
         market_stale_minutes=_env_int("MARKET_STALE_MINUTES", 30),
         orderbook_stale_minutes=_env_int("ORDERBOOK_STALE_MINUTES", 10),
         trade_feed_stale_minutes=_env_int("TRADE_FEED_STALE_MINUTES", 10),

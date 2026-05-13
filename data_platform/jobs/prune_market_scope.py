@@ -64,8 +64,8 @@ def parse_args() -> argparse.Namespace:
         "--platform",
         action="append",
         default=[],
-        choices=["polymarket", "kalshi"],
-        help="Repeatable platform scope. Defaults to both polymarket and kalshi.",
+        choices=["polymarket"],
+        help="Repeatable platform scope. Defaults to Polymarket.",
     )
     parser.add_argument("--sample-size", type=int, default=12, help="How many kept/removed examples to include in the summary.")
     parser.add_argument("--apply", action="store_true", help="Actually delete out-of-scope rows. Dry-run by default.")
@@ -87,7 +87,7 @@ def parse_args() -> argparse.Namespace:
         args.focus_domains = canonicalize_focus_domains(args.focus_domain) or list(DEFAULT_FOCUS_DOMAINS)
     except ValueError as exc:
         parser.error(str(exc))
-    args.platforms = args.platform or ["polymarket", "kalshi"]
+    args.platforms = args.platform or ["polymarket"]
     if args.sample_size <= 0:
         parser.error("--sample-size must be > 0.")
     return args

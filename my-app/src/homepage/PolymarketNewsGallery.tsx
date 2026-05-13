@@ -1,146 +1,56 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useApiData } from "../hooks/useApiData";
-import { fetchPolymarketTweetFeed, type PolymarketTweet } from "../lib/api";
+import { useRef } from "react";
 
-const POLYMARKET_X_URL = "https://x.com/Polymarket";
-const TWEET_CARD_LIMIT = 6;
-const AUTO_ROTATE_MS = 9000;
-const FALLBACK_CARD_COUNT = 6;
-
-function formatTweetTime(value: string | null) {
-  if (!value) return "Live";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Live";
-  const diffMs = Date.now() - date.getTime();
-  const diffMinutes = Math.max(0, Math.floor(diffMs / 60_000));
-  if (diffMinutes < 1) return "Now";
-  if (diffMinutes < 60) return `${diffMinutes}m ago`;
-  const diffHours = Math.floor(diffMinutes / 60);
-  if (diffHours < 24) return `${diffHours}h ago`;
-  const diffDays = Math.floor(diffHours / 24);
-  if (diffDays < 7) return `${diffDays}d ago`;
-  return new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-  }).format(date);
-}
-
-function TweetCard({
-  post,
-  profileImageUrl,
-}: {
-  post: PolymarketTweet;
-  profileImageUrl?: string | null;
-}) {
-  return (
-    <a href={post.url} target="_blank" rel="noreferrer" className="pm-news-card">
-      <div className="pm-news-card-top">
-        <div className="pm-news-account">
-          {profileImageUrl ? (
-            <img src={profileImageUrl} alt="" className="pm-news-avatar pm-news-avatar-img" />
-          ) : (
-            <div className="pm-news-avatar">P</div>
-          )}
-          <div className="pm-news-meta">
-            <span className="pm-news-name">Polymarket</span>
-            <span className="pm-news-handle">@Polymarket</span>
-          </div>
-        </div>
-
-        <span className="pm-news-time">{formatTweetTime(post.created_at)}</span>
-      </div>
-
-      <p className="pm-news-text">{post.text}</p>
-
-      <div className="pm-news-card-bottom">
-        <span className="pm-news-link">↗</span>
-      </div>
-    </a>
-  );
-}
-
-function FeedStateCard({
-  loading,
-  error,
-  reason,
-  index,
-}: {
-  loading: boolean;
-  error: string | null;
-  reason?: string | null;
-  index: number;
-}) {
-  const baseMessage = loading
-    ? "Loading latest Polymarket posts..."
-    : error
-      ? "Unable to load live posts right now."
-      : reason === "missing_x_bearer_token"
-        ? "Live post cards are not connected yet."
-        : "Live posts are unavailable right now.";
-  const messages = [
-    baseMessage,
-    "Open @Polymarket on X for the latest posts.",
-    "Live cards will appear here when the feed is connected.",
-    "Tap through to view Polymarket's current posts.",
-    "Latest X posts will rotate in this carousel.",
-    "Polymarket updates open in a new tab.",
-  ];
-  const message = messages[index % messages.length];
-
-  return (
-    <a
-      href={POLYMARKET_X_URL}
-      target="_blank"
-      rel="noreferrer"
-      className="pm-news-card pm-news-state-card"
-    >
-      <div className="pm-news-card-top">
-        <div className="pm-news-account">
-          <div className="pm-news-avatar">P</div>
-          <div className="pm-news-meta">
-            <span className="pm-news-name">Polymarket</span>
-            <span className="pm-news-handle">@Polymarket</span>
-          </div>
-        </div>
-        <span className="pm-news-time">Live</span>
-      </div>
-      <p className="pm-news-text">{message}</p>
-      <div className="pm-news-card-bottom">
-        <span className="pm-news-link">↗</span>
-      </div>
-    </a>
-  );
-}
+const posts = [
+  {
+    id: 1,
+    text: 'JUST IN: Tesla, SpaceX & xAI unveil TERAFAB — a 1TW chip factory to power a "galactic civilization"',
+    time: "1h ago",
+    url: "https://x.com/Polymarket",
+  },
+  {
+    id: 2,
+    text: "19% chance the AI bubble bursts this year.",
+    time: "2h ago",
+    url: "https://x.com/Polymarket",
+  },
+  {
+    id: 3,
+    text: 'JUST IN: AI cow collar startup Halter raises at $2,000,000,000 valuation, uses proprietary “cowgorithm” to herd...',
+    time: "3h ago",
+    url: "https://x.com/Polymarket",
+  },
+  {
+    id: 4,
+    text: "BREAKING: Iranian man arrested attempting to break into UK nuclear base in Scotland.",
+    time: "3h ago",
+    url: "https://x.com/Polymarket",
+  },
+  {
+    id: 5,
+    text: "Fed speakers this week could reshape rate-cut odds across prediction markets.",
+    time: "4h ago",
+    url: "https://x.com/Polymarket",
+  },
+  {
+    id: 6,
+    text: "Election market volatility spikes after new polling and debate speculation.",
+    time: "5h ago",
+    url: "https://x.com/Polymarket",
+  },
+];
 
 export default function PolymarketNewsGallery() {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const [isPaused, setIsPaused] = useState(false);
-  const loadTweetFeed = useCallback(() => fetchPolymarketTweetFeed(TWEET_CARD_LIMIT), []);
-  const { data, loading, error } = useApiData(loadTweetFeed, { keepPreviousData: true });
-  const posts = useMemo(() => data?.items ?? [], [data]);
-  const visibleCardCount = posts.length > 0 ? posts.length : FALLBACK_CARD_COUNT;
 
-  const scroll = useCallback((direction: "left" | "right") => {
-    const container = scrollRef.current;
-    if (!container) return;
+  const scroll = (direction: "left" | "right") => {
+    if (!scrollRef.current) return;
 
-    const firstCard = container.querySelector<HTMLElement>(".pm-news-card");
-    const amount = firstCard ? firstCard.offsetWidth + 16 : 360;
-    if (direction === "right" && container.scrollLeft + container.clientWidth >= container.scrollWidth - 16) {
-      container.scrollTo({ left: 0, behavior: "smooth" });
-      return;
-    }
-    container.scrollBy({
+    const amount = 360;
+    scrollRef.current.scrollBy({
       left: direction === "left" ? -amount : amount,
       behavior: "smooth",
     });
-  }, []);
-
-  useEffect(() => {
-    if (isPaused || visibleCardCount <= 1) return undefined;
-    const interval = window.setInterval(() => scroll("right"), AUTO_ROTATE_MS);
-    return () => window.clearInterval(interval);
-  }, [isPaused, scroll, visibleCardCount]);
+  };
 
   return (
     <section className="pm-news-section">
@@ -148,13 +58,7 @@ export default function PolymarketNewsGallery() {
         <h2>LIVE TWEET FEED</h2>
       </div>
 
-      <div
-        className="pm-news-carousel"
-        onMouseEnter={() => setIsPaused(true)}
-        onMouseLeave={() => setIsPaused(false)}
-        onFocus={() => setIsPaused(true)}
-        onBlur={() => setIsPaused(false)}
-      >
+      <div className="pm-news-carousel">
         <button
           className="pm-news-arrow left"
           onClick={() => scroll("left")}
@@ -165,25 +69,33 @@ export default function PolymarketNewsGallery() {
         </button>
 
         <div className="pm-news-scroll" ref={scrollRef}>
-          {posts.length > 0 ? (
-            posts.map((post) => (
-              <TweetCard
-                key={post.id}
-                post={post}
-                profileImageUrl={data?.account.profile_image_url}
-              />
-            ))
-          ) : (
-            Array.from({ length: FALLBACK_CARD_COUNT }, (_, index) => (
-              <FeedStateCard
-                key={`tweet-state-${index}`}
-                loading={loading}
-                error={error}
-                reason={data?.reason}
-                index={index}
-              />
-            ))
-          )}
+          {posts.map((post) => (
+            <a
+              key={post.id}
+              href={post.url}
+              target="_blank"
+              rel="noreferrer"
+              className="pm-news-card"
+            >
+              <div className="pm-news-card-top">
+                <div className="pm-news-account">
+                  <div className="pm-news-avatar">⌁</div>
+                  <div className="pm-news-meta">
+                    <span className="pm-news-name">Polymarket</span>
+                    <span className="pm-news-handle">@Polymarket</span>
+                  </div>
+                </div>
+
+                <span className="pm-news-time">{post.time}</span>
+              </div>
+
+              <p className="pm-news-text">{post.text}</p>
+
+              <div className="pm-news-card-bottom">
+                <span className="pm-news-link">↗</span>
+              </div>
+            </a>
+          ))}
         </div>
 
         <button

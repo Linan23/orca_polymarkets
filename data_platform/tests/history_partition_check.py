@@ -204,33 +204,14 @@ def run_checks(
             "analytics.position_snapshot_part": _count(session, "analytics.position_snapshot_part"),
             "analytics.whale_score_snapshot_part": _count(session, "analytics.whale_score_snapshot_part"),
         }
-        shadow_sources = {
-            "analytics.scrape_run_part": _count(session, "analytics.scrape_run"),
-            "raw.api_payload_part": _count(session, "raw.api_payload"),
-            "analytics.transaction_fact_part": _count(session, "analytics.transaction_fact"),
-            "analytics.orderbook_snapshot_part": _count(session, "analytics.orderbook_snapshot"),
-            "analytics.position_snapshot_part": _count(session, "analytics.position_snapshot"),
-            "analytics.whale_score_snapshot_part": _count(session, "analytics.whale_score_snapshot"),
-        }
-        required_shadow_tables = {
-            name
-            for name, source_count in shadow_sources.items()
-            if source_count > 0 and name != "analytics.position_snapshot_part"
-        }
+        required_shadow_tables = {name for name in shadow_counts if name != "analytics.position_snapshot_part"}
         if not allow_empty_position_snapshots:
-            position_source_count = shadow_sources["analytics.position_snapshot_part"]
-            if position_source_count > 0:
-                required_shadow_tables.add("analytics.position_snapshot_part")
+            required_shadow_tables.add("analytics.position_snapshot_part")
         results.append(
             CheckResult(
                 "shadow_tables_populated",
                 all(shadow_counts[name] > 0 for name in required_shadow_tables),
-                {
-                    **shadow_counts,
-                    "source_counts": shadow_sources,
-                    "required_shadow_tables": sorted(required_shadow_tables),
-                    "allow_empty_position_snapshots": allow_empty_position_snapshots,
-                },
+                {**shadow_counts, "allow_empty_position_snapshots": allow_empty_position_snapshots},
             )
         )
 

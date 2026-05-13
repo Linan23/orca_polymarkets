@@ -1,8 +1,7 @@
 import { PieChart } from "@mui/x-charts/PieChart";
-import { useCallback, useState } from "react";
+import { useCallback } from "react";
 import { useApiData } from "../hooks/useApiData";
-import { fetchDashboardHome, type HomeSummary } from "../lib/api";
-import { formatCategoryLabel, getCategoryColor } from "../lib/categoryFormatting";
+import { fetchHomeSummary, type HomeSummary } from "../lib/api";
 
 type HomeSummaryWithFreshness = HomeSummary & {
   is_stale?: boolean;
@@ -28,6 +27,14 @@ function formatCompact(value: number) {
 
 function formatPercent(value: number) {
   return `${Math.round(value)}%`;
+}
+
+function formatCategoryLabel(value: string) {
+  return value
+    .split(/[\s_-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(" ");
 }
 
 function formatLastUpdated(value?: string | number | Date | null) {
@@ -65,6 +72,17 @@ type CoveragePieRow = {
   value: number;
 };
 
+const COVERAGE_COLORS = [
+  "#6f7cff",
+  "#42d3ff",
+  "#4fd18b",
+  "#f6c85f",
+  "#f07167",
+  "#a78bfa",
+  "#f59e0b",
+  "#94a3b8",
+];
+
 function CoveragePieChart({
   rows,
   total,
@@ -74,51 +92,18 @@ function CoveragePieChart({
   total: number;
   totalLabel: string;
 }) {
-  const [tooltip, setTooltip] = useState<{
-    dataIndex: number;
-    x: number;
-    y: number;
-  } | null>(null);
   const activeRows = rows.filter((row) => row.value > 0);
   const pieData = activeRows.map((row, index) => ({
     id: index,
     value: row.value,
     label: row.name,
-    color: getCategoryColor(row.name, index),
+    color: COVERAGE_COLORS[index % COVERAGE_COLORS.length],
   }));
-  const tooltipRow = tooltip ? activeRows[tooltip.dataIndex] : null;
-  const tooltipPercent =
-    tooltipRow && total > 0 ? (tooltipRow.value / total) * 100 : 0;
 
   return (
     <div className="coverage-pie-content">
       {activeRows.length > 0 ? (
-        <div
-          className="coverage-mui-pie-shell"
-          onPointerMove={(event) => {
-            const target = event.target;
-            if (!(target instanceof Element)) {
-              setTooltip(null);
-              return;
-            }
-
-            const arc = target.closest(".MuiPieChart-arc[data-index], path[data-index]");
-            const dataIndex = arc ? Number(arc.getAttribute("data-index")) : Number.NaN;
-
-            if (!Number.isInteger(dataIndex) || dataIndex < 0 || dataIndex >= activeRows.length) {
-              setTooltip(null);
-              return;
-            }
-
-            const bounds = event.currentTarget.getBoundingClientRect();
-            setTooltip({
-              dataIndex,
-              x: event.clientX - bounds.left,
-              y: event.clientY - bounds.top,
-            });
-          }}
-          onPointerLeave={() => setTooltip(null)}
-        >
+        <div className="coverage-mui-pie-shell">
           <PieChart
             className="coverage-mui-pie"
             series={[
@@ -130,33 +115,31 @@ function CoveragePieChart({
                 faded: { innerRadius: 30, additionalRadius: -30, color: "gray" },
                 valueFormatter: (item) => {
                   const percent = total > 0 ? (item.value / total) * 100 : 0;
-                  return `${formatCompact(item.value)} · ${formatPercent(percent)}`;
+                  return `${item.label}: ${formatCompact(item.value)} · ${formatPercent(percent)}`;
                 },
               },
             ]}
-            width={240}
-            height={230}
+            width={220}
+            height={220}
             hideLegend
             margin={{ top: 10, bottom: 10, left: 10, right: 10 }}
             slotProps={{
               tooltip: {
-                trigger: "none",
+                trigger: "item",
+                anchor: "pointer",
+                position: "right",
+                modifiers: [
+                  {
+                    name: "offset",
+                    options: {
+                      offset: [0, 6],
+                    },
+                  },
+                ],
+                sx: { zIndex: 99999 },
               },
             }}
           />
-          {tooltipRow && tooltip && (
-            <div
-              className="coverage-pointer-tooltip"
-              style={{
-                left: tooltip.x,
-                top: tooltip.y,
-              }}
-            >
-              <strong>{tooltipRow.name}</strong>
-              <span>{formatCompact(tooltipRow.value)}</span>
-              <small>{formatPercent(tooltipPercent)}</small>
-            </div>
-          )}
         </div>
       ) : (
         <div className="coverage-empty-state">
@@ -168,24 +151,9 @@ function CoveragePieChart({
   );
 }
 
-type HomepageSummaryCardsProps = {
-  summary?: HomeSummary | null;
-};
-
-export default function HomepageSummaryCards({ summary = null }: HomepageSummaryCardsProps) {
-  const loadSummary = useCallback(
-    async () => {
-      if (summary) return summary;
-      const dashboard = await fetchDashboardHome("all", 5);
-      return dashboard.summary;
-    },
-    [summary],
-  );
-  const { data, loading, error } = useApiData(loadSummary, {
-    keepPreviousData: true,
-    initialData: summary,
-    resetKey: summary?.last_successful_ingest_at ?? summary?.latest_ingestion?.finished_at ?? "summary",
-  });
+export default function HomepageSummaryCards() {
+  const loadSummary = useCallback(() => fetchHomeSummary(), []);
+  const { data, loading, error } = useApiData(loadSummary);
 
   return (
     <section className="summary-section">
@@ -253,6 +221,7 @@ export default function HomepageSummaryCards({ summary = null }: HomepageSummary
                 <p className="summary-card-label">Last Updated</p>
 
                 <div className="last-updated-card">
+                  <h3>Last Updated:</h3>
                   <p>{formatLastUpdated(lastUpdated)}</p>
                 </div>
               </article>

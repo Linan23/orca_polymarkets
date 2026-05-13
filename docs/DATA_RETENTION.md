@@ -1,135 +1,52 @@
-# Data Cleanup And Retention Plan
+# Data Retention
 
-This project continuously pulls Polymarket data, so the database should keep recent detailed data hot, preserve useful ML history for retraining, and move older high-volume records into summaries before deletion. The first implementation is intentionally conservative: the maintenance job can produce a dry-run retention report, but it does not delete trade history or ML validation history yet.
+Orca continuously ingests Polymarket activity, so retention policy is required to keep storage and queries manageable.
 
-## Policy
+## Retention Goals
 
-The active policy lives in `data_platform/config/retention_policy.json`.
+- Keep full trade history for the most recent 6 months for ML retraining and client-visible validation.
+- Keep normalized data and raw payloads when they support audit/debugging.
+- Preserve trusted whales only while they remain active and continue meeting criteria.
+- Keep dashboards focused on latest state plus summary history, not unlimited raw history.
 
-Default windows:
+## Recommended Policy
 
-- Full normalized trade history for ML retraining: last 180 days.
-- Client-visible ML validation results: last 180 days.
-- Raw API payloads in the active database: 60 days, unless still referenced by normalized tables.
-- Detailed orderbook snapshots: 30 days, with hourly and daily rollups retained longer.
-- Detailed dashboard snapshots: 30 days, with summary history retained for 180 days.
-- Detailed whale score snapshots: 60 days.
-- Trusted whales: preserved only while active and still meeting the whale/trust criteria.
+Full normalized trade and orderbook detail:
 
-## Storage Tiers
+- Keep 6 months online.
+- Partition large time-series tables.
+- Archive older partitions before deleting when audit retention is needed.
 
-Hot data is detailed data used by the dashboard and live ML cards. Keep this small and recent:
+Raw API payloads:
 
-- current market contracts/events
-- recent trades and whale activity
-- recent orderbook snapshots
-- recent ML prediction snapshots and validations
-- latest dashboard/profile snapshots
+- Keep recent raw payloads online for debugging.
+- Roll up or archive older payloads after they are normalized.
+- Avoid counting large raw tables with unbounded `count(*)` in routine health checks.
 
-Warm data is compact history used for trend validation and retraining:
+ML validation:
 
-- six months of normalized trades
-- six months of ML validation rows
-- hourly/daily orderbook rollups
-- daily position rollups
-- dashboard and ML summary history
+- Keep client-visible validation within the last 6 months.
+- Use older archived data only for offline experiments when needed.
 
-Cold data is audit/debug material that should not clutter the active query path:
+Whale records:
 
-- older raw Polymarket payloads
-- older detailed snapshots that already have rollups
-- snapshot backups or archived exports
+- Keep active trusted whales.
+- Downgrade or archive inactive whales that no longer meet trust criteria.
+- Preserve historical IDs needed to explain old predictions.
 
-Cold data should be archived before destructive cleanup is enabled.
+## Maintenance Job
 
-## What Must Be Protected
-
-Do not delete these records without a separate migration or archive review:
-
-- referenced raw payloads
-- followed users and followed markets
-- active trusted whales
-- unvalidated ML predictions that may still need a future actual result
-- normalized trades inside the 180-day ML window
-- validation rows inside the 180-day client freshness window
-
-## Maintenance Commands
-
-Preview the current cleanup candidates without changing data:
+Use:
 
 ```bash
-.venv/bin/python data_platform/jobs/run_retention_maintenance.py --dry-run --skip-snapshot
+python data_platform/jobs/run_retention_maintenance.py --dry-run
+python data_platform/jobs/run_retention_maintenance.py --apply
 ```
 
-For large databases, the report uses capped counts and per-query timeouts:
+Run dry-runs first and review affected row counts. Large-table count checks should use timeout-safe estimates or partition metadata instead of blocking full-table counts.
 
-```bash
-.venv/bin/python data_platform/jobs/run_retention_maintenance.py \
-  --dry-run \
-  --skip-snapshot \
-  --retention-report-count-mode auto \
-  --retention-report-row-limit 10000 \
-  --retention-report-timeout-ms 5000
-```
+## Developer Notes
 
-`auto` mode uses fast PostgreSQL planner estimates for known high-volume tables such as raw payloads, trades, and whale score snapshots. Smaller tables still use capped exact counts. For raw payloads, auto mode estimates age-eligible rows only; the real garbage collector still applies the full referenced-payload protection before deleting anything. If `candidate_rows_is_lower_bound` is true, more rows exist beyond the configured cap. If a count times out, the report records `count_error` and falls back to a planner estimate when possible instead of blocking maintenance.
-
-Run the existing nightly maintenance behavior:
-
-```bash
-.venv/bin/python data_platform/jobs/run_retention_maintenance.py --skip-snapshot
-```
-
-The nightly job currently:
-
-1. creates current and next-month partitions
-2. backfills partition shadow tables
-3. rolls up old orderbook and position snapshots
-4. deletes orphan market events in batches
-5. garbage-collects unreferenced raw payloads in batches
-6. optionally writes a backup snapshot
-
-The dry-run report should be reviewed before enabling any new destructive cleanup phase.
-
-## Recommended Rollout
-
-Phase 1 is implemented first:
-
-- add a versioned retention policy
-- document the lifecycle rules for handoff
-- add a dry-run report to show cleanup candidates
-- keep existing nightly maintenance behavior unchanged
-
-Phase 2 should add archive-first jobs:
-
-- export old raw payloads before deleting active DB rows
-- archive detailed snapshots after rollups are verified
-- record archive manifests with row counts, date windows, and checksums
-
-Phase 3 should enable controlled pruning:
-
-- prune old unreferenced raw payloads beyond the active window
-- prune detailed orderbook/position snapshots after rollup coverage passes
-- keep six months of trade and ML validation detail
-- keep dashboard detail short-lived and retain summary history
-
-Phase 4 should add monitoring:
-
-- database size by schema and top tables
-- candidate row counts per retention category
-- last successful archive timestamp
-- last successful maintenance timestamp
-- failed cleanup reason in the maintenance JSONL log
-
-## Handoff Notes
-
-For new developers, retention changes should follow this order:
-
-1. update `data_platform/config/retention_policy.json`
-2. run the dry-run report locally or on the VM
-3. verify row counts and protected categories
-4. add archive coverage if deleting a new data class
-5. run Python compile and the smoke checks
-6. deploy through GitHub, then pull on the VM
-
-Avoid ad hoc database deletes. Cleanup should stay config-driven, logged, and reversible through archives.
+- Do not rewrite historical Alembic migrations for retention changes.
+- Add new retention behavior through migrations and `data_platform/services/storage_lifecycle.py`.
+- Keep destructive cleanup behind explicit `--apply` flags.

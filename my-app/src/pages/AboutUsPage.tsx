@@ -20,9 +20,9 @@ const goals = [
 
 const clients = [
   {
-    name: "LAFC",
+    name: "XXX Club",
     description:
-      "Lafayette Applied Forecasting Community looks into prediction markets, trading behavior, analytics.",
+      "A student group interested in prediction markets, trading behavior, analytics, and real-world applications of market data.",
   },
   {
     name: "Computer Science Department",

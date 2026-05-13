@@ -3,7 +3,7 @@
 This scanner is intentionally strict for high-risk patterns:
 - tracked private key files (`*.pem`, `*.key`)
 - private key block text inside tracked files
-- non-placeholder hardcoded Dune API keys
+- non-placeholder hardcoded password, SMTP, auth secret, and token assignments
 """
 
 from __future__ import annotations
@@ -17,14 +17,19 @@ from pathlib import Path
 
 
 PRIVATE_KEY_BLOCK = re.compile(r"-----BEGIN (?:RSA )?PRIVATE KEY-----")
-DUNE_KEY_ASSIGN = re.compile(r"^\s*DUNE_API_KEY\s*=\s*([^\s#]+)", re.IGNORECASE)
+SECRET_ASSIGN = re.compile(
+    r"^\s*(?:export\s+)?(?:AUTH_SECRET_KEY|SMTP_PASSWORD|POSTGRES_PASSWORD|DATABASE_URL|X_BEARER_TOKEN)\s*=\s*([^\s#]+)"
+)
 PLACEHOLDER_FRAGMENTS = (
     "your_",
     "example",
     "<",
     ">",
     "changeme",
+    "change_me",
     "${",
+    "password@localhost",
+    "password@db",
 )
 FORBIDDEN_FILE_PATTERNS = ("*.pem", "*.key")
 EXCLUDED_PATH_PATTERNS = (
@@ -68,7 +73,7 @@ def scan_file(path: Path) -> list[str]:
         violations.append(f"{path}: contains private key block text")
 
     for line_no, line in enumerate(text.splitlines(), start=1):
-        match = DUNE_KEY_ASSIGN.search(line)
+        match = SECRET_ASSIGN.search(line)
         if not match:
             continue
         value = match.group(1).strip().strip("\"'").lower()
@@ -76,7 +81,7 @@ def scan_file(path: Path) -> list[str]:
             continue
         if any(fragment in value for fragment in PLACEHOLDER_FRAGMENTS):
             continue
-        violations.append(f"{path}:{line_no}: hardcoded DUNE_API_KEY value")
+        violations.append(f"{path}:{line_no}: hardcoded secret-like value")
 
     return violations
 
