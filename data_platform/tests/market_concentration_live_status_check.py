@@ -69,7 +69,19 @@ def main() -> int:
     try:
         read_api.fetch_live_polymarket_market_by_slug = fake_fetch
         corrected = read_api._apply_live_polymarket_market_status_overlay(_base_row("Open"))
+        calls_after_open_overlay = len(calls)
         already_closed = read_api._apply_live_polymarket_market_status_overlay(_base_row("Closed"))
+        calls_after_already_closed_overlay = len(calls)
+        trader_focus_corrected = read_api._apply_live_polymarket_following_focus_overlay(
+            {
+                "user_id": 10,
+                "main_market_slug": "test-market",
+                "main_market_question": "Database test market?",
+                "market_status_label": "Open",
+            },
+            live_market_cache={},
+            slug_key="main_market_slug",
+        )
 
         read_api.fetch_live_polymarket_market_by_slug = lambda slug: None
         unchanged = read_api._apply_live_polymarket_market_status_overlay(_base_row("Open"))
@@ -86,11 +98,18 @@ def main() -> int:
         },
         {
             "name": "already_closed_skips_live_lookup",
-            "ok": already_closed["market_status_label"] == "Closed" and calls == ["test-market"],
+            "ok": already_closed["market_status_label"] == "Closed"
+            and calls_after_already_closed_overlay == calls_after_open_overlay,
         },
         {
             "name": "live_lookup_failure_keeps_database_status",
             "ok": unchanged["market_status_label"] == "Open" and "closed_status_source" not in unchanged,
+        },
+        {
+            "name": "live_closed_overlays_trader_focus_row",
+            "ok": trader_focus_corrected["market_status_label"] == "Closed"
+            and trader_focus_corrected["closed_status_source"] == "polymarket_gamma_live"
+            and trader_focus_corrected["main_market_question"] == "Live test market?",
         },
     ]
     ok = all(check["ok"] for check in checks)

@@ -507,6 +507,38 @@ def _apply_live_polymarket_market_rows_overlay(payload: dict[str, Any] | None) -
     return updated_payload
 
 
+def _apply_live_polymarket_following_focus_overlay(
+    item: dict[str, Any],
+    *,
+    live_market_cache: dict[str, LivePolymarketMarket | None],
+    slug_key: str = "market_slug",
+) -> dict[str, Any]:
+    """Correct followed-trader focus rows when live Gamma has newer market status."""
+    if item.get("market_status_label") == "Closed":
+        return item
+
+    market_slug = str(item.get(slug_key) or "").strip()
+    if not market_slug:
+        return item
+
+    normalized_slug = market_slug.casefold()
+    if normalized_slug not in live_market_cache:
+        live_market_cache[normalized_slug] = fetch_live_polymarket_market_by_slug(market_slug)
+    live_market = live_market_cache[normalized_slug]
+    if live_market is None or live_market.closed is not True:
+        return item
+
+    updated = dict(item)
+    if live_market.question:
+        question_key = "main_market_question" if slug_key == "main_market_slug" else "question"
+        updated[question_key] = live_market.question
+    updated["market_status_label"] = "Closed"
+    updated["database_is_closed"] = False
+    updated["closed_status_source"] = "polymarket_gamma_live"
+    updated["closed_time"] = _closed_time_from_live_market(live_market)
+    return updated
+
+
 def _apply_live_polymarket_profile_overlay(
     payload: dict[str, Any],
     *,
@@ -3425,12 +3457,13 @@ def following_overview(
 
         focus_total = sum(float(item["focus_value"] or 0) for item in trader_focus_by_user.values())
         trader_focus_items = []
+        live_market_cache: dict[str, LivePolymarketMarket | None] = {}
         for user_id in normalized_user_ids:
             item = trader_focus_by_user.get(user_id)
             if item is None:
                 continue
             latest_activity_time = item["latest_activity_time"]
-            trader_focus_items.append(
+            focus_item = _apply_live_polymarket_following_focus_overlay(
                 {
                     **item,
                     "share_percentage": (
@@ -3439,8 +3472,11 @@ def following_overview(
                         else 0.0
                     ),
                     "latest_activity_time": latest_activity_time.isoformat() if latest_activity_time else None,
-                }
+                },
+                live_market_cache=live_market_cache,
+                slug_key="main_market_slug",
             )
+            trader_focus_items.append(focus_item)
         trader_focus = trader_focus_items
 
         aggregated_focus: dict[str, dict[str, Any]] = {}
